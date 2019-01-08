@@ -25,14 +25,10 @@
 #include "call/call.h"
 #include "common_video/h264/profile_level_id.h"
 #include "media/engine/constants.h"
-#include "media/engine/internaldecoderfactory.h"
-#include "media/engine/internalencoderfactory.h"
 #include "media/engine/scopedvideodecoder.h"
 #include "media/engine/scopedvideoencoder.h"
 #include "media/engine/simulcast.h"
 #include "media/engine/simulcast_encoder_adapter.h"
-#include "media/engine/videodecodersoftwarefallbackwrapper.h"
-#include "media/engine/videoencodersoftwarefallbackwrapper.h"
 #include "media/engine/webrtcmediaengine.h"
 #include "media/engine/webrtcvideoencoderfactory.h"
 #include "media/engine/webrtcvoiceengine.h"
@@ -67,7 +63,7 @@ class EncoderFactoryAdapter {
   virtual ~EncoderFactoryAdapter() {}
 
   virtual AllocatedEncoder CreateVideoEncoder(
-      const VideoCodec& codec,
+      const std::string& id, const VideoCodec& codec,
       bool is_conference_mode_screenshare) const = 0;
 
   virtual std::vector<VideoCodec> GetSupportedCodecs() const = 0;
@@ -95,17 +91,15 @@ class CricketEncoderFactoryAdapter : public EncoderFactoryAdapter {
  public:
   explicit CricketEncoderFactoryAdapter(
       std::unique_ptr<WebRtcVideoEncoderFactory> external_encoder_factory)
-      : internal_encoder_factory_(new InternalEncoderFactory()),
-        external_encoder_factory_(std::move(external_encoder_factory)) {}
+      : external_encoder_factory_(std::move(external_encoder_factory)) {}
 
  private:
   AllocatedEncoder CreateVideoEncoder(
-      const VideoCodec& codec,
+      const std::string& id, const VideoCodec& codec,
       bool is_conference_mode_screenshare) const override;
 
   std::vector<VideoCodec> GetSupportedCodecs() const override;
 
-  const std::unique_ptr<WebRtcVideoEncoderFactory> internal_encoder_factory_;
   const std::unique_ptr<WebRtcVideoEncoderFactory> external_encoder_factory_;
 };
 
@@ -113,15 +107,13 @@ class CricketDecoderFactoryAdapter : public DecoderFactoryAdapter {
  public:
   explicit CricketDecoderFactoryAdapter(
       std::unique_ptr<WebRtcVideoDecoderFactory> external_decoder_factory)
-      : internal_decoder_factory_(new InternalDecoderFactory()),
-        external_decoder_factory_(std::move(external_decoder_factory)) {}
+      : external_decoder_factory_(std::move(external_decoder_factory)) {}
 
  private:
   std::unique_ptr<webrtc::VideoDecoder> CreateVideoDecoder(
       const VideoCodec& codec,
       const VideoDecoderParams& decoder_params) const override;
 
-  const std::unique_ptr<WebRtcVideoDecoderFactory> internal_decoder_factory_;
   const std::unique_ptr<WebRtcVideoDecoderFactory> external_decoder_factory_;
 };
 
@@ -135,7 +127,7 @@ class WebRtcEncoderFactoryAdapter : public EncoderFactoryAdapter {
 
  private:
   AllocatedEncoder CreateVideoEncoder(
-      const VideoCodec& codec,
+      const std::string& id, const VideoCodec& codec,
       bool is_conference_mode_screenshare) const override {
     if (!encoder_factory_)
       return AllocatedEncoder();
@@ -197,8 +189,8 @@ bool IsFlexfecAdvertisedFieldTrialEnabled() {
 
 void AddDefaultFeedbackParams(VideoCodec* codec) {
   codec->AddFeedbackParam(FeedbackParam(kRtcpFbParamCcm, kRtcpFbCcmParamFir));
-  codec->AddFeedbackParam(FeedbackParam(kRtcpFbParamNack, kParamValueEmpty));
-  codec->AddFeedbackParam(FeedbackParam(kRtcpFbParamNack, kRtcpFbNackParamPli));
+  //codec->AddFeedbackParam(FeedbackParam(kRtcpFbParamNack, kParamValueEmpty));
+  //codec->AddFeedbackParam(FeedbackParam(kRtcpFbParamNack, kRtcpFbNackParamPli));
   codec->AddFeedbackParam(FeedbackParam(kRtcpFbParamRemb, kParamValueEmpty));
   codec->AddFeedbackParam(
       FeedbackParam(kRtcpFbParamTransportCc, kParamValueEmpty));
@@ -552,9 +544,7 @@ std::vector<VideoCodec> AssignPayloadTypesAndAddAssociatedRtxCodecs(
 
 std::vector<VideoCodec> CricketEncoderFactoryAdapter::GetSupportedCodecs()
     const {
-  std::vector<VideoCodec> codecs = InternalEncoderFactory().supported_codecs();
-  LOG(LS_INFO) << "Internally supported codecs: "
-               << CodecVectorToString(codecs);
+  std::vector<VideoCodec> codecs;
 
   // Add external codecs.
   if (external_encoder_factory_ != nullptr) {
@@ -1161,47 +1151,7 @@ bool WebRtcVideoChannel::AddRecvStream(const StreamParams& sp) {
 
 bool WebRtcVideoChannel::AddRecvStream(const StreamParams& sp,
                                        bool default_stream) {
-  RTC_DCHECK(thread_checker_.CalledOnValidThread());
-
-  LOG(LS_INFO) << "AddRecvStream" << (default_stream ? " (default stream)" : "")
-               << ": " << sp.ToString();
-  if (!ValidateStreamParams(sp))
-    return false;
-
-  uint32_t ssrc = sp.first_ssrc();
-  RTC_DCHECK(ssrc != 0);  // TODO(pbos): Is this ever valid?
-
-  rtc::CritScope stream_lock(&stream_crit_);
-  // Remove running stream if this was a default stream.
-  const auto& prev_stream = receive_streams_.find(ssrc);
-  if (prev_stream != receive_streams_.end()) {
-    if (default_stream || !prev_stream->second->IsDefaultStream()) {
-      LOG(LS_ERROR) << "Receive stream for SSRC '" << ssrc
-                    << "' already exists.";
-      return false;
-    }
-    DeleteReceiveStream(prev_stream->second);
-    receive_streams_.erase(prev_stream);
-  }
-
-  if (!ValidateReceiveSsrcAvailability(sp))
-    return false;
-
-  for (uint32_t used_ssrc : sp.ssrcs)
-    receive_ssrcs_.insert(used_ssrc);
-
-  webrtc::VideoReceiveStream::Config config(this);
-  webrtc::FlexfecReceiveStream::Config flexfec_config(this);
-  ConfigureReceiverRtp(&config, &flexfec_config, sp);
-
-  config.disable_prerenderer_smoothing =
-      video_config_.disable_prerenderer_smoothing;
-  config.sync_group = sp.sync_label;
-
-  receive_streams_[ssrc] = new WebRtcVideoReceiveStream(
-      call_, sp, std::move(config), decoder_factory_, default_stream,
-      recv_codecs_, flexfec_config);
-
+  LOG(LS_WARNING) << "Pretend to accept stream: " << sp.ToString();
   return true;
 }
 
@@ -1546,7 +1496,8 @@ WebRtcVideoChannel::WebRtcVideoSendStream::WebRtcVideoSendStream(
     // TODO(deadbeef): Don't duplicate information between send_params,
     // rtp_extensions, options, etc.
     const VideoSendParameters& send_params)
-    : worker_thread_(rtc::Thread::Current()),
+    : id_(sp.id),
+      worker_thread_(rtc::Thread::Current()),
       ssrcs_(sp.ssrcs),
       ssrc_groups_(sp.ssrc_groups),
       call_(call),
@@ -1687,50 +1638,22 @@ WebRtcVideoChannel::WebRtcVideoSendStream::GetSsrcs() const {
 
 EncoderFactoryAdapter::AllocatedEncoder
 CricketEncoderFactoryAdapter::CreateVideoEncoder(
-    const VideoCodec& codec,
+    const std::string& id, const VideoCodec& codec,
     bool is_conference_mode_screenshare) const {
   // Try creating external encoder.
   if (external_encoder_factory_ != nullptr &&
       FindMatchingCodec(external_encoder_factory_->supported_codecs(), codec)) {
-    std::unique_ptr<webrtc::VideoEncoder> external_encoder;
-    if (CodecNamesEq(codec.name.c_str(), kVp8CodecName)) {
-      // If it's a codec type we can simulcast, create a wrapped encoder.
-      external_encoder = std::unique_ptr<webrtc::VideoEncoder>(
-          new webrtc::SimulcastEncoderAdapter(external_encoder_factory_.get()));
-    } else {
-      external_encoder =
-          CreateScopedVideoEncoder(external_encoder_factory_.get(), codec);
-    }
+    std::unique_ptr<webrtc::VideoEncoder> external_encoder =
+        CreateScopedVideoEncoder(external_encoder_factory_.get(), id, codec);
     if (external_encoder) {
-      std::unique_ptr<webrtc::VideoEncoder> internal_encoder(
-          new webrtc::VideoEncoderSoftwareFallbackWrapper(
-              codec, std::move(external_encoder)));
       const webrtc::VideoCodecType codec_type =
           webrtc::PayloadStringToCodecType(codec.name);
       const bool has_internal_source =
           external_encoder_factory_->EncoderTypeHasInternalSource(codec_type);
-      return AllocatedEncoder(std::move(internal_encoder),
+      return AllocatedEncoder(std::move(external_encoder),
                               true /* is_hardware_accelerated */,
                               has_internal_source);
     }
-  }
-
-  // Try creating internal encoder.
-  std::unique_ptr<webrtc::VideoEncoder> internal_encoder;
-  if (FindMatchingCodec(internal_encoder_factory_->supported_codecs(), codec)) {
-    if (CodecNamesEq(codec.name.c_str(), kVp8CodecName) &&
-        is_conference_mode_screenshare && UseSimulcastScreenshare()) {
-      // TODO(sprang): Remove this adapter once libvpx supports simulcast with
-      // same-resolution substreams.
-      internal_encoder = std::unique_ptr<webrtc::VideoEncoder>(
-          new webrtc::SimulcastEncoderAdapter(internal_encoder_factory_.get()));
-    } else {
-      internal_encoder = std::unique_ptr<webrtc::VideoEncoder>(
-          internal_encoder_factory_->CreateVideoEncoder(codec));
-    }
-    return AllocatedEncoder(std::move(internal_encoder),
-                            false /* is_hardware_accelerated */,
-                            false /* has_internal_source */);
   }
 
   // This shouldn't happen, we should not be trying to create something we don't
@@ -1757,7 +1680,7 @@ void WebRtcVideoChannel::WebRtcVideoSendStream::SetCodec(
             webrtc::VideoEncoderConfig::ContentType::kScreen &&
         parameters_.conference_mode;
     EncoderFactoryAdapter::AllocatedEncoder new_allocated_encoder =
-        encoder_factory_->CreateVideoEncoder(codec_settings.codec,
+        encoder_factory_->CreateVideoEncoder(id_, codec_settings.codec,
                                              is_conference_mode_screenshare);
     new_encoder = std::unique_ptr<webrtc::VideoEncoder>(
         std::move(new_allocated_encoder.encoder));
@@ -1774,6 +1697,7 @@ void WebRtcVideoChannel::WebRtcVideoSendStream::SetCodec(
   parameters_.config.rtp.ulpfec = codec_settings.ulpfec;
   parameters_.config.rtp.flexfec.payload_type =
       codec_settings.flexfec_payload_type;
+  parameters_.encoder_config.max_bitrate_bps = new_encoder->MaxBitrate();
 
   // Set RTX payload type if RTX is enabled.
   if (!parameters_.config.rtp.rtx.ssrcs.empty()) {
@@ -2195,74 +2119,16 @@ CricketDecoderFactoryAdapter::CreateVideoDecoder(
     const VideoCodec& codec,
     const VideoDecoderParams& decoder_params) const {
   if (external_decoder_factory_ != nullptr) {
-    std::unique_ptr<webrtc::VideoDecoder> external_decoder =
-        CreateScopedVideoDecoder(external_decoder_factory_.get(), codec,
-                                 decoder_params);
-    if (external_decoder) {
-      webrtc::VideoCodecType type =
-          webrtc::PayloadStringToCodecType(codec.name);
-      std::unique_ptr<webrtc::VideoDecoder> internal_decoder(
-          new webrtc::VideoDecoderSoftwareFallbackWrapper(
-              type, std::move(external_decoder)));
-      return internal_decoder;
-    }
+    return CreateScopedVideoDecoder(external_decoder_factory_.get(), codec,
+                                    decoder_params);
   }
-
-  std::unique_ptr<webrtc::VideoDecoder> internal_decoder(
-      internal_decoder_factory_->CreateVideoDecoderWithParams(codec,
-                                                              decoder_params));
-  return internal_decoder;
+  RTC_NOTREACHED();
+  return std::unique_ptr<webrtc::VideoDecoder>();
 }
 
 void WebRtcVideoChannel::WebRtcVideoReceiveStream::ConfigureCodecs(
     const std::vector<VideoCodecSettings>& recv_codecs,
     DecoderMap* old_decoders) {
-  RTC_DCHECK(!recv_codecs.empty());
-  *old_decoders = std::move(allocated_decoders_);
-  config_.decoders.clear();
-  config_.rtp.rtx_associated_payload_types.clear();
-  for (const auto& recv_codec : recv_codecs) {
-    webrtc::SdpVideoFormat video_format(recv_codec.codec.name,
-                                        recv_codec.codec.params);
-    std::unique_ptr<webrtc::VideoDecoder> new_decoder;
-
-    auto it = old_decoders->find(video_format);
-    if (it != old_decoders->end()) {
-      new_decoder = std::move(it->second);
-      old_decoders->erase(it);
-    }
-
-    if (!new_decoder) {
-      new_decoder = decoder_factory_->CreateVideoDecoder(recv_codec.codec,
-                                                         {stream_params_.id});
-    }
-
-    webrtc::VideoReceiveStream::Decoder decoder;
-    decoder.decoder = new_decoder.get();
-    decoder.payload_type = recv_codec.codec.id;
-    decoder.payload_name = recv_codec.codec.name;
-    decoder.codec_params = recv_codec.codec.params;
-    config_.decoders.push_back(decoder);
-    config_.rtp.rtx_associated_payload_types[recv_codec.rtx_payload_type] =
-        recv_codec.codec.id;
-
-    const bool did_insert =
-        allocated_decoders_
-            .insert(std::make_pair(video_format, std::move(new_decoder)))
-            .second;
-    RTC_CHECK(did_insert);
-  }
-
-  const auto& codec = recv_codecs.front();
-  config_.rtp.ulpfec_payload_type = codec.ulpfec.ulpfec_payload_type;
-  config_.rtp.red_payload_type = codec.ulpfec.red_payload_type;
-
-  config_.rtp.nack.rtp_history_ms = HasNack(codec.codec) ? kNackHistoryMs : 0;
-  if (codec.ulpfec.red_rtx_payload_type != -1) {
-    config_.rtp
-        .rtx_associated_payload_types[codec.ulpfec.red_rtx_payload_type] =
-        codec.ulpfec.red_payload_type;
-  }
 }
 
 void WebRtcVideoChannel::WebRtcVideoReceiveStream::ConfigureFlexfecCodec(

@@ -12,9 +12,9 @@
 
 #include <algorithm>
 
-#include "logging/rtc_event_log/events/rtc_event_audio_network_adaptation.h"
 #include "logging/rtc_event_log/rtc_event_log.h"
 #include "modules/audio_coding/audio_network_adaptor/event_log_writer.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/ptr_util.h"
 
 namespace webrtc {
@@ -63,9 +63,7 @@ void EventLogWriter::MaybeLogEncoderConfig(
 }
 
 void EventLogWriter::LogEncoderConfig(const AudioEncoderRuntimeConfig& config) {
-  auto config_copy = rtc::MakeUnique<AudioEncoderRuntimeConfig>(config);
-  event_log_->Log(
-      rtc::MakeUnique<RtcEventAudioNetworkAdaptation>(std::move(config_copy)));
+  LOG(LS_INFO) << "Skip logging RtcEventAudioNetworkAdaptation.";
   last_logged_config_ = config;
 }
 

@@ -136,6 +136,19 @@ bool IsValidOfferToReceiveMedia(int value) {
          (value <= Options::kMaxOfferToReceiveMedia);
 }
 
+std::string ToCodecName(webrtc::VideoCodecType vct) {
+  switch (vct) {
+    case webrtc::kVideoCodecVP8:
+      return cricket::kVp8CodecName;
+    case webrtc::kVideoCodecVP9:
+      return cricket::kVp9CodecName;
+    case webrtc::kVideoCodecH264:
+      return cricket::kH264CodecName;
+  }
+  return "";
+}
+
+
 // Add options to |[audio/video]_media_description_options| from |senders|.
 void AddRtpSenderOptions(
     const std::vector<rtc::scoped_refptr<
@@ -146,13 +159,17 @@ void AddRtpSenderOptions(
     if (sender->media_type() == cricket::MEDIA_TYPE_AUDIO) {
       if (audio_media_description_options) {
         audio_media_description_options->AddAudioSender(
-            sender->id(), sender->internal()->stream_ids());
+            sender->id(), sender->internal()->stream_ids(), {});
       }
     } else {
       RTC_DCHECK(sender->media_type() == cricket::MEDIA_TYPE_VIDEO);
       if (video_media_description_options) {
+        std::vector<cricket::VideoCodec> video_codecs;
+        for (webrtc::VideoCodecType vct : sender->internal()->vcts) {
+          video_codecs.emplace_back(vct, ToCodecName(vct));
+        }
         video_media_description_options->AddVideoSender(
-            sender->id(), sender->internal()->stream_ids(), 1);
+            sender->id(), sender->internal()->stream_ids(), 1, video_codecs);
       }
     }
   }
@@ -1612,6 +1629,15 @@ void PeerConnection::OnIceConnectionReceivingChange(bool receiving) {
   observer_->OnIceConnectionReceivingChange(receiving);
 }
 
+void PeerConnection::OnIceSelectedCandidatePairChanged(
+    const cricket::Candidate& local, const cricket::Candidate& remote, bool ready) {
+  RTC_DCHECK(signaling_thread()->IsCurrent());
+  if (IsClosed()) {
+    return;
+  }
+  observer_->OnIceSelectedCandidatePairChanged(local, remote, ready);
+}
+
 void PeerConnection::ChangeSignalingState(
     PeerConnectionInterface::SignalingState signaling_state) {
   signaling_state_ = signaling_state;
@@ -2506,6 +2532,14 @@ bool PeerConnection::InitializePortAllocator_n(
   if (configuration.tcp_candidate_policy == kTcpCandidatePolicyDisabled) {
     portallocator_flags |= cricket::PORTALLOCATOR_DISABLE_TCP;
     LOG(LS_INFO) << "TCP candidates are disabled.";
+  } else if (configuration.tcp_candidate_policy == kTcpCandidatePolicyNoUdp) {
+    portallocator_flags |= cricket::PORTALLOCATOR_DISABLE_UDP;
+    LOG(LS_INFO) << "UDP candidates are disabled.";
+  }
+
+  if (configuration.disable_udp_relay) {
+    portallocator_flags |= cricket::PORTALLOCATOR_DISABLE_UDP_RELAY;
+    LOG(LS_INFO) << "UDP relay are disabled.";
   }
 
   if (configuration.candidate_network_policy ==
@@ -2548,23 +2582,10 @@ bool PeerConnection::ReconfigurePortAllocator_n(
 
 bool PeerConnection::StartRtcEventLog_w(rtc::PlatformFile file,
                                         int64_t max_size_bytes) {
-  if (!event_log_) {
-    return false;
-  }
-
-  // TODO(eladalon): It would be better to not allow negative values into PC.
-  const size_t max_size = (max_size_bytes < 0)
-                              ? RtcEventLog::kUnlimitedOutput
-                              : rtc::saturated_cast<size_t>(max_size_bytes);
-
-  return event_log_->StartLogging(
-      rtc::MakeUnique<RtcEventLogOutputFile>(file, max_size));
+  return false;
 }
 
 void PeerConnection::StopRtcEventLog_w() {
-  if (event_log_) {
-    event_log_->StopLogging();
-  }
 }
 
 }  // namespace webrtc

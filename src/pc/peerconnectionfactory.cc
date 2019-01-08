@@ -19,7 +19,7 @@
 #include "api/peerconnectionproxy.h"
 #include "api/turncustomizer.h"
 #include "api/videosourceproxy.h"
-#include "logging/rtc_event_log/rtc_event_log.h"
+#include "logging/rtc_event_log/rtc_event_log_factory_interface.h"
 #include "rtc_base/bind.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/ptr_util.h"
@@ -317,10 +317,7 @@ rtc::Thread* PeerConnectionFactory::network_thread() {
 
 std::unique_ptr<RtcEventLog> PeerConnectionFactory::CreateRtcEventLog_w() {
   RTC_DCHECK_RUN_ON(worker_thread_);
-  const auto encoding_type = RtcEventLog::EncodingType::Legacy;
-  return event_log_factory_
-             ? event_log_factory_->CreateRtcEventLog(encoding_type)
-             : rtc::MakeUnique<RtcEventLogNullImpl>();
+  return std::unique_ptr<RtcEventLog>();
 }
 
 std::unique_ptr<Call> PeerConnectionFactory::CreateCall_w(

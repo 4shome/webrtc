@@ -67,12 +67,9 @@ rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
 
   std::unique_ptr<CallFactoryInterface> call_factory = CreateCallFactory();
 
-  std::unique_ptr<RtcEventLogFactoryInterface> event_log_factory =
-      CreateRtcEventLogFactory();
-
   return CreateModularPeerConnectionFactory(
       network_thread, worker_thread, signaling_thread, std::move(media_engine),
-      std::move(call_factory), std::move(event_log_factory));
+      std::move(call_factory), nullptr);
 }
 
 rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
@@ -97,12 +94,9 @@ rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
 
   std::unique_ptr<CallFactoryInterface> call_factory = CreateCallFactory();
 
-  std::unique_ptr<RtcEventLogFactoryInterface> event_log_factory =
-      CreateRtcEventLogFactory();
-
   return CreateModularPeerConnectionFactory(
       network_thread, worker_thread, signaling_thread, std::move(media_engine),
-      std::move(call_factory), std::move(event_log_factory));
+      std::move(call_factory), nullptr);
 }
 
 rtc::scoped_refptr<PeerConnectionFactoryInterface>

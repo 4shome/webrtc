@@ -414,9 +414,7 @@ void SendSideBandwidthEstimation::CapBitrateToThresholds(int64_t now_ms,
   if (bitrate_bps != current_bitrate_bps_ ||
       last_fraction_loss_ != last_logged_fraction_loss_ ||
       now_ms - last_rtc_event_log_ms_ > kRtcEventLogPeriodMs) {
-    event_log_->Log(rtc::MakeUnique<RtcEventBweUpdateLossBased>(
-        bitrate_bps, last_fraction_loss_,
-        expected_packets_since_last_loss_update_));
+    LOG(LS_INFO) << "Skip logging RtcEventBweUpdateLossBased.";
     last_logged_fraction_loss_ = last_fraction_loss_;
     last_rtc_event_log_ms_ = now_ms;
   }

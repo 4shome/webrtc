@@ -281,6 +281,8 @@ DtlsTransportInternal* TransportController::CreateDtlsTransport_n(
       this, &TransportController::OnChannelRoleConflict_n);
   dtls->ice_transport()->SignalStateChanged.connect(
       this, &TransportController::OnChannelStateChanged_n);
+  dtls->ice_transport()->SignalSelectedCandidatePairChanged.connect(
+      this, &TransportController::OnSelectedCandidatePairChanged_n);
   RefCountedChannel* new_pair = new RefCountedChannel(dtls, ice);
   new_pair->AddRef();
   channels_.insert(channels_.end(), new_pair);
@@ -825,6 +827,25 @@ void TransportController::OnChannelStateChanged_n(
                << channel->component()
                << " state changed. Check if state is complete.";
   UpdateAggregateStates_n();
+}
+
+void TransportController::OnSelectedCandidatePairChanged(
+    const Candidate& local, const Candidate& remote, bool ready) {
+  RTC_DCHECK(signaling_thread_->IsCurrent());
+  SignalSelectedCandidatePairChanged(local, remote, ready);
+}
+
+void TransportController::OnSelectedCandidatePairChanged_n(
+    IceTransportInternal* channel, CandidatePairInterface* candidate_pair, int last_packet_id,
+    bool ready) {
+  RTC_DCHECK(network_thread_->IsCurrent());
+  if (candidate_pair) {
+    invoker_.AsyncInvoke<void>(
+        RTC_FROM_HERE, signaling_thread_,
+        rtc::Bind(&TransportController::OnSelectedCandidatePairChanged, this,
+                  candidate_pair->local_candidate(),
+                  candidate_pair->remote_candidate(), ready));
+  }
 }
 
 void TransportController::UpdateAggregateStates_n() {

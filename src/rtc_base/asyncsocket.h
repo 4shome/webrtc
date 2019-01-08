@@ -38,6 +38,8 @@ class AsyncSocket : public Socket {
                    sigslot::multi_threaded_local> SignalWriteEvent;
   sigslot::signal1<AsyncSocket*> SignalConnectEvent;     // connected
   sigslot::signal2<AsyncSocket*, int> SignalCloseEvent;  // closed
+
+  void* extra_data;
 };
 
 class AsyncSocketAdapter : public AsyncSocket, public sigslot::has_slots<> {

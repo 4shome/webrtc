@@ -280,7 +280,7 @@ class LogMessageVoidify {
 };
 
 #define LOG_SEVERITY_PRECONDITION(sev) \
-  !(rtc::LogMessage::Loggable(sev)) \
+  !rtc::LogMessage::Loggable(sev) \
     ? (void) 0 \
     : rtc::LogMessageVoidify() &
 

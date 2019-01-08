@@ -74,9 +74,6 @@ namespace rtc {
 namespace tracing {
 // Set up internal event tracer.
 void SetupInternalTracer();
-bool StartInternalCapture(const char* filename);
-void StartInternalCaptureToFile(FILE* file);
-void StopInternalCapture();
 // Make sure we run this, this will tear down the internal tracing.
 void ShutdownInternalTracer();
 }  // namespace tracing

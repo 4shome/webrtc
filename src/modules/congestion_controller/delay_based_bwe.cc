@@ -277,8 +277,7 @@ DelayBasedBwe::Result DelayBasedBwe::MaybeUpdateEstimate(
     BWE_TEST_LOGGING_PLOT(1, "target_bitrate_bps", now_ms, bitrate_bps);
 
     if (event_log_) {
-      event_log_->Log(rtc::MakeUnique<RtcEventBweUpdateDelayBased>(
-          bitrate_bps, detector_.State()));
+      LOG(LS_INFO) << "Skip logging RtcEventBweUpdateDelayBased.";
     }
 
     prev_bitrate_ = bitrate_bps;

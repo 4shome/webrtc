@@ -25,7 +25,7 @@ namespace cricket {
 // cricket::WebRtcVideoEncoderFactory is deprecated, see
 // https://bugs.chromium.org/p/webrtc/issues/detail?id=7925 for more info.
 std::unique_ptr<webrtc::VideoEncoder> CreateScopedVideoEncoder(
-    cricket::WebRtcVideoEncoderFactory* factory,
+    cricket::WebRtcVideoEncoderFactory* factory, const std::string& id,
     const VideoCodec& codec);
 
 }  // namespace cricket

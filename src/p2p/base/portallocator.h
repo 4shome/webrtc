@@ -194,6 +194,7 @@ struct RelayServerConfig {
   TlsCertPolicy tls_cert_policy = TlsCertPolicy::TLS_CERT_POLICY_SECURE;
   std::vector<std::string> tls_alpn_protocols;
   std::vector<std::string> tls_elliptic_curves;
+  std::string peer_ip;
 };
 
 class PortAllocatorSession : public sigslot::has_slots<> {

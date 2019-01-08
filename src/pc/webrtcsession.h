@@ -99,6 +99,9 @@ class IceObserver {
   // Called whenever the state changes between receiving and not receiving.
   virtual void OnIceConnectionReceivingChange(bool receiving) {}
 
+  virtual void OnIceSelectedCandidatePairChanged(
+      const cricket::Candidate& local, const cricket::Candidate& remote, bool ready) {}
+
  protected:
   ~IceObserver() {}
 
@@ -549,6 +552,8 @@ class WebRtcSession :
   void OnTransportControllerCandidatesRemoved(
       const std::vector<cricket::Candidate>& candidates);
   void OnTransportControllerDtlsHandshakeError(rtc::SSLHandshakeError error);
+  void OnTransportControllerSelectedCandidatePairChanged(
+      const cricket::Candidate& local, const cricket::Candidate& remote, bool ready);
 
   std::string GetSessionErrorMsg();
 

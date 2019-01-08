@@ -117,6 +117,8 @@ class BasicPortAllocatorSession : public PortAllocatorSession,
   void RegatherOnAllNetworks() override;
   void PruneAllPorts() override;
 
+  bool HasUDPTurnPort() const;
+
  protected:
   void UpdateIceParametersInternal() override;
 
@@ -341,7 +343,9 @@ class AllocationSequence : public rtc::MessageHandler,
 
  protected:
   // For testing.
-  void CreateTurnPort(const RelayServerConfig& config);
+  void CreateTurnPort(const RelayServerConfig& config,
+                      ProtocolType transport,
+                      ProtocolType peer_transport);
 
  private:
   typedef std::vector<ProtocolType> ProtocolList;
@@ -350,7 +354,7 @@ class AllocationSequence : public rtc::MessageHandler,
   void CreateUDPPorts();
   void CreateTCPPorts();
   void CreateStunPorts();
-  void CreateRelayPorts();
+  void CreateRelayPorts(ProtocolType transport, ProtocolType peer_transport);
   void CreateGturnPort(const RelayServerConfig& config);
 
   void OnReadPacket(rtc::AsyncPacketSocket* socket,
@@ -369,7 +373,6 @@ class AllocationSequence : public rtc::MessageHandler,
   PortConfiguration* config_;
   State state_;
   uint32_t flags_;
-  ProtocolList protocols_;
   std::unique_ptr<rtc::AsyncPacketSocket> udp_socket_;
   // There will be only one udp port per AllocationSequence.
   UDPPort* udp_port_;

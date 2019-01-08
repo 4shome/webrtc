@@ -458,7 +458,7 @@ AudioMixer::Source::AudioFrameInfo Channel::GetAudioFrameWithInfo(
 
   unsigned int ssrc;
   RTC_CHECK_EQ(GetRemoteSSRC(ssrc), 0);
-  event_log_proxy_->Log(rtc::MakeUnique<RtcEventAudioPlayout>(ssrc));
+  LOG(LS_INFO) << "Skip logging RtcEventAudioPlayout.";
   // Get 10ms raw PCM data from the ACM (mixer limits output frequency)
   bool muted;
   if (audio_coding_->PlayoutData10Ms(audio_frame->sample_rate_hz_, audio_frame,

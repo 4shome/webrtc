@@ -57,10 +57,11 @@ class TurnPort : public Port {
                           const RelayCredentials& credentials,
                           int server_priority,
                           const std::string& origin,
+                          cricket::ProtocolType peer_transport,
                           webrtc::TurnCustomizer* customizer) {
     return new TurnPort(thread, factory, network, socket, username, password,
                         server_address, credentials, server_priority, origin,
-                        customizer);
+                        peer_transport, customizer);
   }
 
   // Create a TURN port that will use a new socket, bound to |network| and
@@ -76,20 +77,28 @@ class TurnPort : public Port {
                           const RelayCredentials& credentials,
                           int server_priority,
                           const std::string& origin,
+                          cricket::ProtocolType peer_transport,
                           const std::vector<std::string>& tls_alpn_protocols,
                           const std::vector<std::string>& tls_elliptic_curves,
                           webrtc::TurnCustomizer* customizer) {
     return new TurnPort(thread, factory, network, min_port, max_port, username,
                         password, server_address, credentials, server_priority,
-                        origin, tls_alpn_protocols, tls_elliptic_curves,
-                        customizer);
+                        origin, peer_transport, tls_alpn_protocols,
+                        tls_elliptic_curves, customizer);
   }
 
   virtual ~TurnPort();
 
+  bool received_response() const { return received_response_; }
+  void set_received_response() { received_response_ = true; }
+
   const ProtocolAddress& server_address() const { return server_address_; }
   // Returns an empty address if the local address has not been assigned.
   rtc::SocketAddress GetLocalAddress() const;
+
+  void set_peer_ip(const std::string& peer_ip) {
+    peer_ip_ = peer_ip;
+  }
 
   bool ready() const { return state_ == STATE_READY; }
   bool connected() const {
@@ -137,8 +146,7 @@ class TurnPort : public Port {
                             const rtc::SentPacket& sent_packet);
   virtual void OnReadyToSend(rtc::AsyncPacketSocket* socket);
   virtual bool SupportsProtocol(const std::string& protocol) const {
-    // Turn port only connects to UDP candidates.
-    return protocol == UDP_PROTOCOL_NAME;
+    return protocol == ProtoToString(peer_transport_);
   }
 
   void OnSocketConnect(rtc::AsyncPacketSocket* socket);
@@ -193,6 +201,7 @@ class TurnPort : public Port {
            const RelayCredentials& credentials,
            int server_priority,
            const std::string& origin,
+           cricket::ProtocolType peer_transport,
            webrtc::TurnCustomizer* customizer);
 
   TurnPort(rtc::Thread* thread,
@@ -206,6 +215,7 @@ class TurnPort : public Port {
            const RelayCredentials& credentials,
            int server_priority,
            const std::string& origin,
+           cricket::ProtocolType peer_transport,
            const std::vector<std::string>& tls_alpn_protocols,
            const std::vector<std::string>& tls_elliptic_curves,
            webrtc::TurnCustomizer* customizer);
@@ -295,11 +305,14 @@ class TurnPort : public Port {
   std::vector<std::string> tls_elliptic_curves_;
   RelayCredentials credentials_;
   AttemptedServerSet attempted_server_addresses_;
+  std::string peer_ip_;
+  const cricket::ProtocolType peer_transport_;
 
   rtc::AsyncPacketSocket* socket_;
   SocketOptionsMap socket_options_;
   rtc::AsyncResolverInterface* resolver_;
   int error_;
+  bool received_response_ = false;
 
   StunRequestManager request_manager_;
   std::string realm_;       // From 401/438 response message.

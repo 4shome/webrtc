@@ -252,6 +252,7 @@ static RTCErrorType ParseIceServerUrl(
       }
       cricket::RelayServerConfig config = cricket::RelayServerConfig(
           socket_address, username, server.password, turn_transport_type);
+      config.peer_ip = server.peer_ip;
       if (server.tls_cert_policy ==
           PeerConnectionInterface::kTlsCertPolicyInsecureNoCheck) {
         config.tls_cert_policy =

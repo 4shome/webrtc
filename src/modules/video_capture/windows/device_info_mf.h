@@ -35,6 +35,10 @@ class DeviceInfoMF : public DeviceInfoImpl {
   virtual int32_t DisplayCaptureSettingsDialogBox(
       const char* deviceUniqueIdUTF8, const char* dialogTitleUTF8,
       void* parentWindow, uint32_t positionX, uint32_t positionY);
+
+  virtual int32_t CreateCapabilityMap(const char* deviceUniqueIdUTF8) {
+	  return 0;
+  }
 };
 
 }  // namespace videocapturemodule

@@ -26,6 +26,7 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/helpers.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/stringutils.h"
 
 using rtc::CreateRandomId;
 
@@ -41,10 +42,13 @@ enum {
 };
 
 const int PHASE_UDP = 0;
-const int PHASE_RELAY = 1;
-const int PHASE_TCP = 2;
+const int PHASE_TCP = 1;
+const int PHASE_RELAY_UDP_UDP = 2;
+const int PHASE_RELAY_UDP_TCP = 3;
+const int PHASE_RELAY_TCP_UDP = 4;
+const int PHASE_RELAY_TCP_TCP = 5;
 
-const int kNumPhases = 3;
+const int kNumPhases = 6;
 
 // Gets protocol priority: UDP > TCP > SSLTCP == TLS.
 int GetProtocolPriority(cricket::ProtocolType protocol) {
@@ -591,8 +595,8 @@ std::vector<rtc::Network*> BasicPortAllocatorSession::GetNetworks() {
   // costly networks" flag.
   networks.erase(std::remove_if(networks.begin(), networks.end(),
                                 [this](rtc::Network* network) {
-                                  return allocator_->network_ignore_mask() &
-                                         network->type();
+                                  return rtc::starts_with(network->name().c_str(), "docker") ||
+                                    (allocator_->network_ignore_mask() & network->type());
                                 }),
                  networks.end());
   if (flags() & PORTALLOCATOR_DISABLE_COSTLY_NETWORKS) {
@@ -880,6 +884,18 @@ void BasicPortAllocatorSession::PruneAllPorts() {
   for (PortData& data : ports_) {
     data.Prune();
   }
+}
+
+bool BasicPortAllocatorSession::HasUDPTurnPort() const {
+  for (const auto& port_data : ports_) {
+    const auto* port = port_data.port();
+    if (port->Type() != RELAY_PORT_TYPE) continue;
+    const auto& turn_port = static_cast<const TurnPort*>(port);
+    if (turn_port->received_response() && turn_port->GetProtocol() == PROTO_UDP) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void BasicPortAllocatorSession::OnPortComplete(Port* port) {
@@ -1170,7 +1186,9 @@ void AllocationSequence::OnMessage(rtc::Message* msg) {
   RTC_DCHECK(rtc::Thread::Current() == session_->network_thread());
   RTC_DCHECK(msg->message_id == MSG_ALLOCATION_PHASE);
 
-  const char* const PHASE_NAMES[kNumPhases] = {"Udp", "Relay", "Tcp"};
+  const char* const PHASE_NAMES[kNumPhases] = {
+      "Udp", "Tcp", "RelayUdpUdp", "RelayUdpTcp", "RelayTcpUdp", "RelayTcpTcp"
+  };
 
   // Perform all of the phases in the current step.
   LOG_J(LS_INFO, network_) << "Allocation Phase="
@@ -1182,12 +1200,24 @@ void AllocationSequence::OnMessage(rtc::Message* msg) {
       CreateStunPorts();
       break;
 
-    case PHASE_RELAY:
-      CreateRelayPorts();
-      break;
-
     case PHASE_TCP:
       CreateTCPPorts();
+      break;
+
+    case PHASE_RELAY_UDP_UDP:
+      CreateRelayPorts(PROTO_UDP, PROTO_UDP);
+      break;
+
+    case PHASE_RELAY_UDP_TCP:
+      CreateRelayPorts(PROTO_UDP, PROTO_TCP);
+      break;
+
+    case PHASE_RELAY_TCP_UDP:
+      CreateRelayPorts(PROTO_TCP, PROTO_UDP);
+      break;
+
+    case PHASE_RELAY_TCP_TCP:
+      CreateRelayPorts(PROTO_TCP, PROTO_TCP);
       state_ = kCompleted;
       break;
 
@@ -1197,9 +1227,12 @@ void AllocationSequence::OnMessage(rtc::Message* msg) {
 
   if (state() == kRunning) {
     ++phase_;
-    session_->network_thread()->PostDelayed(RTC_FROM_HERE,
-                                            session_->allocator()->step_delay(),
-                                            this, MSG_ALLOCATION_PHASE);
+    session_->network_thread()->PostDelayed(
+        RTC_FROM_HERE,
+        // Give PHASE_RELAY_TCP_UDP a longer delay to give UDP TURN a chance to finish.
+        // We won't need to create TCP TURN port when we know UDP works.
+        (phase_ == PHASE_RELAY_TCP_UDP ? 500 : session_->allocator()->step_delay()),
+        this, MSG_ALLOCATION_PHASE);
   } else {
     // If all phases in AllocationSequence are completed, no allocation
     // steps needed further. Canceling  pending signal.
@@ -1299,9 +1332,25 @@ void AllocationSequence::CreateStunPorts() {
   }
 }
 
-void AllocationSequence::CreateRelayPorts() {
+void AllocationSequence::CreateRelayPorts(ProtocolType transport,
+                                          ProtocolType peer_transport) {
   if (IsFlagSet(PORTALLOCATOR_DISABLE_RELAY)) {
-     LOG(LS_VERBOSE) << "AllocationSequence: Relay ports disabled, skipping.";
+    LOG(LS_VERBOSE) << "AllocationSequence: Relay ports disabled, skipping.";
+    return;
+  }
+
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_UDP_RELAY) && transport == PROTO_UDP) {
+    LOG(LS_VERBOSE) << "AllocationSequence: UDP relay ports disabled, skipping.";
+    return;
+  }
+
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_TCP) && peer_transport == cricket::PROTO_TCP) {
+     LOG(LS_VERBOSE) << "AllocationSequence: Relay with peer TCP disabled, skipping.";
+     return;
+  }
+
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_UDP) && peer_transport == cricket::PROTO_UDP) {
+     LOG(LS_VERBOSE) << "AllocationSequence: Relay with peer UDP disabled, skipping.";
      return;
   }
 
@@ -1317,9 +1366,12 @@ void AllocationSequence::CreateRelayPorts() {
 
   for (RelayServerConfig& relay : config_->relays) {
     if (relay.type == RELAY_GTURN) {
-      CreateGturnPort(relay);
+      if (transport == cricket::PROTO_UDP &&
+          peer_transport == cricket::PROTO_UDP) {
+        CreateGturnPort(relay);
+      }
     } else if (relay.type == RELAY_TURN) {
-      CreateTurnPort(relay);
+      CreateTurnPort(relay, transport, peer_transport);
     } else {
       RTC_NOTREACHED();
     }
@@ -1355,15 +1407,16 @@ void AllocationSequence::CreateGturnPort(const RelayServerConfig& config) {
   }
 }
 
-void AllocationSequence::CreateTurnPort(const RelayServerConfig& config) {
+void AllocationSequence::CreateTurnPort(const RelayServerConfig& config,
+                                        ProtocolType transport,
+                                        ProtocolType peer_transport) {
   PortList::const_iterator relay_port;
   for (relay_port = config.ports.begin();
        relay_port != config.ports.end(); ++relay_port) {
-    TurnPort* port = NULL;
-
-    // Skip UDP connections to relay servers if it's disallowed.
-    if (IsFlagSet(PORTALLOCATOR_DISABLE_UDP_RELAY) &&
-        relay_port->proto == PROTO_UDP) {
+    if (relay_port->proto != transport) continue;
+    if (relay_port->proto == PROTO_TCP && session_->HasUDPTurnPort()) {
+      LOG(LS_WARNING) << "We already have a UDP TURN connection. Skipping TCP TURN port "
+          << relay_port->address.ToString();
       continue;
     }
 
@@ -1383,6 +1436,7 @@ void AllocationSequence::CreateTurnPort(const RelayServerConfig& config) {
     // don't pass shared socket for ports which will create TCP sockets.
     // TODO(mallinath) - Enable shared socket mode for TURN ports. Disabled
     // due to webrtc bug https://code.google.com/p/webrtc/issues/detail?id=3537
+    TurnPort* port = NULL;
     if (IsFlagSet(PORTALLOCATOR_ENABLE_SHARED_SOCKET) &&
         relay_port->proto == PROTO_UDP && udp_socket_) {
       port = TurnPort::Create(session_->network_thread(),
@@ -1391,7 +1445,9 @@ void AllocationSequence::CreateTurnPort(const RelayServerConfig& config) {
                               session_->username(), session_->password(),
                               *relay_port, config.credentials, config.priority,
                               session_->allocator()->origin(),
+                              peer_transport,
                               session_->allocator()->turn_customizer());
+      if (!config.peer_ip.empty()) port->set_peer_ip(config.peer_ip);
       turn_ports_.push_back(port);
       // Listen to the port destroyed signal, to allow AllocationSequence to
       // remove entrt from it's map.
@@ -1402,8 +1458,10 @@ void AllocationSequence::CreateTurnPort(const RelayServerConfig& config) {
           session_->allocator()->min_port(), session_->allocator()->max_port(),
           session_->username(), session_->password(), *relay_port,
           config.credentials, config.priority, session_->allocator()->origin(),
+          peer_transport,
           config.tls_alpn_protocols, config.tls_elliptic_curves,
           session_->allocator()->turn_customizer());
+      if (!config.peer_ip.empty()) port->set_peer_ip(config.peer_ip);
     }
     RTC_DCHECK(port != NULL);
     port->SetTlsCertPolicy(config.tls_cert_policy);

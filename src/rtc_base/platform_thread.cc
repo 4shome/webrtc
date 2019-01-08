@@ -67,11 +67,8 @@ void SetCurrentThreadName(const char* name) {
     DWORD dwFlags;
   } threadname_info = {0x1000, name, static_cast<DWORD>(-1), 0};
 
-  __try {
-    ::RaiseException(0x406D1388, 0, sizeof(threadname_info) / sizeof(DWORD),
-                     reinterpret_cast<ULONG_PTR*>(&threadname_info));
-  } __except (EXCEPTION_EXECUTE_HANDLER) {
-  }
+  ::RaiseException(0x406D1388, 0, sizeof(threadname_info) / sizeof(DWORD),
+                   reinterpret_cast<ULONG_PTR*>(&threadname_info));
 #elif defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
   prctl(PR_SET_NAME, reinterpret_cast<unsigned long>(name));
 #elif defined(WEBRTC_MAC) || defined(WEBRTC_IOS)

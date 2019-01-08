@@ -10,12 +10,12 @@
 
 #include "rtc_base/task_queue.h"
 
+#include <event.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
 
-#include "base/third_party/libevent/event.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/platform_thread.h"

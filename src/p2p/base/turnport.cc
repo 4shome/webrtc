@@ -47,15 +47,27 @@ inline bool IsTurnChannelData(uint16_t msg_type) {
   return ((msg_type & 0xC000) == 0x4000);  // MSB are 0b01
 }
 
-static int GetRelayPreference(cricket::ProtocolType proto) {
-  switch (proto) {
-    case cricket::PROTO_TCP:
-      return ICE_TYPE_PREFERENCE_RELAY_TCP;
-    case cricket::PROTO_TLS:
-      return ICE_TYPE_PREFERENCE_RELAY_TLS;
+static int GetRelayPreference(ProtocolType transport, ProtocolType peer_transport) {
+  switch (transport) {
+    case PROTO_TCP:
+      if (peer_transport == PROTO_UDP) {
+        return ICE_TYPE_PREFERENCE_RELAY_TCP_UDP;
+      } else {
+        return ICE_TYPE_PREFERENCE_RELAY_TCP_TCP;
+      }
+    case PROTO_TLS:
+      if (peer_transport == PROTO_UDP) {
+        return ICE_TYPE_PREFERENCE_RELAY_TLS_UDP;
+      } else {
+        return ICE_TYPE_PREFERENCE_RELAY_TLS_TCP;
+      }
     default:
-      RTC_DCHECK(proto == PROTO_UDP);
-      return ICE_TYPE_PREFERENCE_RELAY_UDP;
+      RTC_DCHECK(transport == PROTO_UDP);
+      if (peer_transport == PROTO_UDP) {
+        return ICE_TYPE_PREFERENCE_RELAY_UDP_UDP;
+      } else {
+        return ICE_TYPE_PREFERENCE_RELAY_UDP_TCP;
+      }
   }
 }
 
@@ -197,6 +209,7 @@ TurnPort::TurnPort(rtc::Thread* thread,
                    const RelayCredentials& credentials,
                    int server_priority,
                    const std::string& origin,
+                   cricket::ProtocolType peer_transport,
                    webrtc::TurnCustomizer* customizer)
     : Port(thread,
            RELAY_PORT_TYPE,
@@ -206,6 +219,7 @@ TurnPort::TurnPort(rtc::Thread* thread,
            password),
       server_address_(server_address),
       credentials_(credentials),
+      peer_transport_(peer_transport),
       socket_(socket),
       resolver_(NULL),
       error_(0),
@@ -230,6 +244,7 @@ TurnPort::TurnPort(rtc::Thread* thread,
                    const RelayCredentials& credentials,
                    int server_priority,
                    const std::string& origin,
+                   cricket::ProtocolType peer_transport,
                    const std::vector<std::string>& tls_alpn_protocols,
                    const std::vector<std::string>& tls_elliptic_curves,
                    webrtc::TurnCustomizer* customizer)
@@ -245,6 +260,7 @@ TurnPort::TurnPort(rtc::Thread* thread,
       tls_alpn_protocols_(tls_alpn_protocols),
       tls_elliptic_curves_(tls_elliptic_curves),
       credentials_(credentials),
+      peer_transport_(peer_transport),
       socket_(NULL),
       resolver_(NULL),
       error_(0),
@@ -481,7 +497,6 @@ void TurnPort::OnAllocateMismatch() {
 
 Connection* TurnPort::CreateConnection(const Candidate& remote_candidate,
                                        CandidateOrigin origin) {
-  // TURN-UDP can only connect to UDP candidates.
   if (!SupportsProtocol(remote_candidate.protocol())) {
     return NULL;
   }
@@ -498,6 +513,11 @@ Connection* TurnPort::CreateConnection(const Candidate& remote_candidate,
     if (local_candidate.type() == RELAY_PORT_TYPE &&
         local_candidate.address().family() ==
             remote_candidate.address().family()) {
+      if (!peer_ip_.empty() && peer_ip_ != remote_candidate.address().ipaddr().ToString()) {
+        LOG(LS_INFO) << "Ignore remote candidate '" << remote_candidate.ToString()
+            << "', expecting a candidate with IP " << peer_ip_;
+        continue;
+      }
       // Create an entry, if needed, so we can get our permissions set up
       // correctly.
       CreateOrRefreshEntry(remote_candidate.address());
@@ -774,10 +794,10 @@ void TurnPort::OnAllocateSuccess(const rtc::SocketAddress& address,
   AddAddress(address,          // Candidate address.
              address,          // Base address.
              related_address,  // Related address.
-             UDP_PROTOCOL_NAME,
+             (peer_transport_ == PROTO_TCP ? TCP_PROTOCOL_NAME : UDP_PROTOCOL_NAME),
              ProtoToString(server_address_.proto),  // The first hop protocol.
-             "",  // TCP canddiate type, empty for turn candidates.
-             RELAY_PORT_TYPE, GetRelayPreference(server_address_.proto),
+             (peer_transport_ == PROTO_TCP ? TCPTYPE_PASSIVE_STR : ""),
+             RELAY_PORT_TYPE, GetRelayPreference(server_address_.proto, peer_transport_),
              server_priority_, ReconstructedServerUrl(), true);
 }
 
@@ -891,7 +911,7 @@ void TurnPort::HandleDataIndication(const char* data, size_t size,
   }
 
   DispatchPacket(data_attr->bytes(), data_attr->length(), ext_addr,
-                 PROTO_UDP, packet_time);
+                 peer_transport_, packet_time);
 }
 
 void TurnPort::HandleChannelData(int channel_id, const char* data,
@@ -928,7 +948,7 @@ void TurnPort::HandleChannelData(int channel_id, const char* data,
   }
 
   DispatchPacket(data + TURN_CHANNEL_HEADER_SIZE, len, entry->address(),
-                 PROTO_UDP, packet_time);
+                 peer_transport_, packet_time);
 }
 
 void TurnPort::DispatchPacket(const char* data, size_t size,
@@ -1175,7 +1195,11 @@ void TurnAllocateRequest::Prepare(StunMessage* request) {
   request->SetType(TURN_ALLOCATE_REQUEST);
   auto transport_attr =
       StunAttribute::CreateUInt32(STUN_ATTR_REQUESTED_TRANSPORT);
-  transport_attr->SetValue(IPPROTO_UDP << 24);
+  if (port_->peer_transport_ == PROTO_TCP) {
+    transport_attr->SetValue(IPPROTO_TCP << 24);
+  } else {
+    transport_attr->SetValue(IPPROTO_UDP << 24);
+  }
   request->AddAttribute(std::move(transport_attr));
   if (!port_->hash().empty()) {
     port_->AddRequestAuthInfo(request);
@@ -1189,6 +1213,7 @@ void TurnAllocateRequest::OnSent() {
 }
 
 void TurnAllocateRequest::OnResponse(StunMessage* response) {
+  port_->set_received_response();
   LOG_J(LS_INFO, port_) << "TURN allocate requested successfully"
                         << ", id=" << rtc::hex_encode(id())
                         << ", code=0"  // Makes logging easier to parse.
@@ -1202,8 +1227,9 @@ void TurnAllocateRequest::OnResponse(StunMessage* response) {
                              << "attribute in allocate success response";
     return;
   }
+  const rtc::SocketAddress mapped_addr = mapped_attr->GetAddress();
   // Using XOR-Mapped-Address for stun.
-  port_->OnStunAddress(mapped_attr->GetAddress());
+  port_->OnStunAddress(mapped_addr);
 
   const StunAddressAttribute* relayed_attr =
       response->GetAddress(STUN_ATTR_XOR_RELAYED_ADDRESS);
@@ -1220,9 +1246,12 @@ void TurnAllocateRequest::OnResponse(StunMessage* response) {
                              << "allocate success response";
     return;
   }
+  rtc::SocketAddress relayed_addr = relayed_attr->GetAddress();
+  if (relayed_addr.ipaddr().ipv4_address().s_addr == 0) {
+    relayed_addr.SetIP(port_->server_address_.address.ip());
+  }
   // Notify the port the allocate succeeded, and schedule a refresh request.
-  port_->OnAllocateSuccess(relayed_attr->GetAddress(),
-                           mapped_attr->GetAddress());
+  port_->OnAllocateSuccess(relayed_addr, mapped_addr);
   port_->ScheduleRefresh(lifetime_attr->value());
 }
 

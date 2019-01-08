@@ -22,6 +22,7 @@
 #include "api/mediatypes.h"
 #include "api/proxy.h"
 #include "api/rtpparameters.h"
+#include "common_types.h"
 #include "rtc_base/refcount.h"
 #include "rtc_base/scoped_ref_ptr.h"
 
@@ -59,6 +60,10 @@ class RtpSenderInterface : public rtc::RefCountInterface {
   // Returns null for a video sender.
   virtual rtc::scoped_refptr<DtmfSenderInterface> GetDtmfSender() const = 0;
 
+  virtual void AddVideoCodecType(VideoCodecType vct) { vcts.push_back(vct); }
+
+  std::vector<VideoCodecType> vcts;
+
  protected:
   virtual ~RtpSenderInterface() {}
 };
@@ -77,6 +82,7 @@ BEGIN_SIGNALING_PROXY_MAP(RtpSender)
   PROXY_CONSTMETHOD0(RtpParameters, GetParameters);
   PROXY_METHOD1(bool, SetParameters, const RtpParameters&)
   PROXY_CONSTMETHOD0(rtc::scoped_refptr<DtmfSenderInterface>, GetDtmfSender);
+  PROXY_METHOD1(void, AddVideoCodecType, VideoCodecType);
 END_PROXY_MAP()
 
 }  // namespace webrtc

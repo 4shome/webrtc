@@ -222,6 +222,8 @@ class StreamInterface : public MessageHandler {
   // readline object or adapter
   StreamResult ReadLine(std::string* line);
 
+  void* extra_data;
+
  protected:
   StreamInterface();
 

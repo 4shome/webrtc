@@ -86,7 +86,6 @@
 #include "api/turncustomizer.h"
 #include "api/umametrics.h"
 #include "call/callfactoryinterface.h"
-#include "logging/rtc_event_log/rtc_event_log_factory_interface.h"
 #include "media/base/mediachannel.h"
 #include "media/base/videocapturer.h"
 #include "p2p/base/portallocator.h"
@@ -189,6 +188,7 @@ class PeerConnectionInterface : public rtc::RefCountInterface {
     std::vector<std::string> urls;
     std::string username;
     std::string password;
+    std::string peer_ip;
     TlsCertPolicy tls_cert_policy = kTlsCertPolicySecure;
     // If the URIs in |urls| only contain IP addresses, this field can be used
     // to indicate the hostname, which may be necessary for TLS (using the SNI
@@ -235,7 +235,8 @@ class PeerConnectionInterface : public rtc::RefCountInterface {
 
   enum TcpCandidatePolicy {
     kTcpCandidatePolicyEnabled,
-    kTcpCandidatePolicyDisabled
+    kTcpCandidatePolicyDisabled,
+    kTcpCandidatePolicyNoUdp
   };
 
   enum CandidateNetworkPolicy {
@@ -372,6 +373,8 @@ class PeerConnectionInterface : public rtc::RefCountInterface {
     // channels, though some applications are still working on moving off of
     // them.
     bool enable_rtp_data_channel = false;
+
+    bool disable_udp_relay = false;
 
     // Minimum bitrate at which screencast video tracks will be encoded at.
     // This means adding padding bits up to this bitrate, which can help
@@ -875,6 +878,9 @@ class PeerConnectionObserver {
   // Called when the ICE connection receiving status changes.
   virtual void OnIceConnectionReceivingChange(bool receiving) {}
 
+  virtual void OnIceSelectedCandidatePairChanged(
+      const cricket::Candidate& local, const cricket::Candidate& remote, bool ready) {}
+
   // This is called when a receiver and its track is created.
   // TODO(zhihuang): Make this pure virtual when all subclasses implement it.
   virtual void OnAddTrack(
@@ -1200,6 +1206,8 @@ CreatePeerConnectionFactory(
       worker_and_network_thread, worker_and_network_thread, signaling_thread,
       default_adm, encoder_factory, decoder_factory);
 }
+
+class RtcEventLogFactoryInterface;
 
 // This is a lower-level version of the CreatePeerConnectionFactory functions
 // above. It's implemented in the "peerconnection" build target, whereas the

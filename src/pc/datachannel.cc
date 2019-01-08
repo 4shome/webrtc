@@ -576,6 +576,7 @@ bool DataChannel::SendDataMessage(const DataBuffer& buffer,
     if (!queue_if_blocked || QueueSendDataMessage(buffer)) {
       return false;
     }
+    return true;
   }
   // Close the channel if the error is not SDR_BLOCK, or if queuing the
   // message failed.

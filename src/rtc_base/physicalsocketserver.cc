@@ -197,7 +197,7 @@ SocketAddress PhysicalSocket::GetRemoteAddress() const {
   if (result >= 0) {
     SocketAddressFromSockAddrStorage(addr_storage, &address);
   } else {
-    LOG(LS_WARNING) << "GetRemoteAddress: unable to get remote addr, socket="
+    LOG(LS_VERBOSE) << "GetRemoteAddress: unable to get remote addr, socket="
                     << s_;
   }
   return address;

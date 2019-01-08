@@ -11,6 +11,7 @@
 #ifndef MEDIA_ENGINE_WEBRTCVIDEOENCODERFACTORY_H_
 #define MEDIA_ENGINE_WEBRTCVIDEOENCODERFACTORY_H_
 
+#include <string>
 #include <vector>
 
 #include "common_types.h"  // NOLINT(build/include)
@@ -31,7 +32,7 @@ class WebRtcVideoEncoderFactory {
   // Caller takes the ownership of the returned object and it should be released
   // by calling DestroyVideoEncoder().
   virtual webrtc::VideoEncoder* CreateVideoEncoder(
-      const cricket::VideoCodec& codec) = 0;
+      const std::string& id, const cricket::VideoCodec& codec) = 0;
 
   // Returns a list of supported codecs in order of preference.
   virtual const std::vector<cricket::VideoCodec>& supported_codecs() const = 0;
@@ -41,7 +42,7 @@ class WebRtcVideoEncoderFactory {
   // frames to be delivered via webrtc::VideoEncoder::Encode.
   virtual bool EncoderTypeHasInternalSource(webrtc::VideoCodecType type) const;
 
-  virtual void DestroyVideoEncoder(webrtc::VideoEncoder* encoder) = 0;
+  virtual void DestroyVideoEncoder(const std::string& id, webrtc::VideoEncoder* encoder) = 0;
 };
 
 }  // namespace cricket

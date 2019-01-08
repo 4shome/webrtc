@@ -3,6 +3,7 @@
 *.host.mk
 *.ncb
 *.ninja
+*.o
 *.props
 *.pyc
 *.rules
@@ -36,6 +37,7 @@
 .pydevproject
 .settings
 .sw?
+tags
 /Makefile
 /base
 /build

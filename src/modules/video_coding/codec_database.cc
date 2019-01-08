@@ -10,10 +10,6 @@
 
 #include "modules/video_coding/codec_database.h"
 
-#include "modules/video_coding/codecs/h264/include/h264.h"
-#include "modules/video_coding/codecs/i420/include/i420.h"
-#include "modules/video_coding/codecs/vp8/include/vp8.h"
-#include "modules/video_coding/codecs/vp9/include/vp9.h"
 #include "modules/video_coding/internal_defines.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -26,25 +22,6 @@ namespace webrtc {
 
 // Create an internal Decoder given a codec type
 static std::unique_ptr<VCMGenericDecoder> CreateDecoder(VideoCodecType type) {
-  switch (type) {
-    case kVideoCodecVP8:
-      return std::unique_ptr<VCMGenericDecoder>(
-          new VCMGenericDecoder(VP8Decoder::Create()));
-    case kVideoCodecVP9:
-      return std::unique_ptr<VCMGenericDecoder>(
-          new VCMGenericDecoder(VP9Decoder::Create()));
-    case kVideoCodecI420:
-      return std::unique_ptr<VCMGenericDecoder>(
-          new VCMGenericDecoder(new I420Decoder()));
-    case kVideoCodecH264:
-      if (H264Decoder::IsSupported()) {
-        return std::unique_ptr<VCMGenericDecoder>(
-            new VCMGenericDecoder(H264Decoder::Create()));
-      }
-      break;
-    default:
-      break;
-  }
   LOG(LS_WARNING) << "No internal decoder of this type exists.";
   return std::unique_ptr<VCMGenericDecoder>();
 }

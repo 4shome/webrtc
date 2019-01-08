@@ -16,10 +16,8 @@
 #include <openssl/rand.h>
 #include <openssl/tls1.h>
 #include <openssl/x509v3.h>
-#ifndef OPENSSL_IS_BORINGSSL
 #include <openssl/dtls1.h>
 #include <openssl/ssl.h>
-#endif
 
 #include <memory>
 #include <vector>
@@ -35,10 +33,6 @@
 #include "rtc_base/stringutils.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/timeutils.h"
-
-namespace {
-  bool g_use_time_callback_for_testing = false;
-}
 
 namespace rtc {
 
@@ -62,15 +56,7 @@ static SrtpCipherMapEntry SrtpCipherMap[] = {
     {"SRTP_AEAD_AES_256_GCM", SRTP_AEAD_AES_256_GCM},
     {nullptr, 0}};
 
-#ifdef OPENSSL_IS_BORINGSSL
-// Not used in production code. Actual time should be relative to Jan 1, 1970.
-static void TimeCallbackForTesting(const SSL* ssl, struct timeval* out_clock) {
-  int64_t time = TimeNanos();
-  out_clock->tv_sec = time / kNumNanosecsPerSec;
-  out_clock->tv_usec = (time % kNumNanosecsPerSec) / kNumNanosecsPerMicrosec;
-}
-#else  // #ifdef OPENSSL_IS_BORINGSSL
-
+#ifndef OPENSSL_IS_BORINGSSL
 // Cipher name table. Maps internal OpenSSL cipher ids to the RFC name.
 struct SslCipherMapEntry {
   uint32_t openssl_id;
@@ -165,40 +151,45 @@ static long stream_ctrl(BIO* h, int cmd, long arg1, void* arg2);
 static int stream_new(BIO* h);
 static int stream_free(BIO* data);
 
-static const BIO_METHOD methods_stream = {
-    BIO_TYPE_BIO, "stream",   stream_write, stream_read, stream_puts, 0,
-    stream_ctrl,  stream_new, stream_free,  nullptr,
-};
-
 static BIO* BIO_new_stream(StreamInterface* stream) {
-  // TODO(davidben): Remove the const_cast when BoringSSL is assumed.
-  BIO* ret = BIO_new(const_cast<BIO_METHOD*>(&methods_stream));
-  if (ret == nullptr)
-    return nullptr;
-  ret->ptr = stream;
+  BIO_METHOD* meth = BIO_meth_new(BIO_get_new_index(), "stream");
+  BIO_meth_set_write(meth, stream_write);
+  BIO_meth_set_read(meth, stream_read);
+  BIO_meth_set_puts(meth, stream_puts);
+  BIO_meth_set_ctrl(meth, stream_ctrl);
+  BIO_meth_set_create(meth, stream_new);
+  BIO_meth_set_destroy(meth, stream_free);
+  BIO* ret = BIO_new(meth);
+  if (ret == nullptr) {
+      BIO_meth_free(meth);
+      return nullptr;
+  }
+  stream->extra_data = meth;
+  BIO_set_data(ret, stream);
   return ret;
 }
 
 // bio methods return 1 (or at least non-zero) on success and 0 on failure.
 
 static int stream_new(BIO* b) {
-  b->shutdown = 0;
-  b->init = 1;
-  b->num = 0;  // 1 means end-of-stream
-  b->ptr = 0;
+  BIO_set_shutdown(b, 0);
+  BIO_set_init(b, 1);
+  BIO_set_num(b, 0);
+  BIO_set_data(b, NULL);
   return 1;
 }
 
 static int stream_free(BIO* b) {
-  if (b == nullptr)
-    return 0;
+  if (b == nullptr) return 0;
+  StreamInterface* stream = static_cast<StreamInterface*>(BIO_get_data(b));
+  BIO_meth_free(static_cast<BIO_METHOD*>(stream->extra_data));
   return 1;
 }
 
 static int stream_read(BIO* b, char* out, int outl) {
   if (!out)
     return -1;
-  StreamInterface* stream = static_cast<StreamInterface*>(b->ptr);
+  StreamInterface* stream = static_cast<StreamInterface*>(BIO_get_data(b));
   BIO_clear_retry_flags(b);
   size_t read;
   int error;
@@ -206,7 +197,7 @@ static int stream_read(BIO* b, char* out, int outl) {
   if (result == SR_SUCCESS) {
     return checked_cast<int>(read);
   } else if (result == SR_EOS) {
-    b->num = 1;
+    BIO_set_num(b, 1);
   } else if (result == SR_BLOCK) {
     BIO_set_retry_read(b);
   }
@@ -216,7 +207,7 @@ static int stream_read(BIO* b, char* out, int outl) {
 static int stream_write(BIO* b, const char* in, int inl) {
   if (!in)
     return -1;
-  StreamInterface* stream = static_cast<StreamInterface*>(b->ptr);
+  StreamInterface* stream = static_cast<StreamInterface*>(BIO_get_data(b));
   BIO_clear_retry_flags(b);
   size_t written;
   int error;
@@ -238,7 +229,7 @@ static long stream_ctrl(BIO* b, int cmd, long num, void* ptr) {
     case BIO_CTRL_RESET:
       return 0;
     case BIO_CTRL_EOF:
-      return b->num;
+      return BIO_get_num(b);
     case BIO_CTRL_WPENDING:
     case BIO_CTRL_PENDING:
       return 0;
@@ -795,7 +786,7 @@ int OpenSSLStreamAdapter::BeginSSL() {
   SSL_set_mode(ssl_, SSL_MODE_ENABLE_PARTIAL_WRITE |
                SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
-#if !defined(OPENSSL_IS_BORINGSSL)
+#ifndef OPENSSL_IS_BORINGSSL
   // Specify an ECDH group for ECDHE ciphers, otherwise OpenSSL cannot
   // negotiate them when acting as the server. Use NIST's P-256 which is
   // commonly supported. BoringSSL doesn't need explicit configuration and has
@@ -942,75 +933,10 @@ void OpenSSLStreamAdapter::OnMessage(Message* msg) {
 }
 
 SSL_CTX* OpenSSLStreamAdapter::SetupSSLContext() {
-  SSL_CTX* ctx = nullptr;
-
-#ifdef OPENSSL_IS_BORINGSSL
-    ctx = SSL_CTX_new(ssl_mode_ == SSL_MODE_DTLS ?
-        DTLS_method() : TLS_method());
-    // Version limiting for BoringSSL will be done below.
-#else
-  const SSL_METHOD* method;
-  switch (ssl_max_version_) {
-    case SSL_PROTOCOL_TLS_10:
-    case SSL_PROTOCOL_TLS_11:
-      // OpenSSL doesn't support setting min/max versions, so we always use
-      // (D)TLS 1.0 if a max. version below the max. available is requested.
-      if (ssl_mode_ == SSL_MODE_DTLS) {
-        if (role_ == SSL_CLIENT) {
-          method = DTLSv1_client_method();
-        } else {
-          method = DTLSv1_server_method();
-        }
-      } else {
-        if (role_ == SSL_CLIENT) {
-          method = TLSv1_client_method();
-        } else {
-          method = TLSv1_server_method();
-        }
-      }
-      break;
-    case SSL_PROTOCOL_TLS_12:
-    default:
-      if (ssl_mode_ == SSL_MODE_DTLS) {
-#if (OPENSSL_VERSION_NUMBER >= 0x10002000L)
-        // DTLS 1.2 only available starting from OpenSSL 1.0.2
-        if (role_ == SSL_CLIENT) {
-          method = DTLS_client_method();
-        } else {
-          method = DTLS_server_method();
-        }
-#else
-        if (role_ == SSL_CLIENT) {
-          method = DTLSv1_client_method();
-        } else {
-          method = DTLSv1_server_method();
-        }
-#endif
-      } else {
-#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
-        // New API only available starting from OpenSSL 1.1.0
-        if (role_ == SSL_CLIENT) {
-          method = TLS_client_method();
-        } else {
-          method = TLS_server_method();
-        }
-#else
-        if (role_ == SSL_CLIENT) {
-          method = SSLv23_client_method();
-        } else {
-          method = SSLv23_server_method();
-        }
-#endif
-      }
-      break;
-  }
-  ctx = SSL_CTX_new(method);
-#endif  // OPENSSL_IS_BORINGSSL
-
+  SSL_CTX* ctx = SSL_CTX_new(ssl_mode_ == SSL_MODE_DTLS ? DTLS_method() : TLS_method());
   if (ctx == nullptr)
     return nullptr;
 
-#ifdef OPENSSL_IS_BORINGSSL
   SSL_CTX_set_min_proto_version(ctx, ssl_mode_ == SSL_MODE_DTLS ?
       DTLS1_VERSION : TLS1_VERSION);
   switch (ssl_max_version_) {
@@ -1028,10 +954,6 @@ SSL_CTX* OpenSSLStreamAdapter::SetupSSLContext() {
           DTLS1_2_VERSION : TLS1_2_VERSION);
       break;
   }
-  if (g_use_time_callback_for_testing) {
-    SSL_CTX_set_current_time_cb(ctx, &TimeCallbackForTesting);
-  }
-#endif
 
   if (identity_ && !identity_->ConfigureIdentity(ctx)) {
     SSL_CTX_free(ctx);
@@ -1110,9 +1032,8 @@ int OpenSSLStreamAdapter::SSLVerifyCallback(X509_STORE_CTX* store, void* arg) {
       reinterpret_cast<OpenSSLStreamAdapter*>(SSL_get_app_data(ssl));
 
   // Record the peer's certificate.
-  X509* cert = SSL_get_peer_certificate(ssl);
+  X509* cert = X509_STORE_CTX_get0_cert(store);
   stream->peer_certificate_.reset(new OpenSSLCertificate(cert));
-  X509_free(cert);
 
   // If the peer certificate digest isn't known yet, we'll wait to verify
   // until it's known, and for now just return a success status.
@@ -1209,7 +1130,6 @@ bool OpenSSLStreamAdapter::IsAcceptableCipher(const std::string& cipher,
 }
 
 void OpenSSLStreamAdapter::enable_time_callback_for_testing() {
-  g_use_time_callback_for_testing = true;
 }
 
 }  // namespace rtc

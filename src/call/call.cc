@@ -591,8 +591,7 @@ webrtc::AudioSendStream* Call::CreateAudioSendStream(
     const webrtc::AudioSendStream::Config& config) {
   TRACE_EVENT0("webrtc", "Call::CreateAudioSendStream");
   RTC_DCHECK_CALLED_SEQUENTIALLY(&configuration_sequence_checker_);
-  event_log_->Log(rtc::MakeUnique<RtcEventAudioSendStreamConfig>(
-      CreateRtcLogStreamConfig(config)));
+  LOG(LS_INFO) << "Skip logging RtcEventAudioSendStreamConfig.";
 
   rtc::Optional<RtpState> suspended_rtp_state;
   {
@@ -658,8 +657,7 @@ webrtc::AudioReceiveStream* Call::CreateAudioReceiveStream(
     const webrtc::AudioReceiveStream::Config& config) {
   TRACE_EVENT0("webrtc", "Call::CreateAudioReceiveStream");
   RTC_DCHECK_CALLED_SEQUENTIALLY(&configuration_sequence_checker_);
-  event_log_->Log(rtc::MakeUnique<RtcEventAudioReceiveStreamConfig>(
-      CreateRtcLogStreamConfig(config)));
+  LOG(LS_INFO) << "Skip logging RtcEventAudioReceiveStreamConfig.";
   AudioReceiveStream* receive_stream = new AudioReceiveStream(
       &audio_receiver_controller_, transport_send_->packet_router(), config,
       config_.audio_state, event_log_);
@@ -717,11 +715,7 @@ webrtc::VideoSendStream* Call::CreateVideoSendStream(
   RTC_DCHECK_CALLED_SEQUENTIALLY(&configuration_sequence_checker_);
 
   video_send_delay_stats_->AddSsrcs(config);
-  for (size_t ssrc_index = 0; ssrc_index < config.rtp.ssrcs.size();
-       ++ssrc_index) {
-    event_log_->Log(rtc::MakeUnique<RtcEventVideoSendStreamConfig>(
-        CreateRtcLogStreamConfig(config, ssrc_index)));
-  }
+  LOG(LS_INFO) << "Skip logging RtcEventVideoSendStreamConfig.";
 
   // TODO(mflodman): Base the start bitrate on a current bandwidth estimate, if
   // the call has already started.
@@ -814,8 +808,7 @@ webrtc::VideoReceiveStream* Call::CreateVideoReceiveStream(
   }
   receive_stream->SignalNetworkState(video_network_state_);
   UpdateAggregateNetworkState();
-  event_log_->Log(rtc::MakeUnique<RtcEventVideoReceiveStreamConfig>(
-      CreateRtcLogStreamConfig(config)));
+  LOG(LS_INFO) << "Skip logging RtcEventVideoReceiveStreamConfig.";
   return receive_stream;
 }
 
@@ -874,8 +867,6 @@ FlexfecReceiveStream* Call::CreateFlexfecReceiveStream(
     receive_rtp_config_[config.remote_ssrc] =
         ReceiveRtpConfig(config.rtp_header_extensions, UseSendSideBwe(config));
   }
-
-  // TODO(brandtr): Store config in RtcEventLog here.
 
   return receive_stream;
 }
@@ -1292,10 +1283,8 @@ PacketReceiver::DeliveryStatus Call::DeliverRtcp(MediaType media_type,
   }
 
   if (rtcp_delivered) {
-    event_log_->Log(rtc::MakeUnique<RtcEventRtcpPacketIncoming>(
-        rtc::MakeArrayView(packet, length)));
+    LOG(LS_INFO) << "Skip logging RtcEventRtcpPacketIncoming.";
   }
-
   return rtcp_delivered ? DELIVERY_OK : DELIVERY_PACKET_ERROR;
 }
 
@@ -1344,8 +1333,7 @@ PacketReceiver::DeliveryStatus Call::DeliverRtp(MediaType media_type,
     if (audio_receiver_controller_.OnRtpPacket(parsed_packet)) {
       received_bytes_per_second_counter_.Add(static_cast<int>(length));
       received_audio_bytes_per_second_counter_.Add(static_cast<int>(length));
-      event_log_->Log(
-          rtc::MakeUnique<RtcEventRtpPacketIncoming>(parsed_packet));
+      LOG(LS_INFO) << "Skip logging RtcEventRtpPacketIncoming.";
       const int64_t arrival_time_ms = parsed_packet.arrival_time_ms();
       if (!first_received_rtp_audio_ms_) {
         first_received_rtp_audio_ms_.emplace(arrival_time_ms);
@@ -1357,8 +1345,7 @@ PacketReceiver::DeliveryStatus Call::DeliverRtp(MediaType media_type,
     if (video_receiver_controller_.OnRtpPacket(parsed_packet)) {
       received_bytes_per_second_counter_.Add(static_cast<int>(length));
       received_video_bytes_per_second_counter_.Add(static_cast<int>(length));
-      event_log_->Log(
-          rtc::MakeUnique<RtcEventRtpPacketIncoming>(parsed_packet));
+      LOG(LS_INFO) << "Skip logging RtcEventRtpPacketIncoming.";
       const int64_t arrival_time_ms = parsed_packet.arrival_time_ms();
       if (!first_received_rtp_video_ms_) {
         first_received_rtp_video_ms_.emplace(arrival_time_ms);

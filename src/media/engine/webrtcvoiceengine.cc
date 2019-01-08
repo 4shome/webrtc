@@ -28,7 +28,6 @@
 #include "media/engine/webrtcmediaengine.h"
 #include "media/engine/webrtcvoe.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
-#include "modules/audio_processing/aec_dump/aec_dump_factory.h"
 #include "modules/audio_processing/include/audio_processing.h"
 #include "rtc_base/arraysize.h"
 #include "rtc_base/base64.h"
@@ -679,24 +678,12 @@ void WebRtcVoiceEngine::UnregisterChannel(WebRtcVoiceMediaChannel* channel) {
 
 bool WebRtcVoiceEngine::StartAecDump(rtc::PlatformFile file,
                                      int64_t max_size_bytes) {
-  RTC_DCHECK(worker_thread_checker_.CalledOnValidThread());
-  auto aec_dump = webrtc::AecDumpFactory::Create(
-      file, max_size_bytes, low_priority_worker_queue_.get());
-  if (!aec_dump) {
-    return false;
-  }
-  apm()->AttachAecDump(std::move(aec_dump));
-  return true;
+  LOG(LS_INFO) << "Skip AEC dump.";
+  return false;
 }
 
 void WebRtcVoiceEngine::StartAecDump(const std::string& filename) {
-  RTC_DCHECK(worker_thread_checker_.CalledOnValidThread());
-
-  auto aec_dump = webrtc::AecDumpFactory::Create(
-      filename, -1, low_priority_worker_queue_.get());
-  if (aec_dump) {
-    apm()->AttachAecDump(std::move(aec_dump));
-  }
+  LOG(LS_INFO) << "Skip AEC dump.";
 }
 
 void WebRtcVoiceEngine::StopAecDump() {

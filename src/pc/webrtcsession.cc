@@ -520,6 +520,8 @@ WebRtcSession::WebRtcSession(
       this, &WebRtcSession::OnTransportControllerCandidatesRemoved);
   transport_controller_->SignalDtlsHandshakeError.connect(
       this, &WebRtcSession::OnTransportControllerDtlsHandshakeError);
+  transport_controller_->SignalSelectedCandidatePairChanged.connect(
+      this, &WebRtcSession::OnTransportControllerSelectedCandidatePairChanged);
 }
 
 WebRtcSession::~WebRtcSession() {
@@ -1587,6 +1589,14 @@ void WebRtcSession::OnTransportControllerDtlsHandshakeError(
     metrics_observer_->IncrementEnumCounter(
         webrtc::kEnumCounterDtlsHandshakeError, static_cast<int>(error),
         static_cast<int>(rtc::SSLHandshakeError::MAX_VALUE));
+  }
+}
+
+void WebRtcSession::OnTransportControllerSelectedCandidatePairChanged(
+    const cricket::Candidate& local, const cricket::Candidate& remote, bool ready) {
+  RTC_DCHECK(signaling_thread()->IsCurrent());
+  if (ice_observer_) {
+    ice_observer_->OnIceSelectedCandidatePairChanged(local, remote, ready);
   }
 }
 

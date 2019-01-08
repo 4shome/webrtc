@@ -20,7 +20,7 @@ namespace {
 
 class ScopedVideoEncoder : public webrtc::VideoEncoder {
  public:
-  ScopedVideoEncoder(WebRtcVideoEncoderFactory* factory,
+  ScopedVideoEncoder(WebRtcVideoEncoderFactory* factory, const std::string& id,
                      webrtc::VideoEncoder* encoder);
 
   int32_t InitEncode(const webrtc::VideoCodec* codec_settings,
@@ -40,17 +40,19 @@ class ScopedVideoEncoder : public webrtc::VideoEncoder {
   int32_t SetPeriodicKeyFrames(bool enable) override;
   bool SupportsNativeHandle() const override;
   const char* ImplementationName() const override;
+  uint32_t MaxBitrate() const override;
 
   ~ScopedVideoEncoder() override;
 
  private:
   WebRtcVideoEncoderFactory* factory_;
+  const std::string id_;
   webrtc::VideoEncoder* encoder_;
 };
 
-ScopedVideoEncoder::ScopedVideoEncoder(WebRtcVideoEncoderFactory* factory,
+ScopedVideoEncoder::ScopedVideoEncoder(WebRtcVideoEncoderFactory* factory, const std::string& id,
                                        webrtc::VideoEncoder* encoder)
-    : factory_(factory), encoder_(encoder) {}
+    : factory_(factory), id_(id), encoder_(encoder) {}
 
 int32_t ScopedVideoEncoder::InitEncode(const webrtc::VideoCodec* codec_settings,
                                        int32_t number_of_cores,
@@ -107,20 +109,24 @@ const char* ScopedVideoEncoder::ImplementationName() const {
   return encoder_->ImplementationName();
 }
 
+uint32_t ScopedVideoEncoder::MaxBitrate() const {
+  return encoder_->MaxBitrate();
+}
+
 ScopedVideoEncoder::~ScopedVideoEncoder() {
-  factory_->DestroyVideoEncoder(encoder_);
+  factory_->DestroyVideoEncoder(id_, encoder_);
 }
 
 }  // namespace
 
 std::unique_ptr<webrtc::VideoEncoder> CreateScopedVideoEncoder(
-    WebRtcVideoEncoderFactory* factory,
+    WebRtcVideoEncoderFactory* factory, const std::string& id,
     const VideoCodec& codec) {
-  webrtc::VideoEncoder* encoder = factory->CreateVideoEncoder(codec);
+  webrtc::VideoEncoder* encoder = factory->CreateVideoEncoder(id, codec);
   if (!encoder)
     return nullptr;
   return std::unique_ptr<webrtc::VideoEncoder>(
-      new ScopedVideoEncoder(factory, encoder));
+      new ScopedVideoEncoder(factory, id, encoder));
 }
 
 }  // namespace cricket

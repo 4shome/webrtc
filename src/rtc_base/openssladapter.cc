@@ -35,34 +35,6 @@
 #include "rtc_base/stringutils.h"
 #include "rtc_base/thread.h"
 
-#ifndef OPENSSL_IS_BORINGSSL
-
-// TODO: Use a nicer abstraction for mutex.
-
-#if defined(WEBRTC_WIN)
-  #define MUTEX_TYPE HANDLE
-#define MUTEX_SETUP(x) (x) = CreateMutex(nullptr, FALSE, nullptr)
-#define MUTEX_CLEANUP(x) CloseHandle(x)
-#define MUTEX_LOCK(x) WaitForSingleObject((x), INFINITE)
-#define MUTEX_UNLOCK(x) ReleaseMutex(x)
-#define THREAD_ID GetCurrentThreadId()
-#elif defined(WEBRTC_POSIX)
-  #define MUTEX_TYPE pthread_mutex_t
-  #define MUTEX_SETUP(x) pthread_mutex_init(&(x), nullptr)
-  #define MUTEX_CLEANUP(x) pthread_mutex_destroy(&(x))
-  #define MUTEX_LOCK(x) pthread_mutex_lock(&(x))
-  #define MUTEX_UNLOCK(x) pthread_mutex_unlock(&(x))
-  #define THREAD_ID pthread_self()
-#else
-  #error You must define mutex operations appropriate for your platform!
-#endif
-
-struct CRYPTO_dynlock_value {
-  MUTEX_TYPE mutex;
-};
-
-#endif  // #ifndef OPENSSL_IS_BORINGSSL
-
 //////////////////////////////////////////////////////////////////////
 // SocketBIO
 //////////////////////////////////////////////////////////////////////
@@ -74,47 +46,55 @@ static long socket_ctrl(BIO* h, int cmd, long arg1, void* arg2);
 static int socket_new(BIO* h);
 static int socket_free(BIO* data);
 
-// TODO(davidben): This should be const once BoringSSL is assumed.
-static BIO_METHOD methods_socket = {
-    BIO_TYPE_BIO, "socket",   socket_write, socket_read, socket_puts, 0,
-    socket_ctrl,  socket_new, socket_free,  nullptr,
-};
-
-static BIO_METHOD* BIO_s_socket2() { return(&methods_socket); }
+static BIO_METHOD* BIO_s_socket2() {
+  BIO_METHOD* meth = BIO_meth_new(BIO_get_new_index(), "socket");
+  BIO_meth_set_write(meth, socket_write);
+  BIO_meth_set_read(meth, socket_read);
+  BIO_meth_set_puts(meth, socket_puts);
+  BIO_meth_set_ctrl(meth, socket_ctrl);
+  BIO_meth_set_create(meth, socket_new);
+  BIO_meth_set_destroy(meth, socket_free);
+  return meth;
+}
 
 static BIO* BIO_new_socket(rtc::AsyncSocket* socket) {
-  BIO* ret = BIO_new(BIO_s_socket2());
+  BIO_METHOD* method = BIO_s_socket2();
+  BIO* ret = BIO_new(method);
   if (ret == nullptr) {
+    BIO_meth_free(method);
     return nullptr;
   }
-  ret->ptr = socket;
+  socket->extra_data = method;
+  BIO_set_data(ret, socket);
   return ret;
 }
 
 static int socket_new(BIO* b) {
-  b->shutdown = 0;
-  b->init = 1;
-  b->num = 0; // 1 means socket closed
-  b->ptr = 0;
+  BIO_set_shutdown(b, 0);
+  BIO_set_init(b, 1);
+  BIO_set_num(b, 0);
+  BIO_set_data(b, NULL);
   return 1;
 }
 
 static int socket_free(BIO* b) {
   if (b == nullptr)
     return 0;
+  rtc::AsyncSocket* socket = static_cast<rtc::AsyncSocket*>(BIO_get_data(b));
+  BIO_meth_free(static_cast<BIO_METHOD*>(socket->extra_data));
   return 1;
 }
 
 static int socket_read(BIO* b, char* out, int outl) {
   if (!out)
     return -1;
-  rtc::AsyncSocket* socket = static_cast<rtc::AsyncSocket*>(b->ptr);
+  rtc::AsyncSocket* socket = static_cast<rtc::AsyncSocket*>(BIO_get_data(b));
   BIO_clear_retry_flags(b);
   int result = socket->Recv(out, outl, nullptr);
   if (result > 0) {
     return result;
   } else if (result == 0) {
-    b->num = 1;
+    BIO_set_num(b, 1);
   } else if (socket->IsBlocking()) {
     BIO_set_retry_read(b);
   }
@@ -124,7 +104,7 @@ static int socket_read(BIO* b, char* out, int outl) {
 static int socket_write(BIO* b, const char* in, int inl) {
   if (!in)
     return -1;
-  rtc::AsyncSocket* socket = static_cast<rtc::AsyncSocket*>(b->ptr);
+  rtc::AsyncSocket* socket = static_cast<rtc::AsyncSocket*>(BIO_get_data(b));
   BIO_clear_retry_flags(b);
   int result = socket->Send(in, inl);
   if (result > 0) {
@@ -144,7 +124,7 @@ static long socket_ctrl(BIO* b, int cmd, long num, void* ptr) {
   case BIO_CTRL_RESET:
     return 0;
   case BIO_CTRL_EOF:
-    return b->num;
+    return BIO_get_num(b);
   case BIO_CTRL_WPENDING:
   case BIO_CTRL_PENDING:
     return 0;
@@ -176,51 +156,6 @@ static void LogSslError() {
 
 namespace rtc {
 
-#ifndef OPENSSL_IS_BORINGSSL
-
-// This array will store all of the mutexes available to OpenSSL.
-static MUTEX_TYPE* mutex_buf = nullptr;
-
-static void locking_function(int mode, int n, const char * file, int line) {
-  if (mode & CRYPTO_LOCK) {
-    MUTEX_LOCK(mutex_buf[n]);
-  } else {
-    MUTEX_UNLOCK(mutex_buf[n]);
-  }
-}
-
-static unsigned long id_function() {  // NOLINT
-  // Use old-style C cast because THREAD_ID's type varies with the platform,
-  // in some cases requiring static_cast, and in others requiring
-  // reinterpret_cast.
-  return (unsigned long)THREAD_ID; // NOLINT
-}
-
-static CRYPTO_dynlock_value* dyn_create_function(const char* file, int line) {
-  CRYPTO_dynlock_value* value = new CRYPTO_dynlock_value;
-  if (!value)
-    return nullptr;
-  MUTEX_SETUP(value->mutex);
-  return value;
-}
-
-static void dyn_lock_function(int mode, CRYPTO_dynlock_value* l,
-                              const char* file, int line) {
-  if (mode & CRYPTO_LOCK) {
-    MUTEX_LOCK(l->mutex);
-  } else {
-    MUTEX_UNLOCK(l->mutex);
-  }
-}
-
-static void dyn_destroy_function(CRYPTO_dynlock_value* l,
-                                 const char* file, int line) {
-  MUTEX_CLEANUP(l->mutex);
-  delete l;
-}
-
-#endif  // #ifndef OPENSSL_IS_BORINGSSL
-
 VerificationCallback OpenSSLAdapter::custom_verify_callback_ = nullptr;
 
 bool OpenSSLAdapter::InitializeSSL(VerificationCallback callback) {
@@ -238,40 +173,10 @@ bool OpenSSLAdapter::InitializeSSL(VerificationCallback callback) {
 }
 
 bool OpenSSLAdapter::InitializeSSLThread() {
-  // BoringSSL is doing the locking internally, so the callbacks are not used
-  // in this case (and are no-ops anyways).
-#ifndef OPENSSL_IS_BORINGSSL
-  mutex_buf = new MUTEX_TYPE[CRYPTO_num_locks()];
-  if (!mutex_buf)
-    return false;
-  for (int i = 0; i < CRYPTO_num_locks(); ++i)
-    MUTEX_SETUP(mutex_buf[i]);
-
-  // we need to cast our id_function to return an unsigned long -- pthread_t is
-  // a pointer
-  CRYPTO_set_id_callback(id_function);
-  CRYPTO_set_locking_callback(locking_function);
-  CRYPTO_set_dynlock_create_callback(dyn_create_function);
-  CRYPTO_set_dynlock_lock_callback(dyn_lock_function);
-  CRYPTO_set_dynlock_destroy_callback(dyn_destroy_function);
-#endif  // #ifndef OPENSSL_IS_BORINGSSL
   return true;
 }
 
 bool OpenSSLAdapter::CleanupSSL() {
-#ifndef OPENSSL_IS_BORINGSSL
-  if (!mutex_buf)
-    return false;
-  CRYPTO_set_id_callback(nullptr);
-  CRYPTO_set_locking_callback(nullptr);
-  CRYPTO_set_dynlock_create_callback(nullptr);
-  CRYPTO_set_dynlock_lock_callback(nullptr);
-  CRYPTO_set_dynlock_destroy_callback(nullptr);
-  for (int i = 0; i < CRYPTO_num_locks(); ++i)
-    MUTEX_CLEANUP(mutex_buf[i]);
-  delete [] mutex_buf;
-  mutex_buf = nullptr;
-#endif  // #ifndef OPENSSL_IS_BORINGSSL
   return true;
 }
 
@@ -438,8 +343,8 @@ int OpenSSLAdapter::BeginSSL() {
   }
 
   // Set a couple common TLS extensions; even though we don't use them yet.
-  SSL_enable_ocsp_stapling(ssl_);
-  SSL_enable_signed_cert_timestamps(ssl_);
+  //SSL_enable_ocsp_stapling(ssl_);
+  //SSL_enable_signed_cert_timestamps(ssl_);
 
   if (!alpn_protocols_.empty()) {
     std::string tls_alpn_string = TransformAlpnProtocols(alpn_protocols_);
@@ -1079,12 +984,7 @@ SSL_CTX* OpenSSLAdapter::CreateContext(SSLMode mode, bool enable_cache) {
   // (Default V1.0 to V1.2). However (D)TLSv1_2_client_method functions used
   // below in OpenSSL only support V1.2.
   SSL_CTX* ctx = nullptr;
-#ifdef OPENSSL_IS_BORINGSSL
   ctx = SSL_CTX_new(mode == SSL_MODE_DTLS ? DTLS_method() : TLS_method());
-#else
-  ctx = SSL_CTX_new(mode == SSL_MODE_DTLS ? DTLSv1_2_client_method()
-                                          : TLSv1_2_client_method());
-#endif  // OPENSSL_IS_BORINGSSL
   if (ctx == nullptr) {
     unsigned long error = ERR_get_error();  // NOLINT: type used by OpenSSL.
     LOG(LS_WARNING) << "SSL_CTX creation failed: "

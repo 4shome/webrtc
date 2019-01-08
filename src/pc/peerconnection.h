@@ -267,6 +267,8 @@ class PeerConnection : public PeerConnectionInterface,
   void OnIceCandidatesRemoved(
       const std::vector<cricket::Candidate>& candidates) override;
   void OnIceConnectionReceivingChange(bool receiving) override;
+  void OnIceSelectedCandidatePairChanged(
+      const cricket::Candidate& local, const cricket::Candidate& remote, bool ready) override;
 
   // Signals from WebRtcSession.
   void OnSessionStateChange(WebRtcSession* session, WebRtcSession::State state);

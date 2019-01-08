@@ -165,6 +165,8 @@ class TransportController : public sigslot::has_slots<>,
 
   sigslot::signal1<rtc::SSLHandshakeError> SignalDtlsHandshakeError;
 
+  sigslot::signal3<const Candidate&, const Candidate&, bool> SignalSelectedCandidatePairChanged;
+
  protected:
   // TODO(deadbeef): Get rid of these virtual methods. Used by
   // FakeTransportController currently, but FakeTransportController shouldn't
@@ -242,6 +244,10 @@ class TransportController : public sigslot::has_slots<>,
                                     const Candidates& candidates);
   void OnChannelRoleConflict_n(IceTransportInternal* channel);
   void OnChannelStateChanged_n(IceTransportInternal* channel);
+  void OnSelectedCandidatePairChanged(const Candidate& local, const Candidate& remote, bool ready);
+  void OnSelectedCandidatePairChanged_n(
+      IceTransportInternal* channel, CandidatePairInterface* candidate_pair, int last_packet_id,
+      bool ready);
 
   void UpdateAggregateStates_n();
 

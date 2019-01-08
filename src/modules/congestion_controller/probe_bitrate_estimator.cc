@@ -106,8 +106,7 @@ int ProbeBitrateEstimator::HandleProbeAndEstimateBitrate(
                  << "] [send interval: " << send_interval_ms << " ms]"
                  << " [receive interval: " << receive_interval_ms << " ms]";
     if (event_log_) {
-      event_log_->Log(rtc::MakeUnique<RtcEventProbeResultFailure>(
-          cluster_id, ProbeFailureReason::kInvalidSendReceiveInterval));
+      LOG(LS_INFO) << "Skip logging RtcEventProbeResultFailure.";
     }
     return -1;
   }
@@ -138,8 +137,7 @@ int ProbeBitrateEstimator::HandleProbeAndEstimateBitrate(
                  << send_bps / 1000 << " = " << ratio << " > kMaxValidRatio ("
                  << kMaxValidRatio << ")]";
     if (event_log_) {
-      event_log_->Log(rtc::MakeUnique<RtcEventProbeResultFailure>(
-          cluster_id, ProbeFailureReason::kInvalidSendReceiveRatio));
+      LOG(LS_INFO) << "Skip logging RtcEventProbeResultFailure.";
     }
     return -1;
   }
@@ -160,8 +158,7 @@ int ProbeBitrateEstimator::HandleProbeAndEstimateBitrate(
     res = kTargetUtilizationFraction * receive_bps;
   }
   if (event_log_) {
-    event_log_->Log(
-        rtc::MakeUnique<RtcEventProbeResultSuccess>(cluster_id, res));
+    LOG(LS_INFO) << "Skip logging RtcEventProbeResultSuccess.";
   }
   estimated_bitrate_bps_ = rtc::Optional<int>(res);
   return *estimated_bitrate_bps_;

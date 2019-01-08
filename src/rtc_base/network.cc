@@ -832,7 +832,7 @@ IPAddress BasicNetworkManager::QueryDefaultLocalAddress(int family) const {
         && socket->GetError() != EHOSTUNREACH) {
       // Ignore the expected case of "host/net unreachable" - which happens if
       // the network is V4- or V6-only.
-      LOG(LS_INFO) << "Connect failed with " << socket->GetError();
+      LOG(LS_VERBOSE) << "Connect failed with " << socket->GetError();
     }
     return IPAddress();
   }
