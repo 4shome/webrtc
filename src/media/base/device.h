@@ -11,6 +11,8 @@
 #ifndef MEDIA_BASE_DEVICE_H_
 #define MEDIA_BASE_DEVICE_H_
 
+#include <string>
+
 #include "rtc_base/stringencode.h"
 
 namespace cricket {
@@ -18,12 +20,8 @@ namespace cricket {
 // Used to represent an audio or video capture or render device.
 struct Device {
   Device() {}
-  Device(const std::string& name, int id)
-      : name(name),
-        id(rtc::ToString(id)) {
-  }
-  Device(const std::string& name, const std::string& id)
-      : name(name), id(id) {}
+  Device(const std::string& name, int id) : name(name), id(rtc::ToString(id)) {}
+  Device(const std::string& name, const std::string& id) : name(name), id(id) {}
 
   std::string name;
   std::string id;

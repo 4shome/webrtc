@@ -16,7 +16,6 @@
 #include <vector>
 
 #include "rtc_base/asyncinvoker.h"
-#include "rtc_base/basictypes.h"
 #include "rtc_base/bytebuffer.h"
 #include "rtc_base/callback.h"
 #include "rtc_base/constructormagic.h"
@@ -25,7 +24,6 @@
 #include "rtc_base/socketaddress.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_checker.h"
-#include "typedefs.h"  // NOLINT(build/include)
 
 namespace rtc {
 class AsyncPacketSocket;
@@ -69,7 +67,8 @@ class StunProber : public sigslot::has_slots<> {
   };
 
   struct Stats {
-    Stats() {}
+    Stats();
+    ~Stats();
 
     // |raw_num_request_sent| is the total number of requests
     // sent. |num_request_sent| is the count of requests against a server where
@@ -100,7 +99,7 @@ class StunProber : public sigslot::has_slots<> {
   StunProber(rtc::PacketSocketFactory* socket_factory,
              rtc::Thread* thread,
              const rtc::NetworkManager::NetworkList& networks);
-  virtual ~StunProber();
+  ~StunProber() override;
 
   // Begin performing the probe test against the |servers|. If
   // |shared_socket_mode| is false, each request will be done with a new socket.
@@ -153,17 +152,12 @@ class StunProber : public sigslot::has_slots<> {
   // AsyncCallback.
   class ObserverAdapter : public Observer {
    public:
+    ObserverAdapter();
+    ~ObserverAdapter() override;
+
     void set_callback(AsyncCallback callback) { callback_ = callback; }
-    void OnPrepared(StunProber* stunprober, Status status) {
-      if (status == SUCCESS) {
-        stunprober->Start(this);
-      } else {
-        callback_(stunprober, status);
-      }
-    }
-    void OnFinished(StunProber* stunprober, Status status) {
-      callback_(stunprober, status);
-    }
+    void OnPrepared(StunProber* stunprober, Status status) override;
+    void OnFinished(StunProber* stunprober, Status status) override;
 
    private:
     AsyncCallback callback_;

@@ -8,9 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <string.h>
+
+#include <X11/Xutil.h>
 #include <X11/extensions/Xcomposite.h>
 #include <X11/extensions/Xrender.h>
-#include <X11/Xutil.h>
 
 #include <utility>
 
@@ -26,6 +28,7 @@
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/scoped_ref_ptr.h"
+#include "rtc_base/trace_event.h"
 
 namespace webrtc {
 
@@ -79,7 +82,7 @@ WindowCapturerLinux::WindowCapturerLinux(const DesktopCaptureOptions& options)
       (major_version > 0 || minor_version >= 2)) {
     has_composite_extension_ = true;
   } else {
-    LOG(LS_INFO) << "Xcomposite extension not available or too old.";
+    RTC_LOG(LS_INFO) << "Xcomposite extension not available or too old.";
   }
 
   x_display_->AddEventHandler(ConfigureNotify, this);
@@ -90,15 +93,14 @@ WindowCapturerLinux::~WindowCapturerLinux() {
 }
 
 bool WindowCapturerLinux::GetSourceList(SourceList* sources) {
-  return GetWindowList(&atom_cache_,
-                       [this, sources](::Window window) {
-                         Source w;
-                         w.id = window;
-                         if (this->GetWindowTitle(window, &w.title)) {
-                           sources->push_back(w);
-                         }
-                         return true;
-                       });
+  return GetWindowList(&atom_cache_, [this, sources](::Window window) {
+    Source w;
+    w.id = window;
+    if (this->GetWindowTitle(window, &w.title)) {
+      sources->push_back(w);
+    }
+    return true;
+  });
 }
 
 bool WindowCapturerLinux::SelectSource(SourceId id) {
@@ -131,10 +133,10 @@ bool WindowCapturerLinux::FocusOnSelectedSource() {
   ::Window parent;
   ::Window root;
   // Find the root window to pass event to.
-  int status = XQueryTree(
-      display(), selected_window_, &root, &parent, &children, &num_children);
+  int status = XQueryTree(display(), selected_window_, &root, &parent,
+                          &children, &num_children);
   if (status == 0) {
-    LOG(LS_ERROR) << "Failed to query for the root window.";
+    RTC_LOG(LS_ERROR) << "Failed to query for the root window.";
     return false;
   }
 
@@ -161,11 +163,8 @@ bool WindowCapturerLinux::FocusOnSelectedSource() {
 
     memset(xev.xclient.data.l, 0, sizeof(xev.xclient.data.l));
 
-    XSendEvent(display(),
-               root,
-               False,
-               SubstructureRedirectMask | SubstructureNotifyMask,
-               &xev);
+    XSendEvent(display(), root, False,
+               SubstructureRedirectMask | SubstructureNotifyMask, &xev);
   }
   XFlush(display());
   return true;
@@ -179,8 +178,10 @@ void WindowCapturerLinux::Start(Callback* callback) {
 }
 
 void WindowCapturerLinux::CaptureFrame() {
+  TRACE_EVENT0("webrtc", "WindowCapturerLinux::CaptureFrame");
+
   if (!x_server_pixel_buffer_.IsWindowValid()) {
-    LOG(LS_INFO) << "The window is no longer valid.";
+    RTC_LOG(LS_ERROR) << "The window is no longer valid.";
     callback_->OnCaptureResult(Result::ERROR_PERMANENT, nullptr);
     return;
   }
@@ -191,7 +192,7 @@ void WindowCapturerLinux::CaptureFrame() {
     // Without the Xcomposite extension we capture when the whole window is
     // visible on screen and not covered by any other window. This is not
     // something we want so instead, just bail out.
-    LOG(LS_INFO) << "No Xcomposite extension detected.";
+    RTC_LOG(LS_ERROR) << "No Xcomposite extension detected.";
     callback_->OnCaptureResult(Result::ERROR_PERMANENT, nullptr);
     return;
   }
@@ -210,6 +211,7 @@ void WindowCapturerLinux::CaptureFrame() {
   x_server_pixel_buffer_.Synchronize();
   if (!x_server_pixel_buffer_.CaptureRect(DesktopRect::MakeSize(frame->size()),
                                           frame.get())) {
+    RTC_LOG(LS_WARNING) << "Temporarily failed to capture winodw.";
     callback_->OnCaptureResult(Result::ERROR_TEMPORARY, nullptr);
     return;
   }
@@ -223,7 +225,7 @@ void WindowCapturerLinux::CaptureFrame() {
 
 bool WindowCapturerLinux::IsOccluded(const DesktopVector& pos) {
   return window_finder_.GetWindowUnderPoint(pos) !=
-      static_cast<WindowId>(selected_window_);
+         static_cast<WindowId>(selected_window_);
 }
 
 bool WindowCapturerLinux::HandleXEvent(const XEvent& event) {
@@ -231,9 +233,10 @@ bool WindowCapturerLinux::HandleXEvent(const XEvent& event) {
     XConfigureEvent xce = event.xconfigure;
     if (xce.window == selected_window_) {
       if (!DesktopRectFromXAttributes(xce).equals(
-            x_server_pixel_buffer_.window_rect())) {
+              x_server_pixel_buffer_.window_rect())) {
         if (!x_server_pixel_buffer_.Init(display(), selected_window_)) {
-          LOG(LS_ERROR) << "Failed to initialize pixel buffer after resizing.";
+          RTC_LOG(LS_ERROR)
+              << "Failed to initialize pixel buffer after resizing.";
         }
       }
     }
@@ -253,12 +256,12 @@ bool WindowCapturerLinux::GetWindowTitle(::Window window, std::string* title) {
     if (status && window_name.value && window_name.nitems) {
       int cnt;
       char** list = nullptr;
-      status = Xutf8TextPropertyToTextList(display(), &window_name, &list,
-                                           &cnt);
+      status =
+          Xutf8TextPropertyToTextList(display(), &window_name, &list, &cnt);
       if (status >= Success && cnt && *list) {
         if (cnt > 1) {
-          LOG(LS_INFO) << "Window has " << cnt
-                       << " text properties, only using the first one.";
+          RTC_LOG(LS_INFO) << "Window has " << cnt
+                           << " text properties, only using the first one.";
         }
         *title = *list;
         result = true;

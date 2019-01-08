@@ -16,15 +16,11 @@
 #include "api/audio_codecs/L16/audio_encoder_L16.h"
 #include "api/audio_codecs/audio_encoder_factory_template.h"
 #include "api/audio_codecs/g711/audio_encoder_g711.h"
-#if WEBRTC_USE_BUILTIN_G722
-#include "api/audio_codecs/g722/audio_encoder_g722.h"  // nogncheck
-#endif
+#include "api/audio_codecs/g722/audio_encoder_g722.h"
 #if WEBRTC_USE_BUILTIN_ILBC
 #include "api/audio_codecs/ilbc/audio_encoder_ilbc.h"  // nogncheck
 #endif
-#if WEBRTC_USE_BUILTIN_ISAC
-#include "api/audio_codecs/isac/audio_encoder_isac.h"  // nogncheck
-#endif
+#include "api/audio_codecs/isac/audio_encoder_isac.h"
 #if WEBRTC_USE_BUILTIN_OPUS
 #include "api/audio_codecs/opus/audio_encoder_opus.h"  // nogncheck
 #endif
@@ -37,7 +33,8 @@ namespace {
 template <typename T>
 struct NotAdvertised {
   using Config = typename T::Config;
-  static rtc::Optional<Config> SdpToConfig(const SdpAudioFormat& audio_format) {
+  static absl::optional<Config> SdpToConfig(
+      const SdpAudioFormat& audio_format) {
     return T::SdpToConfig(audio_format);
   }
   static void AppendSupportedEncoders(std::vector<AudioCodecSpec>* specs) {
@@ -46,9 +43,11 @@ struct NotAdvertised {
   static AudioCodecInfo QueryAudioEncoder(const Config& config) {
     return T::QueryAudioEncoder(config);
   }
-  static std::unique_ptr<AudioEncoder> MakeAudioEncoder(const Config& config,
-                                                        int payload_type) {
-    return T::MakeAudioEncoder(config, payload_type);
+  static std::unique_ptr<AudioEncoder> MakeAudioEncoder(
+      const Config& config,
+      int payload_type,
+      absl::optional<AudioCodecPairId> codec_pair_id = absl::nullopt) {
+    return T::MakeAudioEncoder(config, payload_type, codec_pair_id);
   }
 };
 
@@ -61,13 +60,7 @@ rtc::scoped_refptr<AudioEncoderFactory> CreateBuiltinAudioEncoderFactory() {
       AudioEncoderOpus,
 #endif
 
-#if WEBRTC_USE_BUILTIN_ISAC
-      AudioEncoderIsac,
-#endif
-
-#if WEBRTC_USE_BUILTIN_G722
-      AudioEncoderG722,
-#endif
+      AudioEncoderIsac, AudioEncoderG722,
 
 #if WEBRTC_USE_BUILTIN_ILBC
       AudioEncoderIlbc,

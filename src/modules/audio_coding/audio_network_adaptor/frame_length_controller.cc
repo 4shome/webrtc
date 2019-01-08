@@ -25,7 +25,7 @@ int OverheadRateBps(size_t overhead_bytes_per_packet, int frame_length_ms) {
   return static_cast<int>(overhead_bytes_per_packet * 8 * 1000 /
                           frame_length_ms);
 }
-}
+}  // namespace
 
 FrameLengthController::Config::Config(
     const std::vector<int>& encoder_frame_lengths_ms,
@@ -82,7 +82,7 @@ void FrameLengthController::MakeDecision(AudioEncoderRuntimeConfig* config) {
     prev_decision_increase_ = false;
   }
   config->last_fl_change_increase = prev_decision_increase_;
-  config->frame_length_ms = rtc::Optional<int>(*frame_length_ms_);
+  config->frame_length_ms = *frame_length_ms_;
 }
 
 FrameLengthController::Config::FrameLengthChange::FrameLengthChange(

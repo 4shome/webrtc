@@ -10,6 +10,7 @@
 
 #include "media/engine/nullwebrtcvideoengine.h"
 #include "media/engine/webrtcvoiceengine.h"
+#include "modules/audio_device/include/mock_audio_device.h"
 #include "modules/audio_processing/include/audio_processing.h"
 #include "test/gtest.h"
 #include "test/mock_audio_decoder_factory.h"
@@ -31,15 +32,16 @@ class WebRtcMediaEngineNullVideo
                                   audio_encoder_factory,
                                   audio_decoder_factory,
                                   nullptr,
-                                  webrtc::AudioProcessing::Create()),
+                                  webrtc::AudioProcessingBuilder().Create()),
             std::forward_as_tuple()) {}
 };
 
 // Simple test to check if NullWebRtcVideoEngine implements the methods
 // required by CompositeMediaEngine.
 TEST(NullWebRtcVideoEngineTest, CheckInterface) {
+  testing::NiceMock<webrtc::test::MockAudioDeviceModule> adm;
   WebRtcMediaEngineNullVideo engine(
-      nullptr, webrtc::MockAudioEncoderFactory::CreateUnusedFactory(),
+      &adm, webrtc::MockAudioEncoderFactory::CreateUnusedFactory(),
       webrtc::MockAudioDecoderFactory::CreateUnusedFactory());
   EXPECT_TRUE(engine.Init());
 }

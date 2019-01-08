@@ -21,8 +21,9 @@
 namespace cricket {
 
 TransportDescriptionFactory::TransportDescriptionFactory()
-    : secure_(SEC_DISABLED) {
-}
+    : secure_(SEC_DISABLED) {}
+
+TransportDescriptionFactory::~TransportDescriptionFactory() = default;
 
 TransportDescription* TransportDescriptionFactory::CreateOffer(
     const TransportOptions& options,
@@ -61,8 +62,8 @@ TransportDescription* TransportDescriptionFactory::CreateAnswer(
     const TransportDescription* current_description) const {
   // TODO(juberti): Figure out why we get NULL offers, and fix this upstream.
   if (!offer) {
-    LOG(LS_WARNING) << "Failed to create TransportDescription answer " <<
-        "because offer is NULL";
+    RTC_LOG(LS_WARNING) << "Failed to create TransportDescription answer "
+                           "because offer is NULL";
     return NULL;
   }
 
@@ -87,8 +88,9 @@ TransportDescription* TransportDescriptionFactory::CreateAnswer(
     if (secure_ == SEC_ENABLED || secure_ == SEC_REQUIRED) {
       // Fail if we can't create the fingerprint.
       // Setting DTLS role to active.
-      ConnectionRole role = (options.prefer_passive_role) ?
-          CONNECTIONROLE_PASSIVE : CONNECTIONROLE_ACTIVE;
+      ConnectionRole role = (options.prefer_passive_role)
+                                ? CONNECTIONROLE_PASSIVE
+                                : CONNECTIONROLE_ACTIVE;
 
       if (!SetSecurityInfo(desc.get(), role)) {
         return NULL;
@@ -96,18 +98,18 @@ TransportDescription* TransportDescriptionFactory::CreateAnswer(
     }
   } else if (require_transport_attributes && secure_ == SEC_REQUIRED) {
     // We require DTLS, but the other side didn't offer it. Fail.
-    LOG(LS_WARNING) << "Failed to create TransportDescription answer "
-                       "because of incompatible security settings";
+    RTC_LOG(LS_WARNING) << "Failed to create TransportDescription answer "
+                           "because of incompatible security settings";
     return NULL;
   }
 
   return desc.release();
 }
 
-bool TransportDescriptionFactory::SetSecurityInfo(
-    TransportDescription* desc, ConnectionRole role) const {
+bool TransportDescriptionFactory::SetSecurityInfo(TransportDescription* desc,
+                                                  ConnectionRole role) const {
   if (!certificate_) {
-    LOG(LS_ERROR) << "Cannot create identity digest with no certificate";
+    RTC_LOG(LS_ERROR) << "Cannot create identity digest with no certificate";
     return false;
   }
 

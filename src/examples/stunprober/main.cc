@@ -12,9 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <iostream>
 #include <map>
 #include <memory>
+#include <sstream>  // no-presubmit-check TODO(webrtc:8982)
 
 #include "p2p/base/basicpacketsocketfactory.h"
 #include "p2p/stunprober/stunprober.h"
@@ -25,6 +25,7 @@
 #include "rtc_base/nethelpers.h"
 #include "rtc_base/network.h"
 #include "rtc_base/ssladapter.h"
+#include "rtc_base/strings/string_builder.h"
 #include "rtc_base/stringutils.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/timeutils.h"
@@ -66,30 +67,32 @@ const char* PrintNatType(stunprober::NatType type) {
 void PrintStats(StunProber* prober) {
   StunProber::Stats stats;
   if (!prober->GetStats(&stats)) {
-    LOG(LS_WARNING) << "Results are inconclusive.";
+    RTC_LOG(LS_WARNING) << "Results are inconclusive.";
     return;
   }
 
-  LOG(LS_INFO) << "Shared Socket Mode: " << stats.shared_socket_mode;
-  LOG(LS_INFO) << "Requests sent: " << stats.num_request_sent;
-  LOG(LS_INFO) << "Responses received: " << stats.num_response_received;
-  LOG(LS_INFO) << "Target interval (ns): " << stats.target_request_interval_ns;
-  LOG(LS_INFO) << "Actual interval (ns): " << stats.actual_request_interval_ns;
-  LOG(LS_INFO) << "NAT Type: " << PrintNatType(stats.nat_type);
-  LOG(LS_INFO) << "Host IP: " << stats.host_ip;
-  LOG(LS_INFO) << "Server-reflexive ips: ";
+  RTC_LOG(LS_INFO) << "Shared Socket Mode: " << stats.shared_socket_mode;
+  RTC_LOG(LS_INFO) << "Requests sent: " << stats.num_request_sent;
+  RTC_LOG(LS_INFO) << "Responses received: " << stats.num_response_received;
+  RTC_LOG(LS_INFO) << "Target interval (ns): "
+                   << stats.target_request_interval_ns;
+  RTC_LOG(LS_INFO) << "Actual interval (ns): "
+                   << stats.actual_request_interval_ns;
+  RTC_LOG(LS_INFO) << "NAT Type: " << PrintNatType(stats.nat_type);
+  RTC_LOG(LS_INFO) << "Host IP: " << stats.host_ip;
+  RTC_LOG(LS_INFO) << "Server-reflexive ips: ";
   for (auto& ip : stats.srflx_addrs) {
-    LOG(LS_INFO) << "\t" << ip;
+    RTC_LOG(LS_INFO) << "\t" << ip;
   }
 
-  LOG(LS_INFO) << "Success Precent: " << stats.success_percent;
-  LOG(LS_INFO) << "Response Latency:" << stats.average_rtt_ms;
+  RTC_LOG(LS_INFO) << "Success Precent: " << stats.success_percent;
+  RTC_LOG(LS_INFO) << "Response Latency:" << stats.average_rtt_ms;
 }
 
 void StopTrial(rtc::Thread* thread, StunProber* prober, int result) {
   thread->Quit();
   if (prober) {
-    LOG(LS_INFO) << "Result: " << result;
+    RTC_LOG(LS_INFO) << "Result: " << result;
     if (result == StunProber::SUCCESS) {
       PrintStats(prober);
     }
@@ -98,7 +101,7 @@ void StopTrial(rtc::Thread* thread, StunProber* prober, int result) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char* argv[]) {
   rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, true);
   if (FLAG_help) {
     rtc::FlagList::Print(nullptr, false);
@@ -111,7 +114,7 @@ int main(int argc, char** argv) {
   while (getline(servers, server, ',')) {
     rtc::SocketAddress addr;
     if (!addr.FromString(server)) {
-      LOG(LS_ERROR) << "Parsing " << server << " failed.";
+      RTC_LOG(LS_ERROR) << "Parsing " << server << " failed.";
       return -1;
     }
     server_addresses.push_back(addr);

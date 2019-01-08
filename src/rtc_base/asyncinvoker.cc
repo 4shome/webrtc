@@ -67,6 +67,10 @@ void AsyncInvoker::Flush(Thread* thread, uint32_t id /*= MQID_ANY*/) {
   }
 }
 
+void AsyncInvoker::Clear() {
+  MessageQueueManager::Clear(this);
+}
+
 void AsyncInvoker::DoInvoke(const Location& posted_from,
                             Thread* thread,
                             std::unique_ptr<AsyncClosure> closure,
@@ -76,7 +80,7 @@ void AsyncInvoker::DoInvoke(const Location& posted_from,
     // tasks that AsyncInvoke other tasks. But otherwise it indicates a race
     // between a thread destroying the AsyncInvoker and a thread still trying
     // to use it.
-    LOG(LS_WARNING) << "Tried to invoke while destroying the invoker.";
+    RTC_LOG(LS_WARNING) << "Tried to invoke while destroying the invoker.";
     return;
   }
   thread->Post(posted_from, this, id,
@@ -90,7 +94,7 @@ void AsyncInvoker::DoInvokeDelayed(const Location& posted_from,
                                    uint32_t id) {
   if (destroying_.load(std::memory_order_relaxed)) {
     // See above comment.
-    LOG(LS_WARNING) << "Tried to invoke while destroying the invoker.";
+    RTC_LOG(LS_WARNING) << "Tried to invoke while destroying the invoker.";
     return;
   }
   thread->PostDelayed(posted_from, delay_ms, this, id,
@@ -102,8 +106,7 @@ GuardedAsyncInvoker::GuardedAsyncInvoker() : thread_(Thread::Current()) {
                                         &GuardedAsyncInvoker::ThreadDestroyed);
 }
 
-GuardedAsyncInvoker::~GuardedAsyncInvoker() {
-}
+GuardedAsyncInvoker::~GuardedAsyncInvoker() {}
 
 bool GuardedAsyncInvoker::Flush(uint32_t id) {
   CritScope cs(&crit_);

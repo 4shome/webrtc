@@ -13,7 +13,7 @@
 #include <utility>
 
 #include "rtc_base/checks.h"
-#include "rtc_base/safe_conversions.h"
+#include "rtc_base/numerics/safe_conversions.h"
 
 namespace webrtc {
 namespace test {
@@ -27,13 +27,15 @@ EncodeNetEqInput::EncodeNetEqInput(std::unique_ptr<Generator> generator,
   CreatePacket();
 }
 
-rtc::Optional<int64_t> EncodeNetEqInput::NextPacketTime() const {
+EncodeNetEqInput::~EncodeNetEqInput() = default;
+
+absl::optional<int64_t> EncodeNetEqInput::NextPacketTime() const {
   RTC_DCHECK(packet_data_);
-  return rtc::Optional<int64_t>(static_cast<int64_t>(packet_data_->time_ms));
+  return static_cast<int64_t>(packet_data_->time_ms);
 }
 
-rtc::Optional<int64_t> EncodeNetEqInput::NextOutputEventTime() const {
-  return rtc::Optional<int64_t>(next_output_event_ms_);
+absl::optional<int64_t> EncodeNetEqInput::NextOutputEventTime() const {
+  return next_output_event_ms_;
 }
 
 std::unique_ptr<NetEqInput::PacketData> EncodeNetEqInput::PopPacket() {
@@ -50,9 +52,13 @@ void EncodeNetEqInput::AdvanceOutputEvent() {
   next_output_event_ms_ += kOutputPeriodMs;
 }
 
-rtc::Optional<RTPHeader> EncodeNetEqInput::NextHeader() const {
+bool EncodeNetEqInput::ended() const {
+  return next_output_event_ms_ > input_duration_ms_;
+}
+
+absl::optional<RTPHeader> EncodeNetEqInput::NextHeader() const {
   RTC_DCHECK(packet_data_);
-  return rtc::Optional<RTPHeader>(packet_data_->header);
+  return packet_data_->header;
 }
 
 void EncodeNetEqInput::CreatePacket() {

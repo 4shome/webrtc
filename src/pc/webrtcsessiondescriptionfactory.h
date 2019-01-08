@@ -12,25 +12,18 @@
 #define PC_WEBRTCSESSIONDESCRIPTIONFACTORY_H_
 
 #include <memory>
+#include <queue>
+#include <string>
 
-#include "api/peerconnectioninterface.h"
 #include "p2p/base/transportdescriptionfactory.h"
 #include "pc/mediasession.h"
+#include "pc/peerconnectioninternal.h"
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/messagehandler.h"
 #include "rtc_base/rtccertificate.h"
 #include "rtc_base/rtccertificategenerator.h"
 
-namespace cricket {
-class ChannelManager;
-class TransportDescriptionFactory;
-}  // namespace cricket
-
 namespace webrtc {
-class CreateSessionDescriptionObserver;
-class MediaConstraintsInterface;
-class SessionDescriptionInterface;
-class WebRtcSession;
 
 // DTLS certificate request callback class.
 class WebRtcCertificateGeneratorCallback
@@ -53,13 +46,10 @@ struct CreateSessionDescriptionRequest {
     kAnswer,
   };
 
-  CreateSessionDescriptionRequest(
-      Type type,
-      CreateSessionDescriptionObserver* observer,
-      const cricket::MediaSessionOptions& options)
-      : type(type),
-        observer(observer),
-        options(options) {}
+  CreateSessionDescriptionRequest(Type type,
+                                  CreateSessionDescriptionObserver* observer,
+                                  const cricket::MediaSessionOptions& options)
+      : type(type), observer(observer), options(options) {}
 
   Type type;
   rtc::scoped_refptr<CreateSessionDescriptionObserver> observer;
@@ -74,20 +64,16 @@ struct CreateSessionDescriptionRequest {
 class WebRtcSessionDescriptionFactory : public rtc::MessageHandler,
                                         public sigslot::has_slots<> {
  public:
-  // If |certificate_generator| is not null, DTLS is enabled and a default
-  // certificate is generated asynchronously; otherwise DTLS is disabled.
+  // Can specify either a |cert_generator| or |certificate| to enable DTLS. If
+  // a certificate generator is given, starts generating the certificate
+  // asynchronously. If a certificate is given, will use that for identifying
+  // over DTLS. If neither is specified, DTLS is disabled.
   WebRtcSessionDescriptionFactory(
       rtc::Thread* signaling_thread,
       cricket::ChannelManager* channel_manager,
-      WebRtcSession* session,
+      PeerConnectionInternal* pc,
       const std::string& session_id,
-      std::unique_ptr<rtc::RTCCertificateGeneratorInterface> cert_generator);
-  // Construct with DTLS enabled using the specified |certificate|.
-  WebRtcSessionDescriptionFactory(
-      rtc::Thread* signaling_thread,
-      cricket::ChannelManager* channel_manager,
-      WebRtcSession* session,
-      const std::string& session_id,
+      std::unique_ptr<rtc::RTCCertificateGeneratorInterface> cert_generator,
       const rtc::scoped_refptr<rtc::RTCCertificate>& certificate);
   virtual ~WebRtcSessionDescriptionFactory();
 
@@ -126,16 +112,6 @@ class WebRtcSessionDescriptionFactory : public rtc::MessageHandler,
     CERTIFICATE_FAILED,
   };
 
-  // If |certificate_generator| or |certificate| is not null DTLS is enabled,
-  // otherwise DTLS is disabled.
-  WebRtcSessionDescriptionFactory(
-      rtc::Thread* signaling_thread,
-      cricket::ChannelManager* channel_manager,
-      WebRtcSession* session,
-      const std::string& session_id,
-      std::unique_ptr<rtc::RTCCertificateGeneratorInterface> cert_generator,
-      const rtc::scoped_refptr<rtc::RTCCertificate>& certificate);
-
   // MessageHandler implementation.
   virtual void OnMessage(rtc::Message* msg);
 
@@ -148,7 +124,7 @@ class WebRtcSessionDescriptionFactory : public rtc::MessageHandler,
       const std::string& error);
   void PostCreateSessionDescriptionSucceeded(
       CreateSessionDescriptionObserver* observer,
-      SessionDescriptionInterface* description);
+      std::unique_ptr<SessionDescriptionInterface> description);
 
   void OnCertificateRequestFailed();
   void SetCertificate(
@@ -161,8 +137,9 @@ class WebRtcSessionDescriptionFactory : public rtc::MessageHandler,
   cricket::MediaSessionDescriptionFactory session_desc_factory_;
   uint64_t session_version_;
   const std::unique_ptr<rtc::RTCCertificateGeneratorInterface> cert_generator_;
-  // TODO(jiayl): remove the dependency on session once bug 2264 is fixed.
-  WebRtcSession* const session_;
+  // TODO(jiayl): remove the dependency on peer connection once bug 2264 is
+  // fixed.
+  PeerConnectionInternal* const pc_;
   const std::string session_id_;
   CertificateRequestState certificate_request_state_;
 

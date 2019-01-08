@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "api/call/transport.h"
+#include "api/rtp_headers.h"
 #include "api/rtpparameters.h"
 #include "call/rtp_packet_sink_interface.h"
 #include "common_types.h"  // NOLINT(build/include)
@@ -35,10 +36,9 @@ class FlexfecReceiveStream : public RtpPacketSinkInterface {
   };
 
   struct Config {
-    explicit Config(Transport* rtcp_send_transport)
-        : rtcp_send_transport(rtcp_send_transport) {
-      RTC_DCHECK(rtcp_send_transport);
-    }
+    explicit Config(Transport* rtcp_send_transport);
+    Config(const Config&);
+    ~Config();
 
     std::string ToString() const;
 

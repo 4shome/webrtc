@@ -39,6 +39,7 @@ class PacketLossEstimator {
  public:
   explicit PacketLossEstimator(int64_t consider_lost_after_ms,
                                int64_t forget_after_ms);
+  ~PacketLossEstimator();
 
   // Registers that a message with the given |id| was sent at |sent_time|.
   void ExpectResponse(std::string id, int64_t sent_time);
@@ -54,9 +55,6 @@ class PacketLossEstimator {
   double get_response_rate() const { return response_rate_; }
 
   std::size_t tracked_packet_count_for_testing() const;
-
-  // Output tracked packet state as a string.
-  std::string TrackedPacketsStringForTesting(std::size_t max) const;
 
  private:
   struct PacketInfo {

@@ -11,42 +11,59 @@
 #include "pc/srtpfilter.h"
 
 #include <string.h>
-
 #include <algorithm>
+#include <utility>
 
 #include "media/base/rtputils.h"
 #include "pc/srtpsession.h"
-#include "rtc_base/base64.h"
 #include "rtc_base/byteorder.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/stringencode.h"
+#include "rtc_base/third_party/base64/base64.h"
 #include "rtc_base/timeutils.h"
+#include "rtc_base/zero_memory.h"
 
 namespace cricket {
 
-// NOTE: This is called from ChannelManager D'tor.
-void ShutdownSrtp() {
-  // If srtp_dealloc is not executed then this will clear all existing sessions.
-  // This should be called when application is shutting down.
-  SrtpSession::Terminate();
-}
+SrtpFilter::SrtpFilter() {}
 
-SrtpFilter::SrtpFilter() {
-}
-
-SrtpFilter::~SrtpFilter() {
-}
+SrtpFilter::~SrtpFilter() {}
 
 bool SrtpFilter::IsActive() const {
   return state_ >= ST_ACTIVE;
 }
 
+bool SrtpFilter::Process(const std::vector<CryptoParams>& cryptos,
+                         webrtc::SdpType type,
+                         ContentSource source) {
+  bool ret = false;
+  switch (type) {
+    case webrtc::SdpType::kOffer:
+      ret = SetOffer(cryptos, source);
+      break;
+    case webrtc::SdpType::kPrAnswer:
+      ret = SetProvisionalAnswer(cryptos, source);
+      break;
+    case webrtc::SdpType::kAnswer:
+      ret = SetAnswer(cryptos, source);
+      break;
+    default:
+      break;
+  }
+
+  if (!ret) {
+    return false;
+  }
+
+  return true;
+}
+
 bool SrtpFilter::SetOffer(const std::vector<CryptoParams>& offer_params,
                           ContentSource source) {
   if (!ExpectOffer(source)) {
-     LOG(LS_ERROR) << "Wrong state to update SRTP offer";
-     return false;
+    RTC_LOG(LS_ERROR) << "Wrong state to update SRTP offer";
+    return false;
   }
   return StoreParams(offer_params, source);
 }
@@ -63,10 +80,9 @@ bool SrtpFilter::SetProvisionalAnswer(
 }
 
 bool SrtpFilter::ExpectOffer(ContentSource source) {
-  return ((state_ == ST_INIT) ||
-          (state_ == ST_ACTIVE) ||
-          (state_  == ST_SENTOFFER && source == CS_LOCAL) ||
-          (state_  == ST_SENTUPDATEDOFFER && source == CS_LOCAL) ||
+  return ((state_ == ST_INIT) || (state_ == ST_ACTIVE) ||
+          (state_ == ST_SENTOFFER && source == CS_LOCAL) ||
+          (state_ == ST_SENTUPDATEDOFFER && source == CS_LOCAL) ||
           (state_ == ST_RECEIVEDOFFER && source == CS_REMOTE) ||
           (state_ == ST_RECEIVEDUPDATEDOFFER && source == CS_REMOTE));
 }
@@ -98,7 +114,7 @@ bool SrtpFilter::DoSetAnswer(const std::vector<CryptoParams>& answer_params,
                              ContentSource source,
                              bool final) {
   if (!ExpectAnswer(source)) {
-    LOG(LS_ERROR) << "Invalid state for SRTP answer";
+    RTC_LOG(LS_ERROR) << "Invalid state for SRTP answer";
     return false;
   }
 
@@ -111,8 +127,8 @@ bool SrtpFilter::DoSetAnswer(const std::vector<CryptoParams>& answer_params,
     } else {
       // Need to wait for the final answer to decide if
       // we should go to Active state.
-      state_ = (source == CS_LOCAL) ? ST_SENTPRANSWER_NO_CRYPTO :
-                                      ST_RECEIVEDPRANSWER_NO_CRYPTO;
+      state_ = (source == CS_LOCAL) ? ST_SENTPRANSWER_NO_CRYPTO
+                                    : ST_RECEIVEDPRANSWER_NO_CRYPTO;
       return true;
     }
   }
@@ -134,8 +150,7 @@ bool SrtpFilter::DoSetAnswer(const std::vector<CryptoParams>& answer_params,
     offer_params_.clear();
     state_ = ST_ACTIVE;
   } else {
-    state_ =
-        (source == CS_LOCAL) ? ST_SENTPRANSWER : ST_RECEIVEDPRANSWER;
+    state_ = (source == CS_LOCAL) ? ST_SENTPRANSWER : ST_RECEIVEDPRANSWER;
   }
   return true;
 }
@@ -162,7 +177,7 @@ bool SrtpFilter::NegotiateParams(const std::vector<CryptoParams>& answer_params,
   }
 
   if (!ret) {
-    LOG(LS_WARNING) << "Invalid parameters in SRTP answer";
+    RTC_LOG(LS_WARNING) << "Invalid parameters in SRTP answer";
   }
   return ret;
 }
@@ -171,8 +186,8 @@ bool SrtpFilter::ResetParams() {
   offer_params_.clear();
   applied_send_params_ = CryptoParams();
   applied_recv_params_ = CryptoParams();
-  send_cipher_suite_ = rtc::Optional<int>();
-  recv_cipher_suite_ = rtc::Optional<int>();
+  send_cipher_suite_ = absl::nullopt;
+  recv_cipher_suite_ = absl::nullopt;
   send_key_.Clear();
   recv_key_.Clear();
   state_ = ST_INIT;
@@ -182,29 +197,30 @@ bool SrtpFilter::ResetParams() {
 bool SrtpFilter::ApplySendParams(const CryptoParams& send_params) {
   if (applied_send_params_.cipher_suite == send_params.cipher_suite &&
       applied_send_params_.key_params == send_params.key_params) {
-    LOG(LS_INFO) << "Applying the same SRTP send parameters again. No-op.";
+    RTC_LOG(LS_INFO) << "Applying the same SRTP send parameters again. No-op.";
 
     // We do not want to reset the ROC if the keys are the same. So just return.
     return true;
   }
 
-  send_cipher_suite_ = rtc::Optional<int>(
-      rtc::SrtpCryptoSuiteFromName(send_params.cipher_suite));
+  send_cipher_suite_ = rtc::SrtpCryptoSuiteFromName(send_params.cipher_suite);
   if (send_cipher_suite_ == rtc::SRTP_INVALID_CRYPTO_SUITE) {
-    LOG(LS_WARNING) << "Unknown crypto suite(s) received:"
-                    << " send cipher_suite " << send_params.cipher_suite;
+    RTC_LOG(LS_WARNING) << "Unknown crypto suite(s) received:"
+                           " send cipher_suite "
+                        << send_params.cipher_suite;
     return false;
   }
 
   int send_key_len, send_salt_len;
   if (!rtc::GetSrtpKeyAndSaltLengths(*send_cipher_suite_, &send_key_len,
                                      &send_salt_len)) {
-    LOG(LS_WARNING) << "Could not get lengths for crypto suite(s):"
-                    << " send cipher_suite " << send_params.cipher_suite;
+    RTC_LOG(LS_WARNING) << "Could not get lengths for crypto suite(s):"
+                           " send cipher_suite "
+                        << send_params.cipher_suite;
     return false;
   }
 
-  send_key_ = rtc::Buffer(send_key_len + send_salt_len);
+  send_key_ = rtc::ZeroOnFreeBuffer<uint8_t>(send_key_len + send_salt_len);
   return ParseKeyParams(send_params.key_params, send_key_.data(),
                         send_key_.size());
 }
@@ -212,29 +228,30 @@ bool SrtpFilter::ApplySendParams(const CryptoParams& send_params) {
 bool SrtpFilter::ApplyRecvParams(const CryptoParams& recv_params) {
   if (applied_recv_params_.cipher_suite == recv_params.cipher_suite &&
       applied_recv_params_.key_params == recv_params.key_params) {
-    LOG(LS_INFO) << "Applying the same SRTP recv parameters again. No-op.";
+    RTC_LOG(LS_INFO) << "Applying the same SRTP recv parameters again. No-op.";
 
     // We do not want to reset the ROC if the keys are the same. So just return.
     return true;
   }
 
-  recv_cipher_suite_ = rtc::Optional<int>(
-      rtc::SrtpCryptoSuiteFromName(recv_params.cipher_suite));
+  recv_cipher_suite_ = rtc::SrtpCryptoSuiteFromName(recv_params.cipher_suite);
   if (recv_cipher_suite_ == rtc::SRTP_INVALID_CRYPTO_SUITE) {
-    LOG(LS_WARNING) << "Unknown crypto suite(s) received:"
-                    << " recv cipher_suite " << recv_params.cipher_suite;
+    RTC_LOG(LS_WARNING) << "Unknown crypto suite(s) received:"
+                           " recv cipher_suite "
+                        << recv_params.cipher_suite;
     return false;
   }
 
   int recv_key_len, recv_salt_len;
   if (!rtc::GetSrtpKeyAndSaltLengths(*recv_cipher_suite_, &recv_key_len,
                                      &recv_salt_len)) {
-    LOG(LS_WARNING) << "Could not get lengths for crypto suite(s):"
-                    << " recv cipher_suite " << recv_params.cipher_suite;
+    RTC_LOG(LS_WARNING) << "Could not get lengths for crypto suite(s):"
+                           " recv cipher_suite "
+                        << recv_params.cipher_suite;
     return false;
   }
 
-  recv_key_ = rtc::Buffer(recv_key_len + recv_salt_len);
+  recv_key_ = rtc::ZeroOnFreeBuffer<uint8_t>(recv_key_len + recv_salt_len);
   return ParseKeyParams(recv_params.key_params, recv_key_.data(),
                         recv_key_.size());
 }
@@ -258,6 +275,9 @@ bool SrtpFilter::ParseKeyParams(const std::string& key_params,
   }
 
   memcpy(key, key_str.c_str(), len);
+  // TODO(bugs.webrtc.org/8905): Switch to ZeroOnFreeBuffer for storing
+  // sensitive data.
+  rtc::ExplicitZeroMemory(&key_str[0], key_str.size());
   return true;
 }
 

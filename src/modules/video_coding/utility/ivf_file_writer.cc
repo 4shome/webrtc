@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 
+#include "api/video_codecs/video_codec.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -25,7 +26,7 @@ namespace webrtc {
 const size_t kIvfHeaderSize = 32;
 
 IvfFileWriter::IvfFileWriter(rtc::File file, size_t byte_limit)
-    : codec_type_(kVideoCodecUnknown),
+    : codec_type_(kVideoCodecGeneric),
       bytes_written_(0),
       byte_limit_(byte_limit),
       num_frames_(0),
@@ -50,7 +51,7 @@ std::unique_ptr<IvfFileWriter> IvfFileWriter::Wrap(rtc::File file,
 
 bool IvfFileWriter::WriteHeader() {
   if (!file_.Seek(0)) {
-    LOG(LS_WARNING) << "Unable to rewind ivf output file.";
+    RTC_LOG(LS_WARNING) << "Unable to rewind ivf output file.";
     return false;
   }
 
@@ -82,7 +83,7 @@ bool IvfFileWriter::WriteHeader() {
       ivf_header[11] = '4';
       break;
     default:
-      LOG(LS_ERROR) << "Unknown CODEC type: " << codec_type_;
+      RTC_LOG(LS_ERROR) << "Unknown CODEC type: " << codec_type_;
       return false;
   }
 
@@ -98,7 +99,7 @@ bool IvfFileWriter::WriteHeader() {
   ByteWriter<uint32_t>::WriteLittleEndian(&ivf_header[28], 0);  // Reserved.
 
   if (file_.Write(ivf_header, kIvfHeaderSize) < kIvfHeaderSize) {
-    LOG(LS_ERROR) << "Unable to write IVF header for ivf output file.";
+    RTC_LOG(LS_ERROR) << "Unable to write IVF header for ivf output file.";
     return false;
   }
 
@@ -115,19 +116,19 @@ bool IvfFileWriter::InitFromFirstFrame(const EncodedImage& encoded_image,
   height_ = encoded_image._encodedHeight;
   RTC_CHECK_GT(width_, 0);
   RTC_CHECK_GT(height_, 0);
-  using_capture_timestamps_ = encoded_image._timeStamp == 0;
+  using_capture_timestamps_ = encoded_image.Timestamp() == 0;
 
   codec_type_ = codec_type;
 
   if (!WriteHeader())
     return false;
 
-  const char* codec_name =
-      CodecTypeToPayloadString(codec_type_);
-  LOG(LS_WARNING) << "Created IVF file for codec data of type " << codec_name
-                  << " at resolution " << width_ << " x " << height_
-                  << ", using " << (using_capture_timestamps_ ? "1" : "90")
-                  << "kHz clock resolution.";
+  const char* codec_name = CodecTypeToPayloadString(codec_type_);
+  RTC_LOG(LS_WARNING) << "Created IVF file for codec data of type "
+                      << codec_name << " at resolution " << width_ << " x "
+                      << height_ << ", using "
+                      << (using_capture_timestamps_ ? "1" : "90")
+                      << "kHz clock resolution.";
   return true;
 }
 
@@ -143,7 +144,7 @@ bool IvfFileWriter::WriteFrame(const EncodedImage& encoded_image,
   if ((encoded_image._encodedWidth > 0 || encoded_image._encodedHeight > 0) &&
       (encoded_image._encodedHeight != height_ ||
        encoded_image._encodedWidth != width_)) {
-    LOG(LS_WARNING)
+    RTC_LOG(LS_WARNING)
         << "Incomig frame has diffferent resolution then previous: (" << width_
         << "x" << height_ << ") -> (" << encoded_image._encodedWidth << "x"
         << encoded_image._encodedHeight << ")";
@@ -151,18 +152,18 @@ bool IvfFileWriter::WriteFrame(const EncodedImage& encoded_image,
 
   int64_t timestamp = using_capture_timestamps_
                           ? encoded_image.capture_time_ms_
-                          : wrap_handler_.Unwrap(encoded_image._timeStamp);
+                          : wrap_handler_.Unwrap(encoded_image.Timestamp());
   if (last_timestamp_ != -1 && timestamp <= last_timestamp_) {
-    LOG(LS_WARNING) << "Timestamp no increasing: " << last_timestamp_ << " -> "
-                    << timestamp;
+    RTC_LOG(LS_WARNING) << "Timestamp no increasing: " << last_timestamp_
+                        << " -> " << timestamp;
   }
   last_timestamp_ = timestamp;
 
   const size_t kFrameHeaderSize = 12;
   if (byte_limit_ != 0 &&
       bytes_written_ + kFrameHeaderSize + encoded_image._length > byte_limit_) {
-    LOG(LS_WARNING) << "Closing IVF file due to reaching size limit: "
-                    << byte_limit_ << " bytes.";
+    RTC_LOG(LS_WARNING) << "Closing IVF file due to reaching size limit: "
+                        << byte_limit_ << " bytes.";
     Close();
     return false;
   }
@@ -173,7 +174,7 @@ bool IvfFileWriter::WriteFrame(const EncodedImage& encoded_image,
   if (file_.Write(frame_header, kFrameHeaderSize) < kFrameHeaderSize ||
       file_.Write(encoded_image._buffer, encoded_image._length) <
           encoded_image._length) {
-    LOG(LS_ERROR) << "Unable to write frame to file.";
+    RTC_LOG(LS_ERROR) << "Unable to write frame to file.";
     return false;
   }
 

@@ -19,11 +19,9 @@
 namespace webrtc {
 namespace acm2 {
 
-ACMResampler::ACMResampler() {
-}
+ACMResampler::ACMResampler() {}
 
-ACMResampler::~ACMResampler() {
-}
+ACMResampler::~ACMResampler() {}
 
 int ACMResampler::Resample10Msec(const int16_t* in_audio,
                                  int in_freq_hz,
@@ -43,16 +41,18 @@ int ACMResampler::Resample10Msec(const int16_t* in_audio,
 
   if (resampler_.InitializeIfNeeded(in_freq_hz, out_freq_hz,
                                     num_audio_channels) != 0) {
-    LOG(LS_ERROR) << "InitializeIfNeeded(" << in_freq_hz << ", " << out_freq_hz
-                  << ", " << num_audio_channels << ") failed.";
+    RTC_LOG(LS_ERROR) << "InitializeIfNeeded(" << in_freq_hz << ", "
+                      << out_freq_hz << ", " << num_audio_channels
+                      << ") failed.";
     return -1;
   }
 
   int out_length =
       resampler_.Resample(in_audio, in_length, out_audio, out_capacity_samples);
   if (out_length == -1) {
-    LOG(LS_ERROR) << "Resample(" << in_audio << ", " << in_length << ", "
-                  << out_audio << ", " << out_capacity_samples << ") failed.";
+    RTC_LOG(LS_ERROR) << "Resample(" << in_audio << ", " << in_length << ", "
+                      << out_audio << ", " << out_capacity_samples
+                      << ") failed.";
     return -1;
   }
 

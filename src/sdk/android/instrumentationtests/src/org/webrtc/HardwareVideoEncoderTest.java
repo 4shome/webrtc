@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
 import org.chromium.base.test.params.BaseJUnit4RunnerDelegate;
 import org.chromium.base.test.params.ParameterAnnotations.ClassParameter;
 import org.chromium.base.test.params.ParameterAnnotations.UseRunnerDelegate;
@@ -63,13 +64,13 @@ public class HardwareVideoEncoderTest {
     this.useEglContext = useEglContext;
   }
 
-  final static String TAG = "HardwareVideoEncoderTest";
+  final static String TAG = "HwVideoEncoderTest";
 
   private static final boolean ENABLE_INTEL_VP8_ENCODER = true;
   private static final boolean ENABLE_H264_HIGH_PROFILE = true;
   private static final VideoEncoder.Settings SETTINGS =
       new VideoEncoder.Settings(1 /* core */, 640 /* width */, 480 /* height */, 300 /* kbps */,
-          30 /* fps */, true /* automaticResizeOn */);
+          30 /* fps */, 1 /* numberOfSimulcastStreams */, true /* automaticResizeOn */);
   private static final int ENCODE_TIMEOUT_MS = 1000;
   private static final int NUM_TEST_FRAMES = 10;
   private static final int NUM_ENCODE_TRIES = 100;
@@ -78,15 +79,31 @@ public class HardwareVideoEncoderTest {
   // # Mock classes
   /**
    * Mock encoder callback that allows easy verification of the general properties of the encoded
-   * frame such as width and height.
+   * frame such as width and height. Also used from AndroidVideoDecoderInstrumentationTest.
    */
-  private static class MockEncoderCallback implements VideoEncoder.Callback {
+  static class MockEncoderCallback implements VideoEncoder.Callback {
     private BlockingQueue<EncodedImage> frameQueue = new LinkedBlockingQueue<>();
 
+    @Override
     public void onEncodedFrame(EncodedImage frame, VideoEncoder.CodecSpecificInfo info) {
       assertNotNull(frame);
       assertNotNull(info);
-      frameQueue.offer(frame);
+
+      // Make a copy because keeping a reference to the buffer is not allowed.
+      final ByteBuffer bufferCopy = ByteBuffer.allocateDirect(frame.buffer.remaining());
+      bufferCopy.put(frame.buffer);
+      bufferCopy.rewind();
+
+      frameQueue.offer(EncodedImage.builder()
+                           .setBuffer(bufferCopy)
+                           .setEncodedWidth(frame.encodedWidth)
+                           .setEncodedHeight(frame.encodedHeight)
+                           .setCaptureTimeNs(frame.captureTimeNs)
+                           .setFrameType(frame.frameType)
+                           .setRotation(frame.rotation)
+                           .setCompleteFrame(frame.completeFrame)
+                           .setQp(frame.qp)
+                           .createEncodedImage());
     }
 
     public EncodedImage poll() {
@@ -195,7 +212,6 @@ public class HardwareVideoEncoderTest {
 
     public MockI420Buffer(int width, int height, Runnable releaseCallback) {
       super(width, height, releaseCallback);
-      // We never release this but it is not a problem in practice because the release is a no-op.
       realBuffer = JavaI420Buffer.allocate(width, height);
     }
 
@@ -236,6 +252,18 @@ public class HardwareVideoEncoderTest {
     }
 
     @Override
+    public void retain() {
+      super.retain();
+      realBuffer.retain();
+    }
+
+    @Override
+    public void release() {
+      super.release();
+      realBuffer.release();
+    }
+
+    @Override
     public VideoFrame.Buffer cropAndScale(
         int cropX, int cropY, int cropWidth, int cropHeight, int scaleWidth, int scaleHeight) {
       return realBuffer.cropAndScale(cropX, cropY, cropWidth, cropHeight, scaleWidth, scaleHeight);
@@ -243,10 +271,11 @@ public class HardwareVideoEncoderTest {
   }
 
   // # Test fields
-  private Object referencedFramesLock = new Object();
-  private int referencedFrames = 0;
+  private final Object referencedFramesLock = new Object();
+  private int referencedFrames;
 
   private Runnable releaseFrameCallback = new Runnable() {
+    @Override
     public void run() {
       synchronized (referencedFramesLock) {
         --referencedFrames;
@@ -263,7 +292,7 @@ public class HardwareVideoEncoderTest {
         eglContext, ENABLE_INTEL_VP8_ENCODER, ENABLE_H264_HIGH_PROFILE);
   }
 
-  private VideoEncoder createEncoder() {
+  private @Nullable VideoEncoder createEncoder() {
     VideoEncoderFactory factory =
         createEncoderFactory(useEglContext ? eglBase.getEglBaseContext() : null);
     VideoCodecInfo[] supportedCodecs = factory.getSupportedCodecs();
@@ -294,7 +323,7 @@ public class HardwareVideoEncoderTest {
     return useTextures ? generateTextureFrame(width, height) : generateI420Frame(width, height);
   }
 
-  private void testEncodeFrame(
+  static void testEncodeFrame(
       VideoEncoder encoder, VideoFrame frame, VideoEncoder.EncodeInfo info) {
     int numTries = 0;
 
@@ -307,16 +336,15 @@ public class HardwareVideoEncoderTest {
         case OK:
           return; // Success
         case NO_OUTPUT:
-          if (numTries < NUM_ENCODE_TRIES) {
-            try {
-              Thread.sleep(ENCODE_RETRY_SLEEP_MS); // Try again.
-            } catch (InterruptedException e) {
-              throw new RuntimeException(e);
-            }
-            break;
-          } else {
+          if (numTries >= NUM_ENCODE_TRIES) {
             fail("encoder.encode keeps returning NO_OUTPUT");
           }
+          try {
+            Thread.sleep(ENCODE_RETRY_SLEEP_MS); // Try again.
+          } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+          }
+          break;
         default:
           fail("encoder.encode returned: " + returnValue); // Error
       }
@@ -326,6 +354,8 @@ public class HardwareVideoEncoderTest {
   // # Tests
   @Before
   public void setUp() {
+    NativeLibrary.initialize(new NativeLibrary.DefaultLoader(), TestConstants.NATIVE_LIBRARY);
+
     eglBase = new EglBase14(null, EglBase.CONFIG_PLAIN);
     eglBase.createDummyPbufferSurface();
     eglBase.makeCurrent();

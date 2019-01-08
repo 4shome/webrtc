@@ -14,31 +14,37 @@
 namespace webrtc {
 
 MatchedFilterLagAggregator::MatchedFilterLagAggregator(
-    ApmDataDumper* data_dumper)
-    : data_dumper_(data_dumper) {
+    ApmDataDumper* data_dumper,
+    size_t max_filter_lag,
+    const EchoCanceller3Config::Delay::DelaySelectionThresholds& thresholds)
+    : data_dumper_(data_dumper),
+      histogram_(max_filter_lag + 1, 0),
+      thresholds_(thresholds) {
   RTC_DCHECK(data_dumper);
-  histogram_.fill(0);
+  RTC_DCHECK_LE(thresholds_.initial, thresholds_.converged);
   histogram_data_.fill(0);
 }
 
 MatchedFilterLagAggregator::~MatchedFilterLagAggregator() = default;
 
-void MatchedFilterLagAggregator::Reset() {
-  histogram_.fill(0);
+void MatchedFilterLagAggregator::Reset(bool hard_reset) {
+  std::fill(histogram_.begin(), histogram_.end(), 0);
   histogram_data_.fill(0);
   histogram_data_index_ = 0;
-  filled_histogram_ = false;
+  if (hard_reset) {
+    significant_candidate_found_ = false;
+  }
 }
 
-rtc::Optional<size_t> MatchedFilterLagAggregator::Aggregate(
+absl::optional<DelayEstimate> MatchedFilterLagAggregator::Aggregate(
     rtc::ArrayView<const MatchedFilter::LagEstimate> lag_estimates) {
-  // hoose the strongest lag estimate as the best one.
+  // Choose the strongest lag estimate as the best one.
   float best_accuracy = 0.f;
   int best_lag_estimate_index = -1;
   for (size_t k = 0; k < lag_estimates.size(); ++k) {
     if (lag_estimates[k].updated && lag_estimates[k].reliable) {
       if (lag_estimates[k].accuracy > best_accuracy) {
-        best_accuracy = std::max(0.f, lag_estimates[k].accuracy);
+        best_accuracy = lag_estimates[k].accuracy;
         best_lag_estimate_index = static_cast<int>(k);
       }
     }
@@ -62,17 +68,25 @@ rtc::Optional<size_t> MatchedFilterLagAggregator::Aggregate(
 
     histogram_data_index_ =
         (histogram_data_index_ + 1) % histogram_data_.size();
-    filled_histogram_ = filled_histogram_ || histogram_data_index_ == 0;
 
     const int candidate =
         std::distance(histogram_.begin(),
                       std::max_element(histogram_.begin(), histogram_.end()));
 
-    if (histogram_[candidate] > 25) {
-      return rtc::Optional<size_t>(candidate);
+    significant_candidate_found_ =
+        significant_candidate_found_ ||
+        histogram_[candidate] > thresholds_.converged;
+    if (histogram_[candidate] > thresholds_.converged ||
+        (histogram_[candidate] > thresholds_.initial &&
+         !significant_candidate_found_)) {
+      DelayEstimate::Quality quality = significant_candidate_found_
+                                           ? DelayEstimate::Quality::kRefined
+                                           : DelayEstimate::Quality::kCoarse;
+      return DelayEstimate(quality, candidate);
     }
   }
-  return rtc::Optional<size_t>();
+
+  return absl::nullopt;
 }
 
 }  // namespace webrtc

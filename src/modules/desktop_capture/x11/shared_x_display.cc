@@ -19,8 +19,7 @@
 
 namespace webrtc {
 
-SharedXDisplay::SharedXDisplay(Display* display)
-  : display_(display) {
+SharedXDisplay::SharedXDisplay(Display* display) : display_(display) {
   RTC_DCHECK(display_);
 }
 
@@ -35,7 +34,7 @@ rtc::scoped_refptr<SharedXDisplay> SharedXDisplay::Create(
   Display* display =
       XOpenDisplay(display_name.empty() ? NULL : display_name.c_str());
   if (!display) {
-    LOG(LS_ERROR) << "Unable to open display";
+    RTC_LOG(LS_ERROR) << "Unable to open display";
     return NULL;
   }
   return new SharedXDisplay(display);

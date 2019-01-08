@@ -70,7 +70,7 @@ bool ParseEvents(const std::string& filename,
                  std::vector<webrtc::rtclog::Event>* events) {
   std::ifstream stream(filename, std::ios_base::in | std::ios_base::binary);
   if (!stream.good() || !stream.is_open()) {
-    LOG(LS_WARNING) << "Could not open file for reading.";
+    RTC_LOG(LS_WARNING) << "Could not open file for reading.";
     return false;
   }
 
@@ -95,34 +95,36 @@ bool ParseEvents(const std::string& filename,
     const uint64_t kExpectedTag = (1 << 3) | 2;
     std::tie(tag, success) = ParseVarInt(stream);
     if (!success) {
-      LOG(LS_WARNING) << "Missing field tag from beginning of protobuf event.";
+      RTC_LOG(LS_WARNING)
+          << "Missing field tag from beginning of protobuf event.";
       return false;
     } else if (tag != kExpectedTag) {
-      LOG(LS_WARNING) << "Unexpected field tag at beginning of protobuf event.";
+      RTC_LOG(LS_WARNING)
+          << "Unexpected field tag at beginning of protobuf event.";
       return false;
     }
 
     // Read the length field.
     std::tie(message_length, success) = ParseVarInt(stream);
     if (!success) {
-      LOG(LS_WARNING) << "Missing message length after protobuf field tag.";
+      RTC_LOG(LS_WARNING) << "Missing message length after protobuf field tag.";
       return false;
     } else if (message_length > kMaxEventSize) {
-      LOG(LS_WARNING) << "Protobuf message length is too large.";
+      RTC_LOG(LS_WARNING) << "Protobuf message length is too large.";
       return false;
     }
 
     // Read the next protobuf event to a temporary char buffer.
     stream.read(tmp_buffer.data(), message_length);
     if (stream.gcount() != static_cast<int>(message_length)) {
-      LOG(LS_WARNING) << "Failed to read protobuf message from file.";
+      RTC_LOG(LS_WARNING) << "Failed to read protobuf message from file.";
       return false;
     }
 
     // Parse the protobuf event from the buffer.
     webrtc::rtclog::Event event;
     if (!event.ParseFromArray(tmp_buffer.data(), message_length)) {
-      LOG(LS_WARNING) << "Failed to parse protobuf message.";
+      RTC_LOG(LS_WARNING) << "Failed to parse protobuf message.";
       return false;
     }
     events->push_back(event);
@@ -162,6 +164,12 @@ std::string EventTypeToString(webrtc::rtclog::Event::EventType event_type) {
       return "BWE_PROBE_CREATED";
     case webrtc::rtclog::Event::BWE_PROBE_RESULT_EVENT:
       return "BWE_PROBE_RESULT";
+    case webrtc::rtclog::Event::ALR_STATE_EVENT:
+      return "ALR_STATE_EVENT";
+    case webrtc::rtclog::Event::ICE_CANDIDATE_PAIR_CONFIG:
+      return "ICE_CANDIDATE_PAIR_CONFIG";
+    case webrtc::rtclog::Event::ICE_CANDIDATE_PAIR_EVENT:
+      return "ICE_CANDIDATE_PAIR_EVENT";
   }
   RTC_NOTREACHED();
   return "UNKNOWN_EVENT";
@@ -181,8 +189,8 @@ int main(int argc, char* argv[]) {
       " --help for usage.\n"
       "Example usage:\n" +
       program_name + " input.rel\n";
-  if (rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, true) ||
-      FLAG_help || argc != 2) {
+  if (rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, true) || FLAG_help ||
+      argc != 2) {
     std::cout << usage;
     if (FLAG_help) {
       rtc::FlagList::Print(nullptr, false);
@@ -194,7 +202,7 @@ int main(int argc, char* argv[]) {
 
   std::vector<webrtc::rtclog::Event> events;
   if (!ParseEvents(file_name, &events)) {
-    LOG(LS_ERROR) << "Failed to parse event log.";
+    RTC_LOG(LS_ERROR) << "Failed to parse event log.";
     return -1;
   }
 
@@ -212,7 +220,7 @@ int main(int argc, char* argv[]) {
   size_t malformed_event_size = 0;
   size_t accumulated_event_size = 0;
   for (const webrtc::rtclog::Event& event : events) {
-    size_t serialized_size = event.ByteSize();
+    size_t serialized_size = event.ByteSizeLong();
     // When the event is written on the disk, it is part of an EventStream
     // object. The event stream will prepend a 1 byte field number/wire type,
     // and a varint encoding (base 128) of the event length.

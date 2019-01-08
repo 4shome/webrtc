@@ -35,6 +35,8 @@ class TransportDescriptionFactory {
  public:
   // Default ctor; use methods below to set configuration.
   TransportDescriptionFactory();
+  ~TransportDescriptionFactory();
+
   SecurePolicy secure() const { return secure_; }
   // The certificate to use when setting up DTLS.
   const rtc::scoped_refptr<rtc::RTCCertificate>& certificate() const {
@@ -50,7 +52,8 @@ class TransportDescriptionFactory {
   }
 
   // Creates a transport description suitable for use in an offer.
-  TransportDescription* CreateOffer(const TransportOptions& options,
+  TransportDescription* CreateOffer(
+      const TransportOptions& options,
       const TransportDescription* current_description) const;
   // Create a transport description that is a response to an offer.
   //

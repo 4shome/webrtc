@@ -20,15 +20,9 @@ class AudioSendTest : public SendTest {
  public:
   AudioSendTest() : SendTest(CallTest::kDefaultTimeoutMs) {}
 
-  size_t GetNumVideoStreams() const override {
-    return 0;
-  }
-  size_t GetNumAudioStreams() const override {
-    return 1;
-  }
-  size_t GetNumFlexfecStreams() const override {
-    return 0;
-  }
+  size_t GetNumVideoStreams() const override { return 0; }
+  size_t GetNumAudioStreams() const override { return 1; }
+  size_t GetNumFlexfecStreams() const override { return 0; }
 };
 }  // namespace
 
@@ -120,8 +114,8 @@ TEST_F(AudioSendStreamCallTest, SupportsAudioLevel) {
         // Wait for at least one packet with a non-zero level.
         observation_complete_.Set();
       } else {
-        LOG(LS_WARNING) << "Got a packet with zero audioLevel - waiting"
-                           " for another packet...";
+        RTC_LOG(LS_WARNING) << "Got a packet with zero audioLevel - waiting"
+                               " for another packet...";
       }
 
       return SEND_PACKET;

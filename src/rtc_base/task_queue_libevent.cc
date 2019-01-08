@@ -10,20 +10,31 @@
 
 #include "rtc_base/task_queue.h"
 
+#include <errno.h>  // for EAGAIN, errno
 #include <fcntl.h>
+#include <pthread.h>  // for pthread_getspecific
 #include <signal.h>
-#include <string.h>
+#include <stdint.h>  // for uint32_t
+#include <time.h>    // for nanosleep, timespec
 #include <unistd.h>
+#include <list>
+#include <memory>       // for unique_ptr, allocator
+#include <type_traits>  // for remove_reference<>::...
+#include <utility>      // for move
 
 #include "base/third_party/libevent/event.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/criticalsection.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/platform_thread.h"
+#include "rtc_base/platform_thread_types.h"  // for CurrentThreadRef
 #include "rtc_base/refcount.h"
 #include "rtc_base/refcountedobject.h"
-#include "rtc_base/safe_conversions.h"
-#include "rtc_base/task_queue.h"
+#include "rtc_base/scoped_ref_ptr.h"  // for scoped_refptr
+#include "rtc_base/system/unused.h"
 #include "rtc_base/task_queue_posix.h"
+#include "rtc_base/thread_annotations.h"  // for RTC_GUARDED_BY
 #include "rtc_base/timeutils.h"
 
 namespace rtc {
@@ -231,7 +242,7 @@ class TaskQueue::Impl::PostAndReplyTask : public QueuedTask {
     // PostAndReplyTask(), the reply task may or may not actually run.
     // In either case, it will be deleted.
     char message = kRunReplyTask;
-    write(reply_pipe_, &message, sizeof(message));
+    RTC_UNUSED(write(reply_pipe_, &message, sizeof(message)));
   }
 
  private:
@@ -358,7 +369,7 @@ void TaskQueue::Impl::PostTask(std::unique_ptr<QueuedTask> task) {
     }
     char message = kRunTask;
     if (write(wakeup_pipe_in_, &message, sizeof(message)) != sizeof(message)) {
-      LOG(WARNING) << "Failed to queue task.";
+      RTC_LOG(WARNING) << "Failed to queue task.";
       CritScope lock(&pending_lock_);
       pending_.remove_if([task_id](std::unique_ptr<QueuedTask>& t) {
         return t.get() == task_id;

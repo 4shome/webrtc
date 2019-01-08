@@ -11,9 +11,10 @@
 #include "media/engine/webrtcmediaengine.h"
 
 #include <algorithm>
+#include <memory>
+#include <tuple>
+#include <utility>
 
-#include "api/audio_codecs/builtin_audio_decoder_factory.h"
-#include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
 #include "media/engine/webrtcvoiceengine.h"
@@ -26,6 +27,7 @@
 
 namespace cricket {
 
+#if defined(USE_BUILTIN_SW_CODECS)
 namespace {
 
 MediaEngineInterface* CreateWebRtcMediaEngine(
@@ -57,47 +59,6 @@ MediaEngineInterface* CreateWebRtcMediaEngine(
 
 }  // namespace
 
-// TODO(ossu): Backwards-compatible interface. Will be deprecated once the
-// audio decoder factory is fully plumbed and used throughout WebRTC.
-// See: crbug.com/webrtc/6000
-MediaEngineInterface* WebRtcMediaEngineFactory::Create(
-    webrtc::AudioDeviceModule* adm,
-    WebRtcVideoEncoderFactory* video_encoder_factory,
-    WebRtcVideoDecoderFactory* video_decoder_factory) {
-  return CreateWebRtcMediaEngine(
-      adm, webrtc::CreateBuiltinAudioEncoderFactory(),
-      webrtc::CreateBuiltinAudioDecoderFactory(), video_encoder_factory,
-      video_decoder_factory, nullptr, webrtc::AudioProcessing::Create());
-}
-
-MediaEngineInterface* WebRtcMediaEngineFactory::Create(
-    webrtc::AudioDeviceModule* adm,
-    const rtc::scoped_refptr<webrtc::AudioDecoderFactory>&
-        audio_decoder_factory,
-    WebRtcVideoEncoderFactory* video_encoder_factory,
-    WebRtcVideoDecoderFactory* video_decoder_factory) {
-  return CreateWebRtcMediaEngine(
-      adm, webrtc::CreateBuiltinAudioEncoderFactory(), audio_decoder_factory,
-      video_encoder_factory, video_decoder_factory, nullptr,
-      webrtc::AudioProcessing::Create());
-}
-
-// Used by PeerConnectionFactory to create a media engine passed into
-// ChannelManager.
-MediaEngineInterface* WebRtcMediaEngineFactory::Create(
-    webrtc::AudioDeviceModule* adm,
-    const rtc::scoped_refptr<webrtc::AudioDecoderFactory>&
-        audio_decoder_factory,
-    WebRtcVideoEncoderFactory* video_encoder_factory,
-    WebRtcVideoDecoderFactory* video_decoder_factory,
-    rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
-    rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing) {
-  return CreateWebRtcMediaEngine(
-      adm, webrtc::CreateBuiltinAudioEncoderFactory(), audio_decoder_factory,
-      video_encoder_factory, video_decoder_factory, audio_mixer,
-      audio_processing);
-}
-
 MediaEngineInterface* WebRtcMediaEngineFactory::Create(
     webrtc::AudioDeviceModule* adm,
     const rtc::scoped_refptr<webrtc::AudioEncoderFactory>&
@@ -106,9 +67,10 @@ MediaEngineInterface* WebRtcMediaEngineFactory::Create(
         audio_decoder_factory,
     WebRtcVideoEncoderFactory* video_encoder_factory,
     WebRtcVideoDecoderFactory* video_decoder_factory) {
-  return CreateWebRtcMediaEngine(
-      adm, audio_encoder_factory, audio_decoder_factory, video_encoder_factory,
-      video_decoder_factory, nullptr, webrtc::AudioProcessing::Create());
+  return CreateWebRtcMediaEngine(adm, audio_encoder_factory,
+                                 audio_decoder_factory, video_encoder_factory,
+                                 video_decoder_factory, nullptr,
+                                 webrtc::AudioProcessingBuilder().Create());
 }
 
 MediaEngineInterface* WebRtcMediaEngineFactory::Create(
@@ -125,6 +87,7 @@ MediaEngineInterface* WebRtcMediaEngineFactory::Create(
       adm, audio_encoder_factory, audio_decoder_factory, video_encoder_factory,
       video_decoder_factory, audio_mixer, audio_processing);
 }
+#endif
 
 std::unique_ptr<MediaEngineInterface> WebRtcMediaEngineFactory::Create(
     rtc::scoped_refptr<webrtc::AudioDeviceModule> adm,
@@ -175,17 +138,19 @@ void DiscardRedundantExtensions(
 
 bool ValidateRtpExtensions(
     const std::vector<webrtc::RtpExtension>& extensions) {
-  bool id_used[14] = {false};
+  bool id_used[1 + webrtc::RtpExtension::kMaxId] = {false};
   for (const auto& extension : extensions) {
-    if (extension.id <= 0 || extension.id >= 15) {
-      LOG(LS_ERROR) << "Bad RTP extension ID: " << extension.ToString();
+    if (extension.id < webrtc::RtpExtension::kMinId ||
+        extension.id > webrtc::RtpExtension::kMaxId) {
+      RTC_LOG(LS_ERROR) << "Bad RTP extension ID: " << extension.ToString();
       return false;
     }
-    if (id_used[extension.id - 1]) {
-      LOG(LS_ERROR) << "Duplicate RTP extension ID: " << extension.ToString();
+    if (id_used[extension.id]) {
+      RTC_LOG(LS_ERROR) << "Duplicate RTP extension ID: "
+                        << extension.ToString();
       return false;
     }
-    id_used[extension.id - 1] = true;
+    id_used[extension.id] = true;
   }
   return true;
 }
@@ -203,19 +168,20 @@ std::vector<webrtc::RtpExtension> FilterRtpExtensions(
     if (supported(extension.uri)) {
       result.push_back(extension);
     } else {
-      LOG(LS_WARNING) << "Unsupported RTP extension: " << extension.ToString();
+      RTC_LOG(LS_WARNING) << "Unsupported RTP extension: "
+                          << extension.ToString();
     }
   }
 
   // Sort by name, ascending (prioritise encryption), so that we don't reset
   // extensions if they were specified in a different order (also allows us
   // to use std::unique below).
-  std::sort(result.begin(), result.end(),
-            [](const webrtc::RtpExtension& rhs,
-               const webrtc::RtpExtension& lhs) {
-                return rhs.encrypt == lhs.encrypt ? rhs.uri < lhs.uri
-                                                  : rhs.encrypt > lhs.encrypt;
-              });
+  std::sort(
+      result.begin(), result.end(),
+      [](const webrtc::RtpExtension& rhs, const webrtc::RtpExtension& lhs) {
+        return rhs.encrypt == lhs.encrypt ? rhs.uri < lhs.uri
+                                          : rhs.encrypt > lhs.encrypt;
+      });
 
   // Remove unnecessary extensions (used on send side).
   if (filter_redundant_extensions) {
@@ -237,9 +203,8 @@ std::vector<webrtc::RtpExtension> FilterRtpExtensions(
   return result;
 }
 
-webrtc::Call::Config::BitrateConfig GetBitrateConfigForCodec(
-    const Codec& codec) {
-  webrtc::Call::Config::BitrateConfig config;
+webrtc::BitrateConstraints GetBitrateConfigForCodec(const Codec& codec) {
+  webrtc::BitrateConstraints config;
   int bitrate_kbps = 0;
   if (codec.GetParam(kCodecParamMinBitrate, &bitrate_kbps) &&
       bitrate_kbps > 0) {

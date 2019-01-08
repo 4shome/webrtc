@@ -16,7 +16,8 @@
 #include <utility>
 #include <vector>
 
-#include "api/optional.h"
+#include "absl/types/optional.h"
+#include "api/video/video_bitrate_allocation.h"
 #include "common_types.h"  // NOLINT(build/include)
 #include "modules/include/module.h"
 #include "modules/rtp_rtcp/include/flexfec_sender.h"
@@ -32,17 +33,14 @@ class RateLimiter;
 class ReceiveStatisticsProvider;
 class RemoteBitrateEstimator;
 class RtcEventLog;
-class RtpReceiver;
 class Transport;
 class VideoBitrateAllocationObserver;
-
-RTPExtensionType StringToRtpExtensionType(const std::string& extension);
 
 namespace rtcp {
 class TransportFeedback;
 }
 
-class RtpRtcp : public Module {
+class RtpRtcp : public Module, public RtcpFeedbackSenderInterface {
  public:
   struct Configuration {
     Configuration();
@@ -94,6 +92,10 @@ class RtpRtcp : public Module {
     RateLimiter* retransmission_rate_limiter = nullptr;
     OverheadObserver* overhead_observer = nullptr;
     RtpKeepAliveConfig keepalive_config;
+    RtcpIntervalConfig rtcp_interval_config;
+
+    // Update network2 instead of pacer_exit field of video timing extension.
+    bool populate_network2_timestamp = false;
 
    private:
     RTC_DISALLOW_COPY_AND_ASSIGN(Configuration);
@@ -126,9 +128,6 @@ class RtpRtcp : public Module {
   // Sets codec name and payload type. Returns -1 on failure else 0.
   virtual int32_t RegisterSendPayload(const CodecInst& voice_codec) = 0;
 
-  // Sets codec name and payload type. Return -1 on failure else 0.
-  virtual int32_t RegisterSendPayload(const VideoCodec& video_codec) = 0;
-
   virtual void RegisterVideoSendPayload(int payload_type,
                                         const char* payload_name) = 0;
 
@@ -141,6 +140,8 @@ class RtpRtcp : public Module {
   // Returns -1 on failure else 0.
   virtual int32_t RegisterSendRtpHeaderExtension(RTPExtensionType type,
                                                  uint8_t id) = 0;
+  // Register extension by uri, returns false on failure.
+  virtual bool RegisterRtpHeaderExtension(const std::string& uri, int id) = 0;
 
   virtual int32_t DeregisterSendRtpHeaderExtension(RTPExtensionType type) = 0;
 
@@ -165,10 +166,15 @@ class RtpRtcp : public Module {
   virtual RtpState GetRtxState() const = 0;
 
   // Returns SSRC.
-  virtual uint32_t SSRC() const = 0;
+  uint32_t SSRC() const override = 0;
 
   // Sets SSRC, default is a random number.
   virtual void SetSSRC(uint32_t ssrc) = 0;
+
+  // Sets the value for sending in the MID RTP header extension.
+  // The MID RTP header extension should be registered for this to do anything.
+  // Once set, this value can not be changed or removed.
+  virtual void SetMid(const std::string& mid) = 0;
 
   // Sets CSRC.
   // |csrcs| - vector of CSRCs
@@ -192,7 +198,7 @@ class RtpRtcp : public Module {
                                      int associated_payload_type) = 0;
 
   // Returns the FlexFEC SSRC, if there is one.
-  virtual rtc::Optional<uint32_t> FlexfecSsrc() const = 0;
+  virtual absl::optional<uint32_t> FlexfecSsrc() const = 0;
 
   // Sets sending status. Sends kRtcpByeCode when going from true to false.
   // Returns -1 on failure else 0.
@@ -206,6 +212,10 @@ class RtpRtcp : public Module {
 
   // Returns current media sending status.
   virtual bool SendingMedia() const = 0;
+
+  // Indicate that the packets sent by this module should be counted towards the
+  // bitrate estimate since the stream participates in the bitrate allocation.
+  virtual void SetAsPartOfAllocation(bool part_of_allocation) = 0;
 
   // Returns current bitrate in Kbit/s.
   virtual void BitrateSent(uint32_t* total_rate,
@@ -329,10 +339,6 @@ class RtpRtcp : public Module {
                                                  uint32_t name,
                                                  const uint8_t* data,
                                                  uint16_t length) = 0;
-  // (XR) Sets VOIP metric.
-  // Returns -1 on failure else 0.
-  virtual int32_t SetRTCPVoIPMetrics(const RTCPVoIPMetric* VoIPMetric) = 0;
-
   // (XR) Sets Receiver Reference Time Report (RTTR) status.
   virtual void SetRtcpXrRrtrStatus(bool enable) = 0;
 
@@ -340,12 +346,10 @@ class RtpRtcp : public Module {
   virtual bool RtcpXrRrtrStatus() const = 0;
 
   // (REMB) Receiver Estimated Max Bitrate.
-  virtual bool REMB() const = 0;
-
-  virtual void SetREMBStatus(bool enable) = 0;
-
-  virtual void SetREMBData(uint32_t bitrate,
-                           const std::vector<uint32_t>& ssrcs) = 0;
+  // Schedules sending REMB on next and following sender/receiver reports.
+  void SetRemb(int64_t bitrate_bps, std::vector<uint32_t> ssrcs) override = 0;
+  // Stops sending REMB on next and following sender/receiver reports.
+  void UnsetRemb() override = 0;
 
   // (TMMBR) Temporary Max Media Bit Rate
   virtual bool TMMBR() const = 0;
@@ -393,9 +397,10 @@ class RtpRtcp : public Module {
       RtcpStatisticsCallback* callback) = 0;
   virtual RtcpStatisticsCallback* GetRtcpStatisticsCallback() = 0;
   // BWE feedback packets.
-  virtual bool SendFeedbackPacket(const rtcp::TransportFeedback& packet) = 0;
+  bool SendFeedbackPacket(const rtcp::TransportFeedback& packet) override = 0;
 
-  virtual void SetVideoBitrateAllocation(const BitrateAllocation& bitrate) = 0;
+  virtual void SetVideoBitrateAllocation(
+      const VideoBitrateAllocation& bitrate) = 0;
 
   // **************************************************************************
   // Audio
@@ -420,13 +425,8 @@ class RtpRtcp : public Module {
 
   // Set RED and ULPFEC payload types. A payload type of -1 means that the
   // corresponding feature is turned off. Note that we DO NOT support enabling
-  // ULPFEC without enabling RED. However, we DO support enabling RED without
-  // enabling ULPFEC. This is due to an RED/RTX workaround, where the receiver
-  // assumes that RTX packets carry RED if RED has been configured in the SDP,
-  // regardless of what RTX payload type mapping was negotiated in the SDP.
-  // TODO(brandtr): Update this comment when we have removed the RED/RTX
-  // send-side workaround, i.e., when we do not support enabling RED without
-  // enabling ULPFEC.
+  // ULPFEC without enabling RED, and RED is only ever used when ULPFEC is
+  // enabled.
   virtual void SetUlpfecConfig(int red_payload_type,
                                int ulpfec_payload_type) = 0;
 

@@ -28,16 +28,16 @@ void CircularBuffer::Push(float value) {
   RTC_DCHECK_LE(nr_elements_in_buffer_, buffer_.size());
 }
 
-rtc::Optional<float> CircularBuffer::Pop() {
+absl::optional<float> CircularBuffer::Pop() {
   if (nr_elements_in_buffer_ == 0) {
-    return rtc::Optional<float>();
+    return absl::nullopt;
   }
   const size_t index =
       (buffer_.size() + next_insertion_index_ - nr_elements_in_buffer_) %
       buffer_.size();
   RTC_DCHECK_LT(index, buffer_.size());
   --nr_elements_in_buffer_;
-  return rtc::Optional<float>(buffer_[index]);
+  return buffer_[index];
 }
 
 void CircularBuffer::Clear() {

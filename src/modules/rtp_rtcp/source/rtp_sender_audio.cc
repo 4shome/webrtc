@@ -26,8 +26,7 @@
 namespace webrtc {
 
 RTPSenderAudio::RTPSenderAudio(Clock* clock, RTPSender* rtp_sender)
-    : clock_(clock),
-      rtp_sender_(rtp_sender) {}
+    : clock_(clock), rtp_sender_(rtp_sender) {}
 
 RTPSenderAudio::~RTPSenderAudio() {}
 
@@ -119,8 +118,7 @@ bool RTPSenderAudio::SendAudio(FrameType frame_type,
                                int8_t payload_type,
                                uint32_t rtp_timestamp,
                                const uint8_t* payload_data,
-                               size_t payload_size,
-                               const RTPFragmentationHeader* fragmentation) {
+                               size_t payload_size) {
   // From RFC 4733:
   // A source has wide latitude as to how often it sends event updates. A
   // natural interval is the spacing between non-event audio packets. [...]
@@ -191,7 +189,8 @@ bool RTPSenderAudio::SendAudio(FrameType frame_type,
         dtmf_duration_samples -= 0xffff;
         dtmf_length_samples_ -= 0xffff;
 
-        return SendTelephoneEventPacket(ended, dtmf_timestamp_,
+        return SendTelephoneEventPacket(
+            ended, dtmf_timestamp_,
             static_cast<uint16_t>(dtmf_duration_samples), false);
       } else {
         if (!SendTelephoneEventPacket(ended, dtmf_timestamp_,
@@ -223,21 +222,10 @@ bool RTPSenderAudio::SendAudio(FrameType frame_type,
   packet->SetExtension<AudioLevel>(frame_type == kAudioFrameSpeech,
                                    audio_level_dbov);
 
-  if (fragmentation && fragmentation->fragmentationVectorSize > 0) {
-    // Use the fragment info if we have one.
-    uint8_t* payload =
-        packet->AllocatePayload(1 + fragmentation->fragmentationLength[0]);
-    if (!payload)  // Too large payload buffer.
-      return false;
-    payload[0] = fragmentation->fragmentationPlType[0];
-    memcpy(payload + 1, payload_data + fragmentation->fragmentationOffset[0],
-           fragmentation->fragmentationLength[0]);
-  } else {
-    uint8_t* payload = packet->AllocatePayload(payload_size);
-    if (!payload)  // Too large payload buffer.
-      return false;
-    memcpy(payload, payload_data, payload_size);
-  }
+  uint8_t* payload = packet->AllocatePayload(payload_size);
+  if (!payload)  // Too large payload buffer.
+    return false;
+  memcpy(payload, payload_data, payload_size);
 
   if (!rtp_sender_->AssignSequenceNumber(packet.get()))
     return false;
@@ -252,7 +240,7 @@ bool RTPSenderAudio::SendAudio(FrameType frame_type,
   bool send_result = rtp_sender_->SendToNetwork(
       std::move(packet), kAllowRetransmission, RtpPacketSender::kHighPriority);
   if (first_packet_sent_()) {
-    LOG(LS_INFO) << "First audio RTP packet sent to pacer";
+    RTC_LOG(LS_INFO) << "First audio RTP packet sent to pacer";
   }
   return send_result;
 }
@@ -333,9 +321,6 @@ bool RTPSenderAudio::SendTelephoneEventPacket(bool ended,
     dtmfbuffer[1] = E | R | volume;
     ByteWriter<uint16_t>::WriteBigEndian(dtmfbuffer + 2, duration);
 
-    TRACE_EVENT_INSTANT2(
-        TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"), "Audio::SendTelephoneEvent",
-        "timestamp", packet->Timestamp(), "seqnum", packet->SequenceNumber());
     result = rtp_sender_->SendToNetwork(std::move(packet), kAllowRetransmission,
                                         RtpPacketSender::kHighPriority);
     send_count--;

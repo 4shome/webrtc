@@ -8,6 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "api/audio_codecs/builtin_audio_encoder_factory.h"
+#include "api/video_codecs/builtin_video_decoder_factory.h"
+#include "api/video_codecs/builtin_video_encoder_factory.h"
 #include "p2p/base/fakeportallocator.h"
 #include "pc/mediasession.h"
 #include "pc/peerconnectionwrapper.h"
@@ -15,32 +19,42 @@
 #ifdef WEBRTC_ANDROID
 #include "pc/test/androidtestinitializer.h"
 #endif
+#include "absl/memory/memory.h"
 #include "pc/test/fakeaudiocapturemodule.h"
 #include "pc/test/fakertccertificategenerator.h"
 #include "rtc_base/gunit.h"
-#include "rtc_base/ptr_util.h"
 #include "rtc_base/virtualsocketserver.h"
 
 namespace webrtc {
 
 using RTCConfiguration = PeerConnectionInterface::RTCConfiguration;
+using RTCOfferAnswerOptions = PeerConnectionInterface::RTCOfferAnswerOptions;
 using ::testing::Values;
 using ::testing::Combine;
 
 constexpr int kGenerateCertTimeout = 1000;
 
-class PeerConnectionCryptoUnitTest : public ::testing::Test {
+class PeerConnectionCryptoBaseTest : public ::testing::Test {
  protected:
   typedef std::unique_ptr<PeerConnectionWrapper> WrapperPtr;
 
-  PeerConnectionCryptoUnitTest()
-      : vss_(new rtc::VirtualSocketServer()), main_(vss_.get()) {
+  explicit PeerConnectionCryptoBaseTest(SdpSemantics sdp_semantics)
+      : vss_(new rtc::VirtualSocketServer()),
+        main_(vss_.get()),
+        sdp_semantics_(sdp_semantics) {
 #ifdef WEBRTC_ANDROID
     InitializeAndroidObjects();
 #endif
     pc_factory_ = CreatePeerConnectionFactory(
         rtc::Thread::Current(), rtc::Thread::Current(), rtc::Thread::Current(),
-        FakeAudioCaptureModule::Create(), nullptr, nullptr);
+        FakeAudioCaptureModule::Create(), CreateBuiltinAudioEncoderFactory(),
+        CreateBuiltinAudioDecoderFactory(), CreateBuiltinVideoEncoderFactory(),
+        CreateBuiltinVideoDecoderFactory(), nullptr /* audio_mixer */,
+        nullptr /* audio_processing */);
+  }
+
+  WrapperPtr CreatePeerConnection() {
+    return CreatePeerConnection(RTCConfiguration());
   }
 
   WrapperPtr CreatePeerConnection(const RTCConfiguration& config) {
@@ -50,18 +64,20 @@ class PeerConnectionCryptoUnitTest : public ::testing::Test {
   WrapperPtr CreatePeerConnection(
       const RTCConfiguration& config,
       std::unique_ptr<rtc::RTCCertificateGeneratorInterface> cert_gen) {
-    auto fake_port_allocator = rtc::MakeUnique<cricket::FakePortAllocator>(
+    auto fake_port_allocator = absl::make_unique<cricket::FakePortAllocator>(
         rtc::Thread::Current(), nullptr);
-    auto observer = rtc::MakeUnique<MockPeerConnectionObserver>();
+    auto observer = absl::make_unique<MockPeerConnectionObserver>();
+    RTCConfiguration modified_config = config;
+    modified_config.sdp_semantics = sdp_semantics_;
     auto pc = pc_factory_->CreatePeerConnection(
-        config, std::move(fake_port_allocator), std::move(cert_gen),
+        modified_config, std::move(fake_port_allocator), std::move(cert_gen),
         observer.get());
     if (!pc) {
       return nullptr;
     }
 
-    return rtc::MakeUnique<PeerConnectionWrapper>(pc_factory_, pc,
-                                                  std::move(observer));
+    return absl::make_unique<PeerConnectionWrapper>(pc_factory_, pc,
+                                                    std::move(observer));
   }
 
   // Accepts the same arguments as CreatePeerConnection and adds default audio
@@ -72,13 +88,34 @@ class PeerConnectionCryptoUnitTest : public ::testing::Test {
     if (!wrapper) {
       return nullptr;
     }
-    wrapper->AddAudioVideoStream("s", "a", "v");
+    wrapper->AddAudioTrack("a");
+    wrapper->AddVideoTrack("v");
     return wrapper;
+  }
+
+  cricket::ConnectionRole& AudioConnectionRole(
+      cricket::SessionDescription* desc) {
+    return ConnectionRoleFromContent(desc, cricket::GetFirstAudioContent(desc));
+  }
+
+  cricket::ConnectionRole& VideoConnectionRole(
+      cricket::SessionDescription* desc) {
+    return ConnectionRoleFromContent(desc, cricket::GetFirstVideoContent(desc));
+  }
+
+  cricket::ConnectionRole& ConnectionRoleFromContent(
+      cricket::SessionDescription* desc,
+      cricket::ContentInfo* content) {
+    RTC_DCHECK(content);
+    auto* transport_info = desc->GetTransportInfoByName(content->name);
+    RTC_DCHECK(transport_info);
+    return transport_info->description.connection_role;
   }
 
   std::unique_ptr<rtc::VirtualSocketServer> vss_;
   rtc::AutoSocketServerThread main_;
   rtc::scoped_refptr<PeerConnectionFactoryInterface> pc_factory_;
+  const SdpSemantics sdp_semantics_;
 };
 
 SdpContentPredicate HaveDtlsFingerprint() {
@@ -91,43 +128,40 @@ SdpContentPredicate HaveDtlsFingerprint() {
 SdpContentPredicate HaveSdesCryptos() {
   return [](const cricket::ContentInfo* content,
             const cricket::TransportInfo* transport) {
-    const auto* media_desc =
-        static_cast<const cricket::MediaContentDescription*>(
-            content->description);
-    return !media_desc->cryptos().empty();
+    return !content->media_description()->cryptos().empty();
   };
 }
 
 SdpContentPredicate HaveProtocol(const std::string& protocol) {
   return [protocol](const cricket::ContentInfo* content,
                     const cricket::TransportInfo* transport) {
-    const auto* media_desc =
-        static_cast<const cricket::MediaContentDescription*>(
-            content->description);
-    return media_desc->protocol() == protocol;
+    return content->media_description()->protocol() == protocol;
   };
 }
 
 SdpContentPredicate HaveSdesGcmCryptos(size_t num_crypto_suites) {
   return [num_crypto_suites](const cricket::ContentInfo* content,
                              const cricket::TransportInfo* transport) {
-    const auto* media_desc =
-        static_cast<const cricket::MediaContentDescription*>(
-            content->description);
-    if (media_desc->cryptos().size() != num_crypto_suites) {
+    const auto& cryptos = content->media_description()->cryptos();
+    if (cryptos.size() != num_crypto_suites) {
       return false;
     }
-    const cricket::CryptoParams first_params = media_desc->cryptos()[0];
+    const cricket::CryptoParams first_params = cryptos[0];
     return first_params.key_params.size() == 67U &&
            first_params.cipher_suite == "AEAD_AES_256_GCM";
   };
 }
 
+class PeerConnectionCryptoTest
+    : public PeerConnectionCryptoBaseTest,
+      public ::testing::WithParamInterface<SdpSemantics> {
+ protected:
+  PeerConnectionCryptoTest() : PeerConnectionCryptoBaseTest(GetParam()) {}
+};
+
 SdpContentMutator RemoveSdesCryptos() {
   return [](cricket::ContentInfo* content, cricket::TransportInfo* transport) {
-    auto* media_desc =
-        static_cast<cricket::MediaContentDescription*>(content->description);
-    media_desc->set_cryptos({});
+    content->media_description()->set_cryptos({});
   };
 }
 
@@ -139,7 +173,7 @@ SdpContentMutator RemoveDtlsFingerprint() {
 
 // When DTLS is enabled, the SDP offer/answer should have a DTLS fingerprint and
 // no SDES cryptos.
-TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInOfferWhenDtlsEnabled) {
+TEST_P(PeerConnectionCryptoTest, CorrectCryptoInOfferWhenDtlsEnabled) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(true);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -153,7 +187,7 @@ TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInOfferWhenDtlsEnabled) {
   EXPECT_TRUE(SdpContentsAll(HaveProtocol(cricket::kMediaProtocolDtlsSavpf),
                              offer->description()));
 }
-TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInAnswerWhenDtlsEnabled) {
+TEST_P(PeerConnectionCryptoTest, CorrectCryptoInAnswerWhenDtlsEnabled) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(true);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -172,7 +206,7 @@ TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInAnswerWhenDtlsEnabled) {
 
 // When DTLS is disabled, the SDP offer/answer should include SDES cryptos and
 // should not have a DTLS fingerprint.
-TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInOfferWhenDtlsDisabled) {
+TEST_P(PeerConnectionCryptoTest, CorrectCryptoInOfferWhenDtlsDisabled) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(false);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -186,7 +220,7 @@ TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInOfferWhenDtlsDisabled) {
   EXPECT_TRUE(SdpContentsAll(HaveProtocol(cricket::kMediaProtocolSavpf),
                              offer->description()));
 }
-TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInAnswerWhenDtlsDisabled) {
+TEST_P(PeerConnectionCryptoTest, CorrectCryptoInAnswerWhenDtlsDisabled) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(false);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -205,8 +239,7 @@ TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInAnswerWhenDtlsDisabled) {
 
 // When encryption is disabled, the SDP offer/answer should have neither a DTLS
 // fingerprint nor any SDES crypto options.
-TEST_F(PeerConnectionCryptoUnitTest,
-       CorrectCryptoInOfferWhenEncryptionDisabled) {
+TEST_P(PeerConnectionCryptoTest, CorrectCryptoInOfferWhenEncryptionDisabled) {
   PeerConnectionFactoryInterface::Options options;
   options.disable_encryption = true;
   pc_factory_->SetOptions(options);
@@ -224,8 +257,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
   EXPECT_TRUE(SdpContentsAll(HaveProtocol(cricket::kMediaProtocolAvpf),
                              offer->description()));
 }
-TEST_F(PeerConnectionCryptoUnitTest,
-       CorrectCryptoInAnswerWhenEncryptionDisabled) {
+TEST_P(PeerConnectionCryptoTest, CorrectCryptoInAnswerWhenEncryptionDisabled) {
   PeerConnectionFactoryInterface::Options options;
   options.disable_encryption = true;
   pc_factory_->SetOptions(options);
@@ -250,7 +282,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
 // should have the correct ciphers in the SDES crypto options.
 // With GCM cipher suites enabled, there will be 3 cryptos in the offer and 1
 // in the answer.
-TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInOfferWithSdesAndGcm) {
+TEST_P(PeerConnectionCryptoTest, CorrectCryptoInOfferWithSdesAndGcm) {
   PeerConnectionFactoryInterface::Options options;
   options.crypto_options.enable_gcm_crypto_suites = true;
   pc_factory_->SetOptions(options);
@@ -265,7 +297,7 @@ TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInOfferWithSdesAndGcm) {
   ASSERT_FALSE(offer->description()->contents().empty());
   EXPECT_TRUE(SdpContentsAll(HaveSdesGcmCryptos(3), offer->description()));
 }
-TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInAnswerWithSdesAndGcm) {
+TEST_P(PeerConnectionCryptoTest, CorrectCryptoInAnswerWithSdesAndGcm) {
   PeerConnectionFactoryInterface::Options options;
   options.crypto_options.enable_gcm_crypto_suites = true;
   pc_factory_->SetOptions(options);
@@ -283,7 +315,7 @@ TEST_F(PeerConnectionCryptoUnitTest, CorrectCryptoInAnswerWithSdesAndGcm) {
   EXPECT_TRUE(SdpContentsAll(HaveSdesGcmCryptos(1), answer->description()));
 }
 
-TEST_F(PeerConnectionCryptoUnitTest, CanSetSdesGcmRemoteOfferAndLocalAnswer) {
+TEST_P(PeerConnectionCryptoTest, CanSetSdesGcmRemoteOfferAndLocalAnswer) {
   PeerConnectionFactoryInterface::Options options;
   options.crypto_options.enable_gcm_crypto_suites = true;
   pc_factory_->SetOptions(options);
@@ -305,7 +337,7 @@ TEST_F(PeerConnectionCryptoUnitTest, CanSetSdesGcmRemoteOfferAndLocalAnswer) {
 // The following group tests that two PeerConnections can successfully exchange
 // an offer/answer when DTLS is off and that they will refuse any offer/answer
 // applied locally/remotely if it does not include SDES cryptos.
-TEST_F(PeerConnectionCryptoUnitTest, ExchangeOfferAnswerWhenSdesOn) {
+TEST_P(PeerConnectionCryptoTest, ExchangeOfferAnswerWhenSdesOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(false);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -319,8 +351,7 @@ TEST_F(PeerConnectionCryptoUnitTest, ExchangeOfferAnswerWhenSdesOn) {
   ASSERT_TRUE(answer);
   ASSERT_TRUE(caller->SetRemoteDescription(std::move(answer)));
 }
-TEST_F(PeerConnectionCryptoUnitTest,
-       FailToSetLocalOfferWithNoCryptosWhenSdesOn) {
+TEST_P(PeerConnectionCryptoTest, FailToSetLocalOfferWithNoCryptosWhenSdesOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(false);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -330,8 +361,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
 
   EXPECT_FALSE(caller->SetLocalDescription(std::move(offer)));
 }
-TEST_F(PeerConnectionCryptoUnitTest,
-       FailToSetRemoteOfferWithNoCryptosWhenSdesOn) {
+TEST_P(PeerConnectionCryptoTest, FailToSetRemoteOfferWithNoCryptosWhenSdesOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(false);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -342,8 +372,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
 
   EXPECT_FALSE(callee->SetRemoteDescription(std::move(offer)));
 }
-TEST_F(PeerConnectionCryptoUnitTest,
-       FailToSetLocalAnswerWithNoCryptosWhenSdesOn) {
+TEST_P(PeerConnectionCryptoTest, FailToSetLocalAnswerWithNoCryptosWhenSdesOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(false);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -355,8 +384,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
 
   EXPECT_FALSE(callee->SetLocalDescription(std::move(answer)));
 }
-TEST_F(PeerConnectionCryptoUnitTest,
-       FailToSetRemoteAnswerWithNoCryptosWhenSdesOn) {
+TEST_P(PeerConnectionCryptoTest, FailToSetRemoteAnswerWithNoCryptosWhenSdesOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(false);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -372,7 +400,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
 // The following group tests that two PeerConnections can successfully exchange
 // an offer/answer when DTLS is on and that they will refuse any offer/answer
 // applied locally/remotely if it does not include a DTLS fingerprint.
-TEST_F(PeerConnectionCryptoUnitTest, ExchangeOfferAnswerWhenDtlsOn) {
+TEST_P(PeerConnectionCryptoTest, ExchangeOfferAnswerWhenDtlsOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(true);
   auto caller = CreatePeerConnectionWithAudioVideo(config);
@@ -386,7 +414,7 @@ TEST_F(PeerConnectionCryptoUnitTest, ExchangeOfferAnswerWhenDtlsOn) {
   ASSERT_TRUE(answer);
   ASSERT_TRUE(caller->SetRemoteDescription(std::move(answer)));
 }
-TEST_F(PeerConnectionCryptoUnitTest,
+TEST_P(PeerConnectionCryptoTest,
        FailToSetLocalOfferWithNoFingerprintWhenDtlsOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(true);
@@ -397,7 +425,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
 
   EXPECT_FALSE(caller->SetLocalDescription(std::move(offer)));
 }
-TEST_F(PeerConnectionCryptoUnitTest,
+TEST_P(PeerConnectionCryptoTest,
        FailToSetRemoteOfferWithNoFingerprintWhenDtlsOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(true);
@@ -409,7 +437,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
 
   EXPECT_FALSE(callee->SetRemoteDescription(std::move(offer)));
 }
-TEST_F(PeerConnectionCryptoUnitTest,
+TEST_P(PeerConnectionCryptoTest,
        FailToSetLocalAnswerWithNoFingerprintWhenDtlsOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(true);
@@ -420,7 +448,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
   auto answer = callee->CreateAnswer();
   SdpContentsForEach(RemoveDtlsFingerprint(), answer->description());
 }
-TEST_F(PeerConnectionCryptoUnitTest,
+TEST_P(PeerConnectionCryptoTest,
        FailToSetRemoteAnswerWithNoFingerprintWhenDtlsOn) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(true);
@@ -435,7 +463,7 @@ TEST_F(PeerConnectionCryptoUnitTest,
 }
 
 // Test that an offer/answer can be exchanged when encryption is disabled.
-TEST_F(PeerConnectionCryptoUnitTest, ExchangeOfferAnswerWhenNoEncryption) {
+TEST_P(PeerConnectionCryptoTest, ExchangeOfferAnswerWhenNoEncryption) {
   PeerConnectionFactoryInterface::Options options;
   options.disable_encryption = true;
   pc_factory_->SetOptions(options);
@@ -456,7 +484,7 @@ TEST_F(PeerConnectionCryptoUnitTest, ExchangeOfferAnswerWhenNoEncryption) {
 
 // Tests that a DTLS call can be established when the certificate is specified
 // in the PeerConnection config and no certificate generator is specified.
-TEST_F(PeerConnectionCryptoUnitTest,
+TEST_P(PeerConnectionCryptoTest,
        ExchangeOfferAnswerWhenDtlsCertificateInConfig) {
   RTCConfiguration caller_config;
   caller_config.enable_dtls_srtp.emplace(true);
@@ -485,19 +513,6 @@ TEST_F(PeerConnectionCryptoUnitTest,
 // CreateOffer/CreateAnswer calls are made while waiting for the certificate,
 // they all finish after the certificate is generated.
 
-// Whether the test will call CreateOffer or CreateAnswer.
-enum class SdpType { kOffer, kAnswer };
-std::ostream& operator<<(std::ostream& out, SdpType value) {
-  switch (value) {
-    case SdpType::kOffer:
-      return out << "offer";
-    case SdpType::kAnswer:
-      return out << "answer";
-    default:
-      return out << "unknown";
-  }
-}
-
 // Whether the certificate will be generated before calling CreateOffer or
 // while CreateOffer is executing.
 enum class CertGenTime { kBefore, kDuring };
@@ -525,16 +540,20 @@ std::ostream& operator<<(std::ostream& out, CertGenResult value) {
   }
 }
 
-class PeerConnectionCryptoDtlsCertGenUnitTest
-    : public PeerConnectionCryptoUnitTest,
-      public ::testing::WithParamInterface<
-          ::testing::tuple<SdpType, CertGenTime, CertGenResult, size_t>> {
+class PeerConnectionCryptoDtlsCertGenTest
+    : public PeerConnectionCryptoBaseTest,
+      public ::testing::WithParamInterface<std::tuple<SdpSemantics,
+                                                      SdpType,
+                                                      CertGenTime,
+                                                      CertGenResult,
+                                                      size_t>> {
  protected:
-  PeerConnectionCryptoDtlsCertGenUnitTest() {
-    sdp_type_ = ::testing::get<0>(GetParam());
-    cert_gen_time_ = ::testing::get<1>(GetParam());
-    cert_gen_result_ = ::testing::get<2>(GetParam());
-    concurrent_calls_ = ::testing::get<3>(GetParam());
+  PeerConnectionCryptoDtlsCertGenTest()
+      : PeerConnectionCryptoBaseTest(std::get<0>(GetParam())) {
+    sdp_type_ = std::get<1>(GetParam());
+    cert_gen_time_ = std::get<2>(GetParam());
+    cert_gen_result_ = std::get<3>(GetParam());
+    concurrent_calls_ = std::get<4>(GetParam());
   }
 
   SdpType sdp_type_;
@@ -543,11 +562,11 @@ class PeerConnectionCryptoDtlsCertGenUnitTest
   size_t concurrent_calls_;
 };
 
-TEST_P(PeerConnectionCryptoDtlsCertGenUnitTest, TestCertificateGeneration) {
+TEST_P(PeerConnectionCryptoDtlsCertGenTest, TestCertificateGeneration) {
   RTCConfiguration config;
   config.enable_dtls_srtp.emplace(true);
   auto owned_fake_certificate_generator =
-      rtc::MakeUnique<FakeRTCCertificateGenerator>();
+      absl::make_unique<FakeRTCCertificateGenerator>();
   auto* fake_certificate_generator = owned_fake_certificate_generator.get();
   fake_certificate_generator->set_should_fail(cert_gen_result_ ==
                                               CertGenResult::kFail);
@@ -579,9 +598,11 @@ TEST_P(PeerConnectionCryptoDtlsCertGenUnitTest, TestCertificateGeneration) {
         new rtc::RefCountedObject<MockCreateSessionDescriptionObserver>();
     observers.push_back(observer);
     if (sdp_type_ == SdpType::kOffer) {
-      pc->pc()->CreateOffer(observer, nullptr);
+      pc->pc()->CreateOffer(observer,
+                            PeerConnectionInterface::RTCOfferAnswerOptions());
     } else {
-      pc->pc()->CreateAnswer(observer, nullptr);
+      pc->pc()->CreateAnswer(observer,
+                             PeerConnectionInterface::RTCOfferAnswerOptions());
     }
   }
   for (auto& observer : observers) {
@@ -595,11 +616,114 @@ TEST_P(PeerConnectionCryptoDtlsCertGenUnitTest, TestCertificateGeneration) {
 }
 
 INSTANTIATE_TEST_CASE_P(
-    PeerConnectionCryptoUnitTest,
-    PeerConnectionCryptoDtlsCertGenUnitTest,
-    Combine(Values(SdpType::kOffer, SdpType::kAnswer),
+    PeerConnectionCryptoTest,
+    PeerConnectionCryptoDtlsCertGenTest,
+    Combine(Values(SdpSemantics::kPlanB, SdpSemantics::kUnifiedPlan),
+            Values(SdpType::kOffer, SdpType::kAnswer),
             Values(CertGenTime::kBefore, CertGenTime::kDuring),
             Values(CertGenResult::kSucceed, CertGenResult::kFail),
             Values(1, 3)));
+
+// Test that we can create and set an answer correctly when different
+// SSL roles have been negotiated for different transports.
+// See: https://bugs.chromium.org/p/webrtc/issues/detail?id=4525
+TEST_P(PeerConnectionCryptoTest, CreateAnswerWithDifferentSslRoles) {
+  auto caller = CreatePeerConnectionWithAudioVideo();
+  auto callee = CreatePeerConnectionWithAudioVideo();
+
+  RTCOfferAnswerOptions options_no_bundle;
+  options_no_bundle.use_rtp_mux = false;
+
+  // First, negotiate different SSL roles for audio and video.
+  ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  auto answer = callee->CreateAnswer(options_no_bundle);
+
+  AudioConnectionRole(answer->description()) = cricket::CONNECTIONROLE_ACTIVE;
+  VideoConnectionRole(answer->description()) = cricket::CONNECTIONROLE_PASSIVE;
+
+  ASSERT_TRUE(
+      callee->SetLocalDescription(CloneSessionDescription(answer.get())));
+  ASSERT_TRUE(caller->SetRemoteDescription(std::move(answer)));
+
+  // Now create an offer in the reverse direction, and ensure the initial
+  // offerer responds with an answer with the correct SSL roles.
+  ASSERT_TRUE(caller->SetRemoteDescription(callee->CreateOfferAndSetAsLocal()));
+  answer = caller->CreateAnswer(options_no_bundle);
+
+  EXPECT_EQ(cricket::CONNECTIONROLE_PASSIVE,
+            AudioConnectionRole(answer->description()));
+  EXPECT_EQ(cricket::CONNECTIONROLE_ACTIVE,
+            VideoConnectionRole(answer->description()));
+
+  ASSERT_TRUE(
+      caller->SetLocalDescription(CloneSessionDescription(answer.get())));
+  ASSERT_TRUE(callee->SetRemoteDescription(std::move(answer)));
+
+  // Lastly, start BUNDLE-ing on "audio", expecting that the "passive" role of
+  // audio is transferred over to video in the answer that completes the BUNDLE
+  // negotiation.
+  RTCOfferAnswerOptions options_bundle;
+  options_bundle.use_rtp_mux = true;
+
+  ASSERT_TRUE(caller->SetRemoteDescription(callee->CreateOfferAndSetAsLocal()));
+  answer = caller->CreateAnswer(options_bundle);
+
+  EXPECT_EQ(cricket::CONNECTIONROLE_PASSIVE,
+            AudioConnectionRole(answer->description()));
+  EXPECT_EQ(cricket::CONNECTIONROLE_PASSIVE,
+            VideoConnectionRole(answer->description()));
+
+  ASSERT_TRUE(
+      caller->SetLocalDescription(CloneSessionDescription(answer.get())));
+  ASSERT_TRUE(callee->SetRemoteDescription(std::move(answer)));
+}
+
+// Tests that if the DTLS fingerprint is invalid then all future calls to
+// SetLocalDescription and SetRemoteDescription will fail due to a session
+// error.
+// This is a regression test for crbug.com/800775
+TEST_P(PeerConnectionCryptoTest, SessionErrorIfFingerprintInvalid) {
+  auto callee_certificate = rtc::RTCCertificate::FromPEM(kRsaPems[0]);
+  auto other_certificate = rtc::RTCCertificate::FromPEM(kRsaPems[1]);
+
+  auto caller = CreatePeerConnectionWithAudioVideo();
+  RTCConfiguration callee_config;
+  callee_config.enable_dtls_srtp.emplace(true);
+  callee_config.certificates.push_back(callee_certificate);
+  auto callee = CreatePeerConnectionWithAudioVideo(callee_config);
+
+  ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+
+  // Create an invalid answer with the other certificate's fingerprint.
+  auto invalid_answer = callee->CreateAnswer();
+  auto* audio_content =
+      cricket::GetFirstAudioContent(invalid_answer->description());
+  ASSERT_TRUE(audio_content);
+  auto* audio_transport_info =
+      invalid_answer->description()->GetTransportInfoByName(
+          audio_content->name);
+  ASSERT_TRUE(audio_transport_info);
+  audio_transport_info->description.identity_fingerprint.reset(
+      rtc::SSLFingerprint::CreateFromCertificate(other_certificate));
+
+  // Set the invalid answer and expect a fingerprint error.
+  std::string error;
+  ASSERT_FALSE(callee->SetLocalDescription(std::move(invalid_answer), &error));
+  EXPECT_PRED_FORMAT2(AssertStringContains, error,
+                      "Local fingerprint does not match identity.");
+
+  // Make sure that setting a valid remote offer or local answer also fails now.
+  ASSERT_FALSE(callee->SetRemoteDescription(caller->CreateOffer(), &error));
+  EXPECT_PRED_FORMAT2(AssertStringContains, error,
+                      "Session error code: ERROR_CONTENT.");
+  ASSERT_FALSE(callee->SetLocalDescription(callee->CreateAnswer(), &error));
+  EXPECT_PRED_FORMAT2(AssertStringContains, error,
+                      "Session error code: ERROR_CONTENT.");
+}
+
+INSTANTIATE_TEST_CASE_P(PeerConnectionCryptoTest,
+                        PeerConnectionCryptoTest,
+                        Values(SdpSemantics::kPlanB,
+                               SdpSemantics::kUnifiedPlan));
 
 }  // namespace webrtc

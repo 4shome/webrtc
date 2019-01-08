@@ -14,11 +14,11 @@
 
 #include "p2p/base/dtlstransport.h"
 
-#include "p2p/base/common.h"
 #include "p2p/base/packettransportinternal.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/dscp.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/messagequeue.h"
 #include "rtc_base/sslstreamadapter.h"
 #include "rtc_base/stream.h"
@@ -104,6 +104,10 @@ bool StreamInterfaceChannel::OnPacketReceived(const char* data, size_t size) {
   return ret;
 }
 
+rtc::StreamState StreamInterfaceChannel::GetState() const {
+  return state_;
+}
+
 void StreamInterfaceChannel::Close() {
   packets_.Clear();
   state_ = rtc::SS_CLOSED;
@@ -113,34 +117,62 @@ DtlsTransport::DtlsTransport(IceTransportInternal* ice_transport,
                              const rtc::CryptoOptions& crypto_options)
     : transport_name_(ice_transport->transport_name()),
       component_(ice_transport->component()),
-      network_thread_(rtc::Thread::Current()),
       ice_transport_(ice_transport),
       downward_(NULL),
       srtp_ciphers_(GetSupportedDtlsSrtpCryptoSuites(crypto_options)),
-      ssl_role_(rtc::SSL_CLIENT),
       ssl_max_version_(rtc::SSL_PROTOCOL_DTLS_12),
       crypto_options_(crypto_options) {
-  ice_transport_->SignalWritableState.connect(this,
-                                              &DtlsTransport::OnWritableState);
-  ice_transport_->SignalReadPacket.connect(this, &DtlsTransport::OnReadPacket);
-  ice_transport_->SignalSentPacket.connect(this, &DtlsTransport::OnSentPacket);
-  ice_transport_->SignalReadyToSend.connect(this,
-                                            &DtlsTransport::OnReadyToSend);
-  ice_transport_->SignalReceivingState.connect(
-      this, &DtlsTransport::OnReceivingState);
+  RTC_DCHECK(ice_transport_);
+  ConnectToIceTransport();
 }
 
-DtlsTransport::~DtlsTransport() {}
+DtlsTransport::DtlsTransport(
+    std::unique_ptr<IceTransportInternal> ice_transport,
+    const rtc::CryptoOptions& crypto_options)
+    : transport_name_(ice_transport->transport_name()),
+      component_(ice_transport->component()),
+      ice_transport_(ice_transport.get()),
+      owned_ice_transport_(std::move(ice_transport)),
+      downward_(NULL),
+      srtp_ciphers_(GetSupportedDtlsSrtpCryptoSuites(crypto_options)),
+      ssl_max_version_(rtc::SSL_PROTOCOL_DTLS_12),
+      crypto_options_(crypto_options) {
+  RTC_DCHECK(owned_ice_transport_);
+  ConnectToIceTransport();
+}
+
+DtlsTransport::~DtlsTransport() = default;
+
+const rtc::CryptoOptions& DtlsTransport::crypto_options() const {
+  return crypto_options_;
+}
+
+DtlsTransportState DtlsTransport::dtls_state() const {
+  return dtls_state_;
+}
+
+const std::string& DtlsTransport::transport_name() const {
+  return transport_name_;
+}
+
+int DtlsTransport::component() const {
+  return component_;
+}
+
+bool DtlsTransport::IsDtlsActive() const {
+  return dtls_active_;
+}
 
 bool DtlsTransport::SetLocalCertificate(
     const rtc::scoped_refptr<rtc::RTCCertificate>& certificate) {
   if (dtls_active_) {
     if (certificate == local_certificate_) {
       // This may happen during renegotiation.
-      LOG_J(LS_INFO, this) << "Ignoring identical DTLS identity";
+      RTC_LOG(LS_INFO) << ToString() << ": Ignoring identical DTLS identity";
       return true;
     } else {
-      LOG_J(LS_ERROR, this) << "Can't change DTLS local identity in this state";
+      RTC_LOG(LS_ERROR) << ToString()
+                        << ": Can't change DTLS local identity in this state";
       return false;
     }
   }
@@ -149,7 +181,8 @@ bool DtlsTransport::SetLocalCertificate(
     local_certificate_ = certificate;
     dtls_active_ = true;
   } else {
-    LOG_J(LS_INFO, this) << "NULL DTLS identity supplied. Not doing DTLS";
+    RTC_LOG(LS_INFO) << ToString()
+                     << ": NULL DTLS identity supplied. Not doing DTLS";
   }
 
   return true;
@@ -162,8 +195,8 @@ rtc::scoped_refptr<rtc::RTCCertificate> DtlsTransport::GetLocalCertificate()
 
 bool DtlsTransport::SetSslMaxProtocolVersion(rtc::SSLProtocolVersion version) {
   if (dtls_active_) {
-    LOG(LS_ERROR) << "Not changing max. protocol version "
-                  << "while DTLS is negotiating";
+    RTC_LOG(LS_ERROR) << "Not changing max. protocol version "
+                         "while DTLS is negotiating";
     return false;
   }
 
@@ -171,21 +204,26 @@ bool DtlsTransport::SetSslMaxProtocolVersion(rtc::SSLProtocolVersion version) {
   return true;
 }
 
-bool DtlsTransport::SetSslRole(rtc::SSLRole role) {
+bool DtlsTransport::SetDtlsRole(rtc::SSLRole role) {
   if (dtls_) {
-    if (ssl_role_ != role) {
-      LOG(LS_ERROR) << "SSL Role can't be reversed after the session is setup.";
+    RTC_DCHECK(dtls_role_);
+    if (*dtls_role_ != role) {
+      RTC_LOG(LS_ERROR)
+          << "SSL Role can't be reversed after the session is setup.";
       return false;
     }
     return true;
   }
 
-  ssl_role_ = role;
+  dtls_role_ = std::move(role);
   return true;
 }
 
-bool DtlsTransport::GetSslRole(rtc::SSLRole* role) const {
-  *role = ssl_role_;
+bool DtlsTransport::GetDtlsRole(rtc::SSLRole* role) const {
+  if (!dtls_role_) {
+    return false;
+  }
+  *role = *dtls_role_;
   return true;
 }
 
@@ -207,14 +245,19 @@ bool DtlsTransport::SetRemoteFingerprint(const std::string& digest_alg,
   if (dtls_active_ && remote_fingerprint_value_ == remote_fingerprint_value &&
       !digest_alg.empty()) {
     // This may happen during renegotiation.
-    LOG_J(LS_INFO, this) << "Ignoring identical remote DTLS fingerprint";
+    RTC_LOG(LS_INFO) << ToString()
+                     << ": Ignoring identical remote DTLS fingerprint";
     return true;
   }
 
   // If the other side doesn't support DTLS, turn off |dtls_active_|.
+  // TODO(deadbeef): Remove this. It's dangerous, because it relies on higher
+  // level code to ensure DTLS is actually used, but there are tests that
+  // depend on it, for the case where an m= section is rejected. In that case
+  // SetRemoteFingerprint shouldn't even be called though.
   if (digest_alg.empty()) {
     RTC_DCHECK(!digest_len);
-    LOG_J(LS_INFO, this) << "Other side didn't support DTLS.";
+    RTC_LOG(LS_INFO) << ToString() << ": Other side didn't support DTLS.";
     dtls_active_ = false;
     return true;
   }
@@ -222,7 +265,8 @@ bool DtlsTransport::SetRemoteFingerprint(const std::string& digest_alg,
   // Otherwise, we must have a local certificate before setting remote
   // fingerprint.
   if (!dtls_active_) {
-    LOG_J(LS_ERROR, this) << "Can't set DTLS remote settings in this state.";
+    RTC_LOG(LS_ERROR) << ToString()
+                      << ": Can't set DTLS remote settings in this state.";
     return false;
   }
 
@@ -240,7 +284,8 @@ bool DtlsTransport::SetRemoteFingerprint(const std::string& digest_alg,
             remote_fingerprint_algorithm_,
             reinterpret_cast<unsigned char*>(remote_fingerprint_value_.data()),
             remote_fingerprint_value_.size(), &err)) {
-      LOG_J(LS_ERROR, this) << "Couldn't set DTLS certificate digest.";
+      RTC_LOG(LS_ERROR) << ToString()
+                        << ": Couldn't set DTLS certificate digest.";
       set_dtls_state(DTLS_TRANSPORT_FAILED);
       // If the error is "verification failed", don't return false, because
       // this means the fingerprint was formatted correctly but didn't match
@@ -267,21 +312,34 @@ bool DtlsTransport::SetRemoteFingerprint(const std::string& digest_alg,
   return true;
 }
 
-std::unique_ptr<rtc::SSLCertificate> DtlsTransport::GetRemoteSSLCertificate()
+std::unique_ptr<rtc::SSLCertChain> DtlsTransport::GetRemoteSSLCertChain()
     const {
   if (!dtls_) {
     return nullptr;
   }
 
-  return dtls_->GetPeerCertificate();
+  return dtls_->GetPeerSSLCertChain();
+}
+
+bool DtlsTransport::ExportKeyingMaterial(const std::string& label,
+                                         const uint8_t* context,
+                                         size_t context_len,
+                                         bool use_context,
+                                         uint8_t* result,
+                                         size_t result_len) {
+  return (dtls_.get())
+             ? dtls_->ExportKeyingMaterial(label, context, context_len,
+                                           use_context, result, result_len)
+             : false;
 }
 
 bool DtlsTransport::SetupDtls() {
+  RTC_DCHECK(dtls_role_);
   StreamInterfaceChannel* downward = new StreamInterfaceChannel(ice_transport_);
 
   dtls_.reset(rtc::SSLStreamAdapter::Create(downward));
   if (!dtls_) {
-    LOG_J(LS_ERROR, this) << "Failed to create DTLS adapter.";
+    RTC_LOG(LS_ERROR) << ToString() << ": Failed to create DTLS adapter.";
     delete downward;
     return false;
   }
@@ -291,7 +349,7 @@ bool DtlsTransport::SetupDtls() {
   dtls_->SetIdentity(local_certificate_->identity()->GetReference());
   dtls_->SetMode(rtc::SSL_MODE_DTLS);
   dtls_->SetMaxProtocolVersion(ssl_max_version_);
-  dtls_->SetServerRole(ssl_role_);
+  dtls_->SetServerRole(*dtls_role_);
   dtls_->SignalEvent.connect(this, &DtlsTransport::OnDtlsEvent);
   dtls_->SignalSSLHandshakeError.connect(this,
                                          &DtlsTransport::OnDtlsHandshakeError);
@@ -300,21 +358,22 @@ bool DtlsTransport::SetupDtls() {
           remote_fingerprint_algorithm_,
           reinterpret_cast<unsigned char*>(remote_fingerprint_value_.data()),
           remote_fingerprint_value_.size())) {
-    LOG_J(LS_ERROR, this) << "Couldn't set DTLS certificate digest.";
+    RTC_LOG(LS_ERROR) << ToString()
+                      << ": Couldn't set DTLS certificate digest.";
     return false;
   }
 
   // Set up DTLS-SRTP, if it's been enabled.
   if (!srtp_ciphers_.empty()) {
     if (!dtls_->SetDtlsSrtpCryptoSuites(srtp_ciphers_)) {
-      LOG_J(LS_ERROR, this) << "Couldn't set DTLS-SRTP ciphers.";
+      RTC_LOG(LS_ERROR) << ToString() << ": Couldn't set DTLS-SRTP ciphers.";
       return false;
     }
   } else {
-    LOG_J(LS_INFO, this) << "Not using DTLS-SRTP.";
+    RTC_LOG(LS_INFO) << ToString() << ": Not using DTLS-SRTP.";
   }
 
-  LOG_J(LS_INFO, this) << "DTLS setup complete.";
+  RTC_LOG(LS_INFO) << ToString() << ": DTLS setup complete.";
 
   // If the underlying ice_transport is already writable at this point, we may
   // be able to start DTLS right away.
@@ -371,8 +430,50 @@ int DtlsTransport::SendPacket(const char* data,
   }
 }
 
+IceTransportInternal* DtlsTransport::ice_transport() {
+  return ice_transport_;
+}
+
 bool DtlsTransport::IsDtlsConnected() {
   return dtls_ && dtls_->IsTlsConnected();
+}
+
+bool DtlsTransport::receiving() const {
+  return receiving_;
+}
+
+bool DtlsTransport::writable() const {
+  return writable_;
+}
+
+int DtlsTransport::GetError() {
+  return ice_transport_->GetError();
+}
+
+absl::optional<rtc::NetworkRoute> DtlsTransport::network_route() const {
+  return ice_transport_->network_route();
+}
+
+bool DtlsTransport::GetOption(rtc::Socket::Option opt, int* value) {
+  return ice_transport_->GetOption(opt, value);
+}
+
+int DtlsTransport::SetOption(rtc::Socket::Option opt, int value) {
+  return ice_transport_->SetOption(opt, value);
+}
+
+void DtlsTransport::ConnectToIceTransport() {
+  RTC_DCHECK(ice_transport_);
+  ice_transport_->SignalWritableState.connect(this,
+                                              &DtlsTransport::OnWritableState);
+  ice_transport_->SignalReadPacket.connect(this, &DtlsTransport::OnReadPacket);
+  ice_transport_->SignalSentPacket.connect(this, &DtlsTransport::OnSentPacket);
+  ice_transport_->SignalReadyToSend.connect(this,
+                                            &DtlsTransport::OnReadyToSend);
+  ice_transport_->SignalReceivingState.connect(
+      this, &DtlsTransport::OnReceivingState);
+  ice_transport_->SignalNetworkRouteChanged.connect(
+      this, &DtlsTransport::OnNetworkRouteChanged);
 }
 
 // The state transition logic here is as follows:
@@ -386,11 +487,11 @@ bool DtlsTransport::IsDtlsConnected() {
 //     - Once the DTLS handshake completes, the state is that of the
 //       impl again
 void DtlsTransport::OnWritableState(rtc::PacketTransportInternal* transport) {
-  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK_RUN_ON(&thread_checker_);
   RTC_DCHECK(transport == ice_transport_);
-  LOG_J(LS_VERBOSE, this)
-      << "DTLSTransportChannelWrapper: ice_transport writable state changed to "
-      << ice_transport_->writable();
+  RTC_LOG(LS_VERBOSE) << ToString()
+                      << ": ice_transport writable state changed to "
+                      << ice_transport_->writable();
 
   if (!dtls_active_) {
     // Not doing DTLS.
@@ -418,11 +519,12 @@ void DtlsTransport::OnWritableState(rtc::PacketTransportInternal* transport) {
 }
 
 void DtlsTransport::OnReceivingState(rtc::PacketTransportInternal* transport) {
-  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK_RUN_ON(&thread_checker_);
   RTC_DCHECK(transport == ice_transport_);
-  LOG_J(LS_VERBOSE, this) << "DTLSTransportChannelWrapper: ice_transport "
-                             "receiving state changed to "
-                          << ice_transport_->receiving();
+  RTC_LOG(LS_VERBOSE) << ToString()
+                      << ": ice_transport "
+                         "receiving state changed to "
+                      << ice_transport_->receiving();
   if (!dtls_active_ || dtls_state() == DTLS_TRANSPORT_CONNECTED) {
     // Note: SignalReceivingState fired by set_receiving.
     set_receiving(ice_transport_->receiving());
@@ -434,7 +536,7 @@ void DtlsTransport::OnReadPacket(rtc::PacketTransportInternal* transport,
                                  size_t size,
                                  const rtc::PacketTime& packet_time,
                                  int flags) {
-  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK_RUN_ON(&thread_checker_);
   RTC_DCHECK(transport == ice_transport_);
   RTC_DCHECK(flags == 0);
 
@@ -447,26 +549,30 @@ void DtlsTransport::OnReadPacket(rtc::PacketTransportInternal* transport,
   switch (dtls_state()) {
     case DTLS_TRANSPORT_NEW:
       if (dtls_) {
-        LOG_J(LS_INFO, this) << "Packet received before DTLS started.";
+        RTC_LOG(LS_INFO) << ToString()
+                         << ": Packet received before DTLS started.";
       } else {
-        LOG_J(LS_WARNING, this) << "Packet received before we know if we are "
-                                << "doing DTLS or not.";
+        RTC_LOG(LS_WARNING) << ToString()
+                            << ": Packet received before we know if we are "
+                               "doing DTLS or not.";
       }
       // Cache a client hello packet received before DTLS has actually started.
       if (IsDtlsClientHelloPacket(data, size)) {
-        LOG_J(LS_INFO, this) << "Caching DTLS ClientHello packet until DTLS is "
-                             << "started.";
+        RTC_LOG(LS_INFO) << ToString()
+                         << ": Caching DTLS ClientHello packet until DTLS is "
+                            "started.";
         cached_client_hello_.SetData(data, size);
         // If we haven't started setting up DTLS yet (because we don't have a
         // remote fingerprint/role), we can use the client hello as a clue that
         // the peer has chosen the client role, and proceed with the handshake.
         // The fingerprint will be verified when it's set.
         if (!dtls_ && local_certificate_) {
-          SetSslRole(rtc::SSL_SERVER);
+          SetDtlsRole(rtc::SSL_SERVER);
           SetupDtls();
         }
       } else {
-        LOG_J(LS_INFO, this) << "Not a DTLS ClientHello packet; dropping.";
+        RTC_LOG(LS_INFO) << ToString()
+                         << ": Not a DTLS ClientHello packet; dropping.";
       }
       break;
 
@@ -476,20 +582,22 @@ void DtlsTransport::OnReadPacket(rtc::PacketTransportInternal* transport,
       // Is this potentially a DTLS packet?
       if (IsDtlsPacket(data, size)) {
         if (!HandleDtlsPacket(data, size)) {
-          LOG_J(LS_ERROR, this) << "Failed to handle DTLS packet.";
+          RTC_LOG(LS_ERROR) << ToString() << ": Failed to handle DTLS packet.";
           return;
         }
       } else {
         // Not a DTLS packet; our handshake should be complete by now.
         if (dtls_state() != DTLS_TRANSPORT_CONNECTED) {
-          LOG_J(LS_ERROR, this) << "Received non-DTLS packet before DTLS "
-                                << "complete.";
+          RTC_LOG(LS_ERROR) << ToString()
+                            << ": Received non-DTLS packet before DTLS "
+                               "complete.";
           return;
         }
 
         // And it had better be a SRTP packet.
         if (!IsRtpPacket(data, size)) {
-          LOG_J(LS_ERROR, this) << "Received unexpected non-DTLS packet.";
+          RTC_LOG(LS_ERROR)
+              << ToString() << ": Received unexpected non-DTLS packet.";
           return;
         }
 
@@ -509,23 +617,23 @@ void DtlsTransport::OnReadPacket(rtc::PacketTransportInternal* transport,
 
 void DtlsTransport::OnSentPacket(rtc::PacketTransportInternal* transport,
                                  const rtc::SentPacket& sent_packet) {
-  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
-
+  RTC_DCHECK_RUN_ON(&thread_checker_);
   SignalSentPacket(this, sent_packet);
 }
 
 void DtlsTransport::OnReadyToSend(rtc::PacketTransportInternal* transport) {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
   if (writable()) {
     SignalReadyToSend(this);
   }
 }
 
 void DtlsTransport::OnDtlsEvent(rtc::StreamInterface* dtls, int sig, int err) {
-  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK_RUN_ON(&thread_checker_);
   RTC_DCHECK(dtls == dtls_.get());
   if (sig & rtc::SE_OPEN) {
     // This is the first time.
-    LOG_J(LS_INFO, this) << "DTLS handshake complete.";
+    RTC_LOG(LS_INFO) << ToString() << ": DTLS handshake complete.";
     if (dtls_->GetState() == rtc::SS_OPEN) {
       // The check for OPEN shouldn't be necessary but let's make
       // sure we don't accidentally frob the state if it's closed.
@@ -546,12 +654,13 @@ void DtlsTransport::OnDtlsEvent(rtc::StreamInterface* dtls, int sig, int err) {
         SignalReadPacket(this, buf, read, rtc::CreatePacketTime(0), 0);
       } else if (ret == rtc::SR_EOS) {
         // Remote peer shut down the association with no error.
-        LOG_J(LS_INFO, this) << "DTLS transport closed";
+        RTC_LOG(LS_INFO) << ToString() << ": DTLS transport closed";
         set_writable(false);
         set_dtls_state(DTLS_TRANSPORT_CLOSED);
       } else if (ret == rtc::SR_ERROR) {
         // Remote peer shut down the association with an error.
-        LOG_J(LS_INFO, this) << "DTLS transport error, code=" << read_error;
+        RTC_LOG(LS_INFO) << ToString()
+                         << ": DTLS transport error, code=" << read_error;
         set_writable(false);
         set_dtls_state(DTLS_TRANSPORT_FAILED);
       }
@@ -561,13 +670,19 @@ void DtlsTransport::OnDtlsEvent(rtc::StreamInterface* dtls, int sig, int err) {
     RTC_DCHECK(sig == rtc::SE_CLOSE);  // SE_CLOSE should be by itself.
     set_writable(false);
     if (!err) {
-      LOG_J(LS_INFO, this) << "DTLS transport closed";
+      RTC_LOG(LS_INFO) << ToString() << ": DTLS transport closed";
       set_dtls_state(DTLS_TRANSPORT_CLOSED);
     } else {
-      LOG_J(LS_INFO, this) << "DTLS transport error, code=" << err;
+      RTC_LOG(LS_INFO) << ToString() << ": DTLS transport error, code=" << err;
       set_dtls_state(DTLS_TRANSPORT_FAILED);
     }
   }
+}
+
+void DtlsTransport::OnNetworkRouteChanged(
+    absl::optional<rtc::NetworkRoute> network_route) {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  SignalNetworkRouteChanged(network_route);
 }
 
 void DtlsTransport::MaybeStartDtls() {
@@ -582,24 +697,26 @@ void DtlsTransport::MaybeStartDtls() {
       // ignore write errors, thus any errors must be because of
       // configuration and therefore are our fault.
       RTC_NOTREACHED() << "StartSSL failed.";
-      LOG_J(LS_ERROR, this) << "Couldn't start DTLS handshake";
+      RTC_LOG(LS_ERROR) << ToString() << ": Couldn't start DTLS handshake";
       set_dtls_state(DTLS_TRANSPORT_FAILED);
       return;
     }
-    LOG_J(LS_INFO, this) << "DtlsTransport: Started DTLS handshake";
+    RTC_LOG(LS_INFO) << ToString() << ": DtlsTransport: Started DTLS handshake";
     set_dtls_state(DTLS_TRANSPORT_CONNECTING);
     // Now that the handshake has started, we can process a cached ClientHello
     // (if one exists).
     if (cached_client_hello_.size()) {
-      if (ssl_role_ == rtc::SSL_SERVER) {
-        LOG_J(LS_INFO, this) << "Handling cached DTLS ClientHello packet.";
+      if (*dtls_role_ == rtc::SSL_SERVER) {
+        RTC_LOG(LS_INFO) << ToString()
+                         << ": Handling cached DTLS ClientHello packet.";
         if (!HandleDtlsPacket(cached_client_hello_.data<char>(),
                               cached_client_hello_.size())) {
-          LOG_J(LS_ERROR, this) << "Failed to handle DTLS packet.";
+          RTC_LOG(LS_ERROR) << ToString() << ": Failed to handle DTLS packet.";
         }
       } else {
-        LOG_J(LS_WARNING, this) << "Discarding cached DTLS ClientHello packet "
-                                << "because we don't have the server role.";
+        RTC_LOG(LS_WARNING) << ToString()
+                            << ": Discarding cached DTLS ClientHello packet "
+                               "because we don't have the server role.";
       }
       cached_client_hello_.Clear();
     }
@@ -641,8 +758,7 @@ void DtlsTransport::set_writable(bool writable) {
   if (writable_ == writable) {
     return;
   }
-  LOG_J(LS_VERBOSE, this) << "set_writable from:" << writable_ << " to "
-                          << writable;
+  RTC_LOG(LS_VERBOSE) << ToString() << ": set_writable to: " << writable;
   writable_ = writable;
   if (writable_) {
     SignalReadyToSend(this);
@@ -654,8 +770,8 @@ void DtlsTransport::set_dtls_state(DtlsTransportState state) {
   if (dtls_state_ == state) {
     return;
   }
-  LOG_J(LS_VERBOSE, this) << "set_dtls_state from:" << dtls_state_ << " to "
-                          << state;
+  RTC_LOG(LS_VERBOSE) << ToString() << ": set_dtls_state from:" << dtls_state_
+                      << " to " << state;
   dtls_state_ = state;
   SignalDtlsState(this, state);
 }
@@ -666,19 +782,20 @@ void DtlsTransport::OnDtlsHandshakeError(rtc::SSLHandshakeError error) {
 
 void DtlsTransport::ConfigureHandshakeTimeout() {
   RTC_DCHECK(dtls_);
-  rtc::Optional<int> rtt = ice_transport_->GetRttEstimate();
+  absl::optional<int> rtt = ice_transport_->GetRttEstimate();
   if (rtt) {
     // Limit the timeout to a reasonable range in case the ICE RTT takes
     // extreme values.
     int initial_timeout = std::max(kMinHandshakeTimeout,
                                    std::min(kMaxHandshakeTimeout, 2 * (*rtt)));
-    LOG_J(LS_INFO, this) << "configuring DTLS handshake timeout "
-                         << initial_timeout << " based on ICE RTT " << *rtt;
+    RTC_LOG(LS_INFO) << ToString() << ": configuring DTLS handshake timeout "
+                     << initial_timeout << " based on ICE RTT " << *rtt;
 
     dtls_->SetInitialRetransmissionTimeout(initial_timeout);
   } else {
-    LOG_J(LS_INFO, this)
-        << "no RTT estimate - using default DTLS handshake timeout";
+    RTC_LOG(LS_INFO)
+        << ToString()
+        << ": no RTT estimate - using default DTLS handshake timeout";
   }
 }
 

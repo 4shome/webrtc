@@ -15,10 +15,10 @@
 #include <vector>
 
 #include "common_audio/resampler/include/resampler.h"
-#include "modules/audio_processing/vad/vad_audio_proc.h"
 #include "modules/audio_processing/vad/common.h"
 #include "modules/audio_processing/vad/pitch_based_vad.h"
 #include "modules/audio_processing/vad/standalone_vad.h"
+#include "modules/audio_processing/vad/vad_audio_proc.h"
 
 namespace webrtc {
 
@@ -29,9 +29,7 @@ class VoiceActivityDetector {
   VoiceActivityDetector();
   ~VoiceActivityDetector();
 
-  // Processes each audio chunk and estimates the voice probability. The maximum
-  // supported sample rate is 32kHz.
-  // TODO(aluebs): Change |length| to size_t.
+  // Processes each audio chunk and estimates the voice probability.
   void ProcessChunk(const int16_t* audio, size_t length, int sample_rate_hz);
 
   // Returns a vector of voice probabilities for each chunk. It can be empty for

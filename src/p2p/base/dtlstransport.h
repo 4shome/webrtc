@@ -22,6 +22,8 @@
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/sslstreamadapter.h"
 #include "rtc_base/stream.h"
+#include "rtc_base/strings/string_builder.h"
+#include "rtc_base/thread_checker.h"
 
 namespace rtc {
 class PacketTransportInternal;
@@ -39,7 +41,7 @@ class StreamInterfaceChannel : public rtc::StreamInterface {
   bool OnPacketReceived(const char* data, size_t size);
 
   // Implementations of StreamInterface
-  rtc::StreamState GetState() const override { return state_; }
+  rtc::StreamState GetState() const override;
   void Close() override;
   rtc::StreamResult Read(void* buffer,
                          size_t buffer_len,
@@ -83,34 +85,46 @@ class StreamInterfaceChannel : public rtc::StreamInterface {
 //
 //   - The SSLStreamAdapter writes to downward_->Write() which translates it
 //     into packet writes on ice_transport_.
+//
+// This class is not thread safe; all methods must be called on the same thread
+// as the constructor.
 class DtlsTransport : public DtlsTransportInternal {
  public:
   // |ice_transport| is the ICE transport this DTLS transport is wrapping.
   //
   // |crypto_options| are the options used for the DTLS handshake. This affects
   // whether GCM crypto suites are negotiated.
+  // TODO(zhihuang): Remove this once we switch to JsepTransportController.
   explicit DtlsTransport(IceTransportInternal* ice_transport,
                          const rtc::CryptoOptions& crypto_options);
+  explicit DtlsTransport(std::unique_ptr<IceTransportInternal> ice_transport,
+                         const rtc::CryptoOptions& crypto_options);
+
   ~DtlsTransport() override;
 
-  const rtc::CryptoOptions& crypto_options() const override {
-    return crypto_options_;
-  }
+  const rtc::CryptoOptions& crypto_options() const override;
+  DtlsTransportState dtls_state() const override;
+  const std::string& transport_name() const override;
+  int component() const override;
 
-  DtlsTransportState dtls_state() const override { return dtls_state_; }
+  // DTLS is active if a local certificate was set. Otherwise this acts in a
+  // "passthrough" mode, sending packets directly through the underlying ICE
+  // transport.
+  // TODO(deadbeef): Remove this weirdness, and handle it in the upper layers.
+  bool IsDtlsActive() const override;
 
-  const std::string& transport_name() const override { return transport_name_; }
-
-  int component() const override { return component_; }
-
-  // Returns false if no local certificate was set, or if the peer doesn't
-  // support DTLS.
-  bool IsDtlsActive() const override { return dtls_active_; }
-
+  // SetLocalCertificate is what makes DTLS active. It must be called before
+  // SetRemoteFinterprint.
+  // TODO(deadbeef): Once DtlsTransport no longer has the concept of being
+  // "active" or not (acting as a passthrough if not active), just require this
+  // certificate on construction or "Start".
   bool SetLocalCertificate(
       const rtc::scoped_refptr<rtc::RTCCertificate>& certificate) override;
   rtc::scoped_refptr<rtc::RTCCertificate> GetLocalCertificate() const override;
 
+  // SetRemoteFingerprint must be called after SetLocalCertificate, and any
+  // other methods like SetDtlsRole. It's what triggers the actual DTLS setup.
+  // TODO(deadbeef): Rename to "Start" like in ORTC?
   bool SetRemoteFingerprint(const std::string& digest_alg,
                             const uint8_t* digest,
                             size_t digest_len) override;
@@ -121,24 +135,23 @@ class DtlsTransport : public DtlsTransportInternal {
                  const rtc::PacketOptions& options,
                  int flags) override;
 
-  bool GetOption(rtc::Socket::Option opt, int* value) override {
-    return ice_transport_->GetOption(opt, value);
-  }
+  bool GetOption(rtc::Socket::Option opt, int* value) override;
 
-  virtual bool SetSslMaxProtocolVersion(rtc::SSLProtocolVersion version);
+  bool SetSslMaxProtocolVersion(rtc::SSLProtocolVersion version) override;
 
   // Find out which DTLS-SRTP cipher was negotiated
   bool GetSrtpCryptoSuite(int* cipher) override;
 
-  bool GetSslRole(rtc::SSLRole* role) const override;
-  bool SetSslRole(rtc::SSLRole role) override;
+  bool GetDtlsRole(rtc::SSLRole* role) const override;
+  bool SetDtlsRole(rtc::SSLRole role) override;
 
   // Find out which DTLS cipher was negotiated
   bool GetSslCipherSuite(int* cipher) override;
 
-  // Once DTLS has been established, this method retrieves the certificate in
-  // use by the remote peer, for use in external identity verification.
-  std::unique_ptr<rtc::SSLCertificate> GetRemoteSSLCertificate() const override;
+  // Once DTLS has been established, this method retrieves the certificate
+  // chain in use by the remote peer, for use in external identity
+  // verification.
+  std::unique_ptr<rtc::SSLCertChain> GetRemoteSSLCertChain() const override;
 
   // Once DTLS has established (i.e., this ice_transport is writable), this
   // method extracts the keys negotiated during the DTLS handshake, for use in
@@ -149,40 +162,36 @@ class DtlsTransport : public DtlsTransportInternal {
                             size_t context_len,
                             bool use_context,
                             uint8_t* result,
-                            size_t result_len) override {
-    return (dtls_.get())
-               ? dtls_->ExportKeyingMaterial(label, context, context_len,
-                                             use_context, result, result_len)
-               : false;
-  }
+                            size_t result_len) override;
 
-  IceTransportInternal* ice_transport() override { return ice_transport_; }
+  IceTransportInternal* ice_transport() override;
 
   // For informational purposes. Tells if the DTLS handshake has finished.
   // This may be true even if writable() is false, if the remote fingerprint
   // has not yet been verified.
   bool IsDtlsConnected();
 
-  bool receiving() const override { return receiving_; }
+  bool receiving() const override;
+  bool writable() const override;
 
-  bool writable() const override { return writable_; }
+  int GetError() override;
 
-  int GetError() override { return ice_transport_->GetError(); }
+  absl::optional<rtc::NetworkRoute> network_route() const override;
 
-  int SetOption(rtc::Socket::Option opt, int value) override {
-    return ice_transport_->SetOption(opt, value);
-  }
+  int SetOption(rtc::Socket::Option opt, int value) override;
 
   std::string ToString() const {
-    const char RECEIVING_ABBREV[2] = {'_', 'R'};
-    const char WRITABLE_ABBREV[2] = {'_', 'W'};
-    std::stringstream ss;
-    ss << "DtlsTransport[" << transport_name_ << "|" << component_ << "|"
+    const absl::string_view RECEIVING_ABBREV[2] = {"_", "R"};
+    const absl::string_view WRITABLE_ABBREV[2] = {"_", "W"};
+    rtc::StringBuilder sb;
+    sb << "DtlsTransport[" << transport_name_ << "|" << component_ << "|"
        << RECEIVING_ABBREV[receiving()] << WRITABLE_ABBREV[writable()] << "]";
-    return ss.str();
+    return sb.Release();
   }
 
  private:
+  void ConnectToIceTransport();
+
   void OnWritableState(rtc::PacketTransportInternal* transport);
   void OnReadPacket(rtc::PacketTransportInternal* transport,
                     const char* data,
@@ -194,6 +203,7 @@ class DtlsTransport : public DtlsTransportInternal {
   void OnReadyToSend(rtc::PacketTransportInternal* transport);
   void OnReceivingState(rtc::PacketTransportInternal* transport);
   void OnDtlsEvent(rtc::StreamInterface* stream_, int sig, int err);
+  void OnNetworkRouteChanged(absl::optional<rtc::NetworkRoute> network_route);
   bool SetupDtls();
   void MaybeStartDtls();
   bool HandleDtlsPacket(const char* data, size_t size);
@@ -205,19 +215,21 @@ class DtlsTransport : public DtlsTransportInternal {
   // Sets the DTLS state, signaling if necessary.
   void set_dtls_state(DtlsTransportState state);
 
+  rtc::ThreadChecker thread_checker_;
+
   std::string transport_name_;
   int component_;
   DtlsTransportState dtls_state_ = DTLS_TRANSPORT_NEW;
-  rtc::Thread* network_thread_;  // Everything should occur on this thread.
   // Underlying ice_transport, not owned by this class.
   IceTransportInternal* const ice_transport_;
+  std::unique_ptr<IceTransportInternal> owned_ice_transport_;
   std::unique_ptr<rtc::SSLStreamAdapter> dtls_;  // The DTLS stream
   StreamInterfaceChannel*
       downward_;  // Wrapper for ice_transport_, owned by dtls_.
   std::vector<int> srtp_ciphers_;  // SRTP ciphers to use with DTLS.
   bool dtls_active_ = false;
   rtc::scoped_refptr<rtc::RTCCertificate> local_certificate_;
-  rtc::SSLRole ssl_role_;
+  absl::optional<rtc::SSLRole> dtls_role_;
   rtc::SSLProtocolVersion ssl_max_version_;
   rtc::CryptoOptions crypto_options_;
   rtc::Buffer remote_fingerprint_value_;

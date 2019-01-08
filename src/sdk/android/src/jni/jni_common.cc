@@ -9,26 +9,41 @@
  */
 
 #include "rtc_base/refcount.h"
+#include "sdk/android/generated_base_jni/jni/JniCommon_jni.h"
 #include "sdk/android/src/jni/jni_helpers.h"
 
-namespace webrtc_jni {
+namespace webrtc {
+namespace jni {
 
-JNI_FUNCTION_DECLARATION(void,
-                         JniCommon_nativeAddRef,
-                         JNIEnv* jni,
-                         jclass,
-                         jlong j_native_ref_counted_pointer) {
+static void JNI_JniCommon_AddRef(JNIEnv* jni,
+                                 const JavaParamRef<jclass>&,
+                                 jlong j_native_ref_counted_pointer) {
   reinterpret_cast<rtc::RefCountInterface*>(j_native_ref_counted_pointer)
       ->AddRef();
 }
 
-JNI_FUNCTION_DECLARATION(void,
-                         JniCommon_nativeReleaseRef,
-                         JNIEnv* jni,
-                         jclass,
-                         jlong j_native_ref_counted_pointer) {
+static void JNI_JniCommon_ReleaseRef(JNIEnv* jni,
+                                     const JavaParamRef<jclass>&,
+                                     jlong j_native_ref_counted_pointer) {
   reinterpret_cast<rtc::RefCountInterface*>(j_native_ref_counted_pointer)
       ->Release();
 }
 
-}  // namespace webrtc_jni
+static ScopedJavaLocalRef<jobject> JNI_JniCommon_AllocateByteBuffer(
+    JNIEnv* jni,
+    const JavaParamRef<jclass>&,
+    jint size) {
+  void* new_data = ::operator new(size);
+  return NewDirectByteBuffer(jni, new_data, size);
+}
+
+static void JNI_JniCommon_FreeByteBuffer(
+    JNIEnv* jni,
+    const JavaParamRef<jclass>&,
+    const JavaParamRef<jobject>& byte_buffer) {
+  void* data = jni->GetDirectBufferAddress(byte_buffer.obj());
+  ::operator delete(data);
+}
+
+}  // namespace jni
+}  // namespace webrtc

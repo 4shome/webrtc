@@ -21,11 +21,9 @@ namespace webrtc {
 namespace {
 class NullSmoothingFilter final : public SmoothingFilter {
  public:
-  void AddSample(float sample) override {
-    last_sample_ = rtc::Optional<float>(sample);
-  }
+  void AddSample(float sample) override { last_sample_ = sample; }
 
-  rtc::Optional<float> GetAverage() override { return last_sample_; }
+  absl::optional<float> GetAverage() override { return last_sample_; }
 
   bool SetTimeConstantMs(int time_constant_ms) override {
     RTC_NOTREACHED();
@@ -33,9 +31,9 @@ class NullSmoothingFilter final : public SmoothingFilter {
   }
 
  private:
-  rtc::Optional<float> last_sample_;
+  absl::optional<float> last_sample_;
 };
-}
+}  // namespace
 
 FecControllerPlrBased::Config::Config(
     bool initial_fec_enabled,
@@ -85,14 +83,13 @@ void FecControllerPlrBased::MakeDecision(AudioEncoderRuntimeConfig* config) {
   fec_enabled_ = fec_enabled_ ? !FecDisablingDecision(packet_loss)
                               : FecEnablingDecision(packet_loss);
 
-  config->enable_fec = rtc::Optional<bool>(fec_enabled_);
+  config->enable_fec = fec_enabled_;
 
-  config->uplink_packet_loss_fraction =
-      rtc::Optional<float>(packet_loss ? *packet_loss : 0.0);
+  config->uplink_packet_loss_fraction = packet_loss ? *packet_loss : 0.0;
 }
 
 bool FecControllerPlrBased::FecEnablingDecision(
-    const rtc::Optional<float>& packet_loss) const {
+    const absl::optional<float>& packet_loss) const {
   if (!uplink_bandwidth_bps_ || !packet_loss) {
     return false;
   } else {
@@ -103,7 +100,7 @@ bool FecControllerPlrBased::FecEnablingDecision(
 }
 
 bool FecControllerPlrBased::FecDisablingDecision(
-    const rtc::Optional<float>& packet_loss) const {
+    const absl::optional<float>& packet_loss) const {
   if (!uplink_bandwidth_bps_ || !packet_loss) {
     return false;
   } else {

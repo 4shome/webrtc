@@ -16,17 +16,18 @@
 #include "modules/audio_processing/aec/echo_cancellation.h"
 #include "modules/audio_processing/audio_buffer.h"
 #include "rtc_base/checks.h"
+#include "system_wrappers/include/field_trial.h"
 
 namespace webrtc {
 
 namespace {
-int16_t MapSetting(EchoCancellation::SuppressionLevel level) {
+int16_t MapSetting(EchoCancellationImpl::SuppressionLevel level) {
   switch (level) {
-    case EchoCancellation::kLowSuppression:
+    case EchoCancellationImpl::kLowSuppression:
       return kAecNlpConservative;
-    case EchoCancellation::kModerateSuppression:
+    case EchoCancellationImpl::kModerateSuppression:
       return kAecNlpModerate;
-    case EchoCancellation::kHighSuppression:
+    case EchoCancellationImpl::kHighSuppression:
       return kAecNlpAggressive;
   }
   RTC_NOTREACHED();
@@ -47,6 +48,14 @@ AudioProcessing::Error MapError(int err) {
       // AEC_NULL_POINTER_ERROR
       return AudioProcessing::kUnspecifiedError;
   }
+}
+
+bool EnforceZeroStreamDelay() {
+#if defined(CHROMEOS)
+  return !field_trial::IsEnabled("WebRTC-Aec2ZeroStreamDelayKillSwitch");
+#else
+  return false;
+#endif
 }
 
 }  // namespace
@@ -99,14 +108,15 @@ EchoCancellationImpl::EchoCancellationImpl(rtc::CriticalSection* crit_render,
     : crit_render_(crit_render),
       crit_capture_(crit_capture),
       drift_compensation_enabled_(false),
-      metrics_enabled_(false),
-      suppression_level_(kModerateSuppression),
+      metrics_enabled_(true),
+      suppression_level_(kHighSuppression),
       stream_drift_samples_(0),
       was_stream_drift_set_(false),
       stream_has_echo_(false),
-      delay_logging_enabled_(false),
+      delay_logging_enabled_(true),
       extended_filter_enabled_(false),
-      delay_agnostic_enabled_(false) {
+      delay_agnostic_enabled_(false),
+      enforce_zero_stream_delay_(EnforceZeroStreamDelay()) {
   RTC_DCHECK(crit_render);
   RTC_DCHECK(crit_capture);
 }
@@ -137,13 +147,15 @@ void EchoCancellationImpl::ProcessRenderAudio(
   }
 }
 
-
 int EchoCancellationImpl::ProcessCaptureAudio(AudioBuffer* audio,
                                               int stream_delay_ms) {
   rtc::CritScope cs_capture(crit_capture_);
   if (!enabled_) {
     return AudioProcessing::kNoError;
   }
+
+  const int stream_delay_ms_use =
+      enforce_zero_stream_delay_ ? 0 : stream_delay_ms;
 
   if (drift_compensation_enabled_ && !was_stream_drift_set_) {
     return AudioProcessing::kStreamParameterNotSetError;
@@ -160,10 +172,11 @@ int EchoCancellationImpl::ProcessCaptureAudio(AudioBuffer* audio,
   stream_has_echo_ = false;
   for (size_t i = 0; i < audio->num_channels(); i++) {
     for (size_t j = 0; j < stream_properties_->num_reverse_channels; j++) {
-      err = WebRtcAec_Process(
-          cancellers_[handle_index]->state(), audio->split_bands_const_f(i),
-          audio->num_bands(), audio->split_bands_f(i),
-          audio->num_frames_per_band(), stream_delay_ms, stream_drift_samples_);
+      err = WebRtcAec_Process(cancellers_[handle_index]->state(),
+                              audio->split_bands_const_f(i), audio->num_bands(),
+                              audio->split_bands_f(i),
+                              audio->num_frames_per_band(), stream_delay_ms_use,
+                              stream_drift_samples_);
 
       if (err != AudioProcessing::kNoError) {
         err = MapError(err);
@@ -229,7 +242,7 @@ int EchoCancellationImpl::set_suppression_level(SuppressionLevel level) {
   return Configure();
 }
 
-EchoCancellation::SuppressionLevel EchoCancellationImpl::suppression_level()
+EchoCancellationImpl::SuppressionLevel EchoCancellationImpl::suppression_level()
     const {
   rtc::CritScope cs(crit_capture_);
   return suppression_level_;
@@ -362,7 +375,8 @@ int EchoCancellationImpl::GetDelayMetrics(int* median, int* std) {
   return GetDelayMetrics(median, std, &fraction_poor_delays);
 }
 
-int EchoCancellationImpl::GetDelayMetrics(int* median, int* std,
+int EchoCancellationImpl::GetDelayMetrics(int* median,
+                                          int* std,
                                           float* fraction_poor_delays) {
   rtc::CritScope cs(crit_capture_);
   if (median == NULL) {
@@ -431,8 +445,7 @@ int EchoCancellationImpl::GetSystemDelayInSamples() const {
   rtc::CritScope cs(crit_capture_);
   RTC_DCHECK(enabled_);
   // Report the delay for the first AEC component.
-  return WebRtcAec_system_delay(
-      WebRtcAec_aec_core(cancellers_[0]->state()));
+  return WebRtcAec_system_delay(WebRtcAec_aec_core(cancellers_[0]->state()));
 }
 
 void EchoCancellationImpl::PackRenderAudioBuffer(

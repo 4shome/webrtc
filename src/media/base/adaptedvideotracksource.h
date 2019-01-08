@@ -26,11 +26,12 @@ class AdaptedVideoTrackSource
     : public webrtc::Notifier<webrtc::VideoTrackSourceInterface> {
  public:
   AdaptedVideoTrackSource();
+  ~AdaptedVideoTrackSource() override;
 
  protected:
   // Allows derived classes to initialize |video_adapter_| with a custom
   // alignment.
-  AdaptedVideoTrackSource(int required_alignment);
+  explicit AdaptedVideoTrackSource(int required_alignment);
   // Checks the apply_rotation() flag. If the frame needs rotation, and it is a
   // plain memory frame, it is rotated. Subclasses producing native frames must
   // handle apply_rotation() themselves.
@@ -74,7 +75,7 @@ class AdaptedVideoTrackSource
   cricket::VideoAdapter video_adapter_;
 
   rtc::CriticalSection stats_crit_;
-  rtc::Optional<Stats> stats_ RTC_GUARDED_BY(stats_crit_);
+  absl::optional<Stats> stats_ RTC_GUARDED_BY(stats_crit_);
 
   VideoBroadcaster broadcaster_;
 };

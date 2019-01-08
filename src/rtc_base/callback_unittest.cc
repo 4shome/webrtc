@@ -19,9 +19,15 @@ namespace rtc {
 namespace {
 
 void f() {}
-int g() { return 42; }
-int h(int x) { return x * x; }
-void i(int& x) { x *= x; }  // NOLINT: Testing refs
+int g() {
+  return 42;
+}
+int h(int x) {
+  return x * x;
+}
+void i(int& x) {
+  x *= x;
+}  // NOLINT: Testing refs
 
 struct BindTester {
   int a() { return 24; }
@@ -31,11 +37,11 @@ struct BindTester {
 class RefCountedBindTester : public RefCountInterface {
  public:
   RefCountedBindTester() : count_(0) {}
-  int AddRef() const override {
-    return ++count_;
-  }
-  int Release() const override {
-    return --count_;
+  void AddRef() const override { ++count_; }
+  RefCountReleaseStatus Release() const override {
+    --count_;
+    return count_ == 0 ? RefCountReleaseStatus::kDroppedLastRef
+                       : RefCountReleaseStatus::kOtherRefsRemained;
   }
   int RefCount() const { return count_; }
 

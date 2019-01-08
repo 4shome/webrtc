@@ -15,15 +15,10 @@ namespace rtc {
 
 static const uint32_t kTimeout = 5000U;
 
-class NullSocketServerTest
-    : public testing::Test,
-      public MessageHandler {
- public:
-  NullSocketServerTest() {}
+class NullSocketServerTest : public testing::Test, public MessageHandler {
  protected:
-  virtual void OnMessage(Message* message) {
-    ss_.WakeUp();
-  }
+  void OnMessage(Message* message) override { ss_.WakeUp(); }
+
   NullSocketServer ss_;
 };
 
