@@ -232,9 +232,9 @@ void RtpTransportControllerSend::OnNetworkRouteChanged(
     BitrateConstraints bitrate_config = bitrate_configurator_.GetConfig();
     RTC_LOG(LS_INFO) << "Network route changed on transport " << transport_name
                      << ": new local network id "
-                     << network_route.local_network_id
+                     << network_route.local_candidate.network_id()
                      << " new remote network id "
-                     << network_route.remote_network_id
+                     << network_route.remote_candidate.network_id()
                      << " Reset bitrates to min: "
                      << bitrate_config.min_bitrate_bps
                      << " bps, start: " << bitrate_config.start_bitrate_bps

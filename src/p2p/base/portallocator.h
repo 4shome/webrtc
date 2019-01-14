@@ -181,6 +181,7 @@ struct RelayServerConfig {
   std::vector<std::string> tls_alpn_protocols;
   std::vector<std::string> tls_elliptic_curves;
   rtc::SSLCertificateVerifier* tls_cert_verifier = nullptr;
+  std::string peer_ip;
 };
 
 class PortAllocatorSession : public sigslot::has_slots<> {

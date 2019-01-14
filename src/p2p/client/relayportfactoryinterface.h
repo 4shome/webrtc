@@ -29,9 +29,9 @@ class TurnCustomizer;
 }  // namespace webrtc
 
 namespace cricket {
-class Port;
 struct ProtocolAddress;
 struct RelayServerConfig;
+class TurnPort;
 
 // A struct containing arguments to RelayPortFactory::Create()
 struct CreateRelayPortArgs {
@@ -44,6 +44,7 @@ struct CreateRelayPortArgs {
   std::string username;
   std::string password;
   std::string origin;
+  ProtocolType peer_transport;
   webrtc::TurnCustomizer* turn_customizer;
 };
 
@@ -56,13 +57,13 @@ class RelayPortFactoryInterface {
 
   // This variant is used for UDP connection to the relay server
   // using a already existing shared socket.
-  virtual std::unique_ptr<Port> Create(const CreateRelayPortArgs& args,
-                                       rtc::AsyncPacketSocket* udp_socket) = 0;
+  virtual std::unique_ptr<TurnPort> Create(const CreateRelayPortArgs& args,
+                                           rtc::AsyncPacketSocket* udp_socket) = 0;
 
   // This variant is used for the other cases.
-  virtual std::unique_ptr<Port> Create(const CreateRelayPortArgs& args,
-                                       int min_port,
-                                       int max_port) = 0;
+  virtual std::unique_ptr<TurnPort> Create(const CreateRelayPortArgs& args,
+                                           int min_port,
+                                           int max_port) = 0;
 };
 
 }  // namespace cricket

@@ -169,6 +169,19 @@ bool IsValidOfferToReceiveMedia(int value) {
          (value <= Options::kMaxOfferToReceiveMedia);
 }
 
+std::string ToCodecName(webrtc::VideoCodecType vct) {
+  switch (vct) {
+    case webrtc::kVideoCodecVP8:
+      return cricket::kVp8CodecName;
+    case webrtc::kVideoCodecVP9:
+      return cricket::kVp9CodecName;
+    case webrtc::kVideoCodecH264:
+      return cricket::kH264CodecName;
+  }
+  return "";
+}
+
+
 // Add options to |[audio/video]_media_description_options| from |senders|.
 void AddRtpSenderOptions(
     const std::vector<rtc::scoped_refptr<
@@ -180,14 +193,18 @@ void AddRtpSenderOptions(
     if (sender->media_type() == cricket::MEDIA_TYPE_AUDIO) {
       if (audio_media_description_options) {
         audio_media_description_options->AddAudioSender(
-            sender->id(), sender->internal()->stream_ids());
+            sender->id(), sender->internal()->stream_ids(), {});
       }
     } else {
       RTC_DCHECK(sender->media_type() == cricket::MEDIA_TYPE_VIDEO);
       if (video_media_description_options) {
+        std::vector<cricket::VideoCodec> video_codecs;
+        for (webrtc::VideoCodecType vct : sender->internal()->vcts) {
+          video_codecs.emplace_back(vct, ToCodecName(vct));
+        }
         video_media_description_options->AddVideoSender(
             sender->id(), sender->internal()->stream_ids(),
-            num_sim_layers);
+            num_sim_layers, video_codecs);
       }
     }
   }
@@ -3531,6 +3548,15 @@ void PeerConnection::OnIceCandidatesRemoved(
   Observer()->OnIceCandidatesRemoved(candidates);
 }
 
+void PeerConnection::OnNetworkRouteChanged(const rtc::NetworkRoute& route) {
+  RTC_DCHECK(signaling_thread()->IsCurrent());
+  if (IsClosed()) {
+    return;
+  }
+  observer_->OnIceSelectedCandidatePairChanged(
+      route.local_candidate, route.remote_candidate, route.connected);
+}
+
 void PeerConnection::ChangeSignalingState(
     PeerConnectionInterface::SignalingState signaling_state) {
   RTC_DCHECK(signaling_thread()->IsCurrent());
@@ -4691,6 +4717,14 @@ bool PeerConnection::InitializePortAllocator_n(
   if (configuration.tcp_candidate_policy == kTcpCandidatePolicyDisabled) {
     port_allocator_flags_ |= cricket::PORTALLOCATOR_DISABLE_TCP;
     RTC_LOG(LS_INFO) << "TCP candidates are disabled.";
+  } else if (configuration.tcp_candidate_policy == kTcpCandidatePolicyNoUdp) {
+    port_allocator_flags_ |= cricket::PORTALLOCATOR_DISABLE_UDP;
+    RTC_LOG(LS_INFO) << "UDP candidates are disabled.";
+  }
+
+  if (configuration.disable_udp_relay) {
+    port_allocator_flags_ |= cricket::PORTALLOCATOR_DISABLE_UDP_RELAY;
+    RTC_LOG(LS_INFO) << "UDP relay are disabled.";
   }
 
   if (configuration.candidate_network_policy ==

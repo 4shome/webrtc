@@ -15,6 +15,7 @@
 #include <numeric>
 #include <utility>
 
+#include "api/bitrate_constraints.h"
 #include "api/video/encoded_image.h"
 #include "api/video/i420_buffer.h"
 #include "modules/video_coding/include/video_codec_initializer.h"
@@ -579,10 +580,12 @@ void VideoStreamEncoder::ReconfigureEncoder() {
     }
 
     encoder_ = settings_.encoder_factory->CreateVideoEncoder(
-        encoder_config_.video_format);
+        encoder_config_.id, encoder_config_.video_format);
     // TODO(nisse): What to do if creating the encoder fails? Crash,
     // or just discard incoming frames?
     RTC_CHECK(encoder_);
+    encoder_config_.max_bitrate_bps = webrtc::MinPositive(
+        encoder_->MaxBitrate(), encoder_config_.max_bitrate_bps);
 
     const webrtc::VideoEncoderFactory::CodecInfo info =
         settings_.encoder_factory->QueryVideoEncoder(

@@ -33,9 +33,7 @@ namespace cricket {
 // TODO(juberti): Move this all to a future turnmessage.h
 //  static const int IPPROTO_UDP = 17;
 static const int kNonceTimeout = 60 * 60 * 1000;              // 60 minutes
-static const int kDefaultAllocationTimeout = 10 * 60 * 1000;  // 10 minutes
-static const int kPermissionTimeout = 5 * 60 * 1000;          //  5 minutes
-static const int kChannelTimeout = 10 * 60 * 1000;            // 10 minutes
+static const int kDefaultAllocationTimeout = 2 * 60 * 1000;   // 2 minutes
 
 static const int kMinChannelNumber = 0x4000;
 static const int kMaxChannelNumber = 0x7FFF;
@@ -54,49 +52,6 @@ inline bool IsTurnChannelData(uint16_t msg_type) {
 // IDs used for posted messages for TurnServerAllocation.
 enum {
   MSG_ALLOCATION_TIMEOUT,
-};
-
-// Encapsulates a TURN permission.
-// The object is created when a create permission request is received by an
-// allocation, and self-deletes when its lifetime timer expires.
-class TurnServerAllocation::Permission : public rtc::MessageHandler {
- public:
-  Permission(rtc::Thread* thread, const rtc::IPAddress& peer);
-  ~Permission() override;
-
-  const rtc::IPAddress& peer() const { return peer_; }
-  void Refresh();
-
-  sigslot::signal1<Permission*> SignalDestroyed;
-
- private:
-  void OnMessage(rtc::Message* msg) override;
-
-  rtc::Thread* thread_;
-  rtc::IPAddress peer_;
-};
-
-// Encapsulates a TURN channel binding.
-// The object is created when a channel bind request is received by an
-// allocation, and self-deletes when its lifetime timer expires.
-class TurnServerAllocation::Channel : public rtc::MessageHandler {
- public:
-  Channel(rtc::Thread* thread, int id,
-                     const rtc::SocketAddress& peer);
-  ~Channel() override;
-
-  int id() const { return id_; }
-  const rtc::SocketAddress& peer() const { return peer_; }
-  void Refresh();
-
-  sigslot::signal1<Channel*> SignalDestroyed;
-
- private:
-  void OnMessage(rtc::Message* msg) override;
-
-  rtc::Thread* thread_;
-  int id_;
-  rtc::SocketAddress peer_;
 };
 
 static bool InitResponse(const StunMessage* req, StunMessage* resp) {
@@ -182,6 +137,9 @@ void TurnServer::AcceptConnection(rtc::AsyncSocket* server_socket) {
   rtc::SocketAddress accept_addr;
   rtc::AsyncSocket* accepted_socket = server_socket->Accept(&accept_addr);
   if (accepted_socket != NULL) {
+    RTC_LOG(LS_INFO) << "Received internal TCP connection from address '"
+        << accepted_socket->GetRemoteAddress().ToString() << "'.";
+
     ProtocolType proto = server_listen_sockets_[server_socket];
     cricket::AsyncStunTCPSocket* tcp_socket =
         new cricket::AsyncStunTCPSocket(accepted_socket, false);
@@ -194,8 +152,15 @@ void TurnServer::AcceptConnection(rtc::AsyncSocket* server_socket) {
 
 void TurnServer::OnInternalSocketClose(rtc::AsyncPacketSocket* socket,
                                        int err) {
-  RTC_DCHECK(thread_checker_.CalledOnValidThread());
-  DestroyInternalSocket(socket);
+  RTC_LOG(LS_INFO) << "Internal TCP socket from '" << socket->GetRemoteAddress().ToString()
+      << "' closed.";
+  auto iter = internal_tcp_sock_to_alloc_.find(socket);
+  if (iter != internal_tcp_sock_to_alloc_.end()) {
+    iter->second->SignalDestroyed(iter->second);
+  } else {
+    RTC_LOG(LS_WARNING) << "Destroying unknown internal socket!";
+    DestroyInternalSocket(socket);
+  }
 }
 
 void TurnServer::OnInternalPacket(rtc::AsyncPacketSocket* socket,
@@ -219,9 +184,9 @@ void TurnServer::OnInternalPacket(rtc::AsyncPacketSocket* socket,
     TurnServerAllocation* allocation = FindAllocation(&conn);
     if (allocation) {
       allocation->HandleChannelData(data, size);
-    }
-    if (stun_message_observer_ != nullptr) {
-      stun_message_observer_->ReceivedChannelData(data, size);
+      if (stun_message_observer_ != nullptr) {
+        stun_message_observer_->ReceivedInternalData(allocation, data, size);
+      }
     }
   }
 }
@@ -237,7 +202,7 @@ void TurnServer::HandleStunMessage(TurnServerConnection* conn, const char* data,
   }
 
   if (stun_message_observer_ != nullptr) {
-    stun_message_observer_->ReceivedMessage(&msg);
+    stun_message_observer_->ReceivedMessage(conn, &msg);
   }
 
   // If it's a STUN binding request, handle that specially.
@@ -259,8 +224,9 @@ void TurnServer::HandleStunMessage(TurnServerConnection* conn, const char* data,
   // existing allocation, the key will already be cached.
   TurnServerAllocation* allocation = FindAllocation(conn);
   std::string key;
+  rtc::IPAddress expected_peer_ip;
   if (!allocation) {
-    GetKey(&msg, &key);
+    GetKey(conn, &msg, &key, &expected_peer_ip);
   } else {
     key = allocation->key();
   }
@@ -273,7 +239,7 @@ void TurnServer::HandleStunMessage(TurnServerConnection* conn, const char* data,
   }
 
   if (!allocation && msg.type() == STUN_ALLOCATE_REQUEST) {
-    HandleAllocateRequest(conn, &msg, key);
+    HandleAllocateRequest(conn, &msg, key, expected_peer_ip);
   } else if (allocation &&
              (msg.type() != STUN_ALLOCATE_REQUEST ||
               msg.transaction_id() == allocation->transaction_id())) {
@@ -287,6 +253,9 @@ void TurnServer::HandleStunMessage(TurnServerConnection* conn, const char* data,
       return;
     }
     allocation->HandleTurnMessage(&msg);
+    if (stun_message_observer_ != nullptr) {
+      stun_message_observer_->ReceivedInternalData(allocation, data, size);
+    }
   } else {
     // Allocation mismatch.
     SendErrorResponse(conn, &msg, STUN_ERROR_ALLOCATION_MISMATCH,
@@ -294,7 +263,9 @@ void TurnServer::HandleStunMessage(TurnServerConnection* conn, const char* data,
   }
 }
 
-bool TurnServer::GetKey(const StunMessage* msg, std::string* key) {
+bool TurnServer::GetKey(const TurnServerConnection* conn,
+                        const StunMessage* msg, std::string* key,
+                        rtc::IPAddress* expected_peer_ip) {
   RTC_DCHECK(thread_checker_.CalledOnValidThread());
   const StunByteStringAttribute* username_attr =
       msg->GetByteString(STUN_ATTR_USERNAME);
@@ -303,7 +274,8 @@ bool TurnServer::GetKey(const StunMessage* msg, std::string* key) {
   }
 
   std::string username = username_attr->GetString();
-  return (auth_hook_ != NULL && auth_hook_->GetKey(username, realm_, key));
+  return (auth_hook_ != NULL && auth_hook_->GetKey(
+      conn, username, realm_, key, expected_peer_ip));
 }
 
 bool TurnServer::CheckAuthorization(TurnServerConnection* conn,
@@ -383,7 +355,8 @@ void TurnServer::HandleBindingRequest(TurnServerConnection* conn,
 
 void TurnServer::HandleAllocateRequest(TurnServerConnection* conn,
                                        const TurnMessage* msg,
-                                       const std::string& key) {
+                                       const std::string& key,
+                                       const rtc::IPAddress& expected_peer_ip) {
   RTC_DCHECK(thread_checker_.CalledOnValidThread());
   // Check the parameters in the request.
   const StunUInt32Attribute* transport_attr =
@@ -396,7 +369,7 @@ void TurnServer::HandleAllocateRequest(TurnServerConnection* conn,
 
   // Only UDP is supported right now.
   int proto = transport_attr->value() >> 24;
-  if (proto != IPPROTO_UDP) {
+  if (proto != IPPROTO_UDP && proto != IPPROTO_TCP) {
     SendErrorResponse(conn, msg, STUN_ERROR_UNSUPPORTED_PROTOCOL,
                       STUN_ERROR_REASON_UNSUPPORTED_PROTOCOL);
     return;
@@ -404,7 +377,8 @@ void TurnServer::HandleAllocateRequest(TurnServerConnection* conn,
 
   // Create the allocation and let it send the success response.
   // If the actual socket allocation fails, send an internal error.
-  TurnServerAllocation* alloc = CreateAllocation(conn, proto, key);
+  TurnServerAllocation* alloc = CreateAllocation(conn, proto, key,
+                                                 expected_peer_ip);
   if (alloc) {
     alloc->HandleTurnMessage(msg);
   } else {
@@ -458,19 +432,34 @@ TurnServerAllocation* TurnServer::FindAllocation(TurnServerConnection* conn) {
 
 TurnServerAllocation* TurnServer::CreateAllocation(TurnServerConnection* conn,
                                                    int proto,
-                                                   const std::string& key) {
+                                                   const std::string& key,
+                                                   const rtc::IPAddress& expected_peer_ip) {
   RTC_DCHECK(thread_checker_.CalledOnValidThread());
-  rtc::AsyncPacketSocket* external_socket = (external_socket_factory_) ?
-      external_socket_factory_->CreateUdpSocket(external_addr_, 0, 0) : NULL;
+  if (external_socket_factory_ == nullptr) return nullptr;
+  rtc::AsyncPacketSocket* external_socket = nullptr;
+  if (proto == IPPROTO_UDP) {
+    external_socket = external_socket_factory_->CreateUdpSocket(external_addr_, 0, 0);
+  } else {
+    external_socket = external_socket_factory_->CreateServerTcpSocket(external_addr_, 0, 0, 0);
+  }
   if (!external_socket) {
     return NULL;
   }
 
   // The Allocation takes ownership of the socket.
   TurnServerAllocation* allocation = new TurnServerAllocation(this,
-      thread_, *conn, external_socket, key);
+      thread_, *conn, proto, external_socket, key, expected_peer_ip);
   allocation->SignalDestroyed.connect(this, &TurnServer::OnAllocationDestroyed);
   allocations_[*conn].reset(allocation);
+  {
+    InternalSocketMap::iterator iter = server_sockets_.find(conn->socket());
+    if (iter != server_sockets_.end() && iter->second != cricket::PROTO_UDP) {
+      internal_tcp_sock_to_alloc_[conn->socket()] = allocation;
+    }
+  }
+  if (stun_message_observer_) {
+    stun_message_observer_->CreatedAllocation(allocation);
+  }
   return allocation;
 }
 
@@ -525,14 +514,7 @@ void TurnServer::SendStun(TurnServerConnection* conn, StunMessage* msg) {
         STUN_ATTR_SOFTWARE, software_));
   }
   msg->Write(&buf);
-  Send(conn, buf);
-}
-
-void TurnServer::Send(TurnServerConnection* conn,
-                      const rtc::ByteBufferWriter& buf) {
-  RTC_DCHECK(thread_checker_.CalledOnValidThread());
-  rtc::PacketOptions options;
-  conn->socket()->SendTo(buf.Data(), buf.Length(), conn->src(), options);
+  conn->Send(buf);
 }
 
 void TurnServer::OnAllocationDestroyed(TurnServerAllocation* allocation) {
@@ -547,11 +529,14 @@ void TurnServer::OnAllocationDestroyed(TurnServerAllocation* allocation) {
   if (iter != server_sockets_.end() && iter->second != cricket::PROTO_UDP) {
     DestroyInternalSocket(socket);
   }
+  internal_tcp_sock_to_alloc_.erase(socket);
 
   AllocationMap::iterator it = allocations_.find(*(allocation->conn()));
   if (it != allocations_.end()) {
-    it->second.release();
     allocations_.erase(it);
+  } else {
+    RTC_LOG(LS_WARNING) << "Cannot find " << allocation->ToString();
+    delete allocation;
   }
 }
 
@@ -577,13 +562,20 @@ void TurnServer::FreeSockets() {
   sockets_to_delete_.clear();
 }
 
+namespace {
+const char* const kProtos[] = {
+    "udp:", "tcp:", "ssltcp:", "tls:"
+};
+}
+
 TurnServerConnection::TurnServerConnection(const rtc::SocketAddress& src,
                                            ProtocolType proto,
                                            rtc::AsyncPacketSocket* socket)
     : src_(src),
-      dst_(socket->GetRemoteAddress()),
+      dst_(socket->GetLocalAddress()),
       proto_(proto),
-      socket_(socket) {
+      socket_(socket),
+      id_(kProtos[proto_] + src_.ToString()) {
 }
 
 bool TurnServerConnection::operator==(const TurnServerConnection& c) const {
@@ -594,46 +586,85 @@ bool TurnServerConnection::operator<(const TurnServerConnection& c) const {
   return std::tie(src_, dst_, proto_) < std::tie(c.src_, c.dst_, c.proto_);
 }
 
-std::string TurnServerConnection::ToString() const {
-  const char* const kProtos[] = {
-      "unknown", "udp", "tcp", "ssltcp"
-  };
-  rtc::StringBuilder ost;
-  ost << src_.ToString() << "-" << dst_.ToString() << ":"<< kProtos[proto_];
-  return ost.Release();
+void TurnServerConnection::Send(const rtc::ByteBufferWriter& buf) {
+  rtc::PacketOptions options;
+  socket_->SendTo(buf.Data(), buf.Length(), src_, options);
 }
 
 TurnServerAllocation::TurnServerAllocation(TurnServer* server,
                                            rtc::Thread* thread,
                                            const TurnServerConnection& conn,
+                                           int proto,
                                            rtc::AsyncPacketSocket* socket,
-                                           const std::string& key)
+                                           const std::string& key,
+                                           const rtc::IPAddress& peer_ip)
     : server_(server),
       thread_(thread),
       conn_(conn),
-      external_socket_(socket),
-      key_(key) {
-  external_socket_->SignalReadPacket.connect(
-      this, &TurnServerAllocation::OnExternalPacket);
+      proto_(proto),
+      key_(key),
+      peer_ip_(peer_ip),
+      id_(ComputeId()) {
+  if (proto_ == IPPROTO_UDP) {
+    external_udp_socket_.reset(socket);
+    external_udp_socket_->SignalReadPacket.connect(
+        this, &TurnServerAllocation::OnExternalPacket);
+  } else {
+    external_server_socket_.reset(socket);
+    external_server_socket_->SignalNewConnection.connect(
+        this, &TurnServerAllocation::OnNewExternalConnection);
+  }
 }
 
 TurnServerAllocation::~TurnServerAllocation() {
-  for (ChannelList::iterator it = channels_.begin();
-       it != channels_.end(); ++it) {
-    delete *it;
-  }
-  for (PermissionList::iterator it = perms_.begin();
-       it != perms_.end(); ++it) {
-    delete *it;
-  }
   thread_->Clear(this, MSG_ALLOCATION_TIMEOUT);
   RTC_LOG(LS_INFO) << ToString() << ": Allocation destroyed";
+  if (server_->stun_message_observer_) {
+    server_->stun_message_observer_->DestroyedAllocation(this);
+  }
+}
+
+std::string TurnServerAllocation::ComputeId() const {
+  return conn_.ToString() + (proto_ == IPPROTO_TCP ? "=>tcp:" : "=>udp:") + peer_ip_.ToString();
+}
+
+void TurnServerAllocation::OnNewExternalConnection(rtc::AsyncPacketSocket* l,
+                                                   rtc::AsyncPacketSocket* c) {
+  const auto& remote_addr = c->GetRemoteAddress();
+  if (server_->enable_permission_checks_ && remote_addr.ipaddr() != peer_ip_) {
+    RTC_LOG(LS_WARNING) << "Received external TCP connection from unexpected address '"
+        << remote_addr.ToString() << "'. Closing it...";
+    delete c;
+  } else {
+    RTC_LOG(LS_INFO) << "Received external TCP connection from address '"
+        << remote_addr.ToString() << "'.";
+    peer_addr_ = remote_addr;
+    external_tcp_socket_.reset(c);
+    c->SignalReadPacket.connect(this, &TurnServerAllocation::OnExternalPacket);
+    c->SignalClose.connect(this, &TurnServerAllocation::OnExternalSocketClose);
+    // Don't reset external_server_socket_, which causes deadlock.
+    external_server_socket_->Close();
+  }
+}
+
+void TurnServerAllocation::OnExternalSocketClose(rtc::AsyncPacketSocket* socket,
+                                                 int err) {
+  RTC_LOG(LS_INFO) << "External TCP socket from '" << socket->GetRemoteAddress().ToString()
+      << "' closed.";
+  SignalDestroyed(this);
+}
+
+std::string TurnServerAllocation::internal_addr() const {
+  return conn_.ToString();
+}
+
+std::string TurnServerAllocation::external_addr() const {
+  return (proto_ == IPPROTO_TCP ? "tcp:" : "udp:") +
+      (peer_addr_.ipaddr().IsNil() ? peer_ip_.ToString() : peer_addr_.ToString());
 }
 
 std::string TurnServerAllocation::ToString() const {
-  rtc::StringBuilder ost;
-  ost << "Alloc[" << conn_.ToString() << "]";
-  return ost.Release();
+  return "Alloc[" + id_ + "]";
 }
 
 void TurnServerAllocation::HandleTurnMessage(const TurnMessage* msg) {
@@ -690,7 +721,9 @@ void TurnServerAllocation::HandleAllocateRequest(const TurnMessage* msg) {
   auto mapped_addr_attr = absl::make_unique<StunXorAddressAttribute>(
       STUN_ATTR_XOR_MAPPED_ADDRESS, conn_.src());
   auto relayed_addr_attr = absl::make_unique<StunXorAddressAttribute>(
-      STUN_ATTR_XOR_RELAYED_ADDRESS, external_socket_->GetLocalAddress());
+      STUN_ATTR_XOR_RELAYED_ADDRESS, (proto_ == IPPROTO_UDP ?
+          external_udp_socket_->GetLocalAddress() :
+          external_server_socket_->GetLocalAddress()));
   auto lifetime_attr =
       absl::make_unique<StunUInt32Attribute>(STUN_ATTR_LIFETIME, lifetime_secs);
   response.AddAttribute(std::move(mapped_addr_attr));
@@ -735,14 +768,13 @@ void TurnServerAllocation::HandleSendIndication(const TurnMessage* msg) {
   }
 
   // If a permission exists, send the data on to the peer.
-  if (HasPermission(peer_attr->GetAddress().ipaddr())) {
-    SendExternal(data_attr->bytes(), data_attr->length(),
-                 peer_attr->GetAddress());
+  const auto peer = peer_attr->GetAddress();
+  if (!server_->enable_permission_checks_ || peer.ipaddr() == peer_ip_) {
+    SendExternal(data_attr->bytes(), data_attr->length(), peer_addr_);
   } else {
     RTC_LOG(LS_WARNING) << ToString()
-                        << ": Received send indication without permission"
-                           " peer="
-                        << peer_attr->GetAddress().ToString();
+                        << ": Received send indication without permission peer="
+                        << peer.ToString();
   }
 }
 
@@ -756,18 +788,17 @@ void TurnServerAllocation::HandleCreatePermissionRequest(
     return;
   }
 
-  if (server_->reject_private_addresses_ &&
-      rtc::IPIsPrivate(peer_attr->GetAddress().ipaddr())) {
+  const rtc::SocketAddress peer_addr = peer_attr->GetAddress();
+  if ((server_->reject_private_addresses_ && rtc::IPIsPrivate(peer_addr.ipaddr())) ||
+      (server_->enable_permission_checks_ && peer_ip_ != peer_addr.ipaddr())) {
+    RTC_LOG(LS_WARNING) << "Rejecting CreatePermissionRequest for "
+        << peer_addr.ToString() << ", expecting " << peer_ip_.ToString();
     SendErrorResponse(msg, STUN_ERROR_FORBIDDEN, STUN_ERROR_REASON_FORBIDDEN);
     return;
   }
+  peer_addr_ = peer_addr;
 
-  // Add this permission.
-  AddPermission(peer_attr->GetAddress().ipaddr());
-
-  RTC_LOG(LS_INFO) << ToString()
-                   << ": Created permission, peer="
-                   << peer_attr->GetAddress().ToString();
+  RTC_LOG(LS_INFO) << "Created permission, peer=" << peer_addr.ToString();
 
   // Send a success response.
   TurnMessage response;
@@ -787,37 +818,23 @@ void TurnServerAllocation::HandleChannelBindRequest(const TurnMessage* msg) {
   }
 
   // Check that channel id is valid.
-  int channel_id = channel_attr->value() >> 16;
-  if (channel_id < kMinChannelNumber || channel_id > kMaxChannelNumber) {
+  const int channel_id = channel_attr->value() >> 16;
+  const auto peer_addr = peer_attr->GetAddress();
+  if (channel_id < kMinChannelNumber || channel_id > kMaxChannelNumber ||
+      (server_->enable_permission_checks_ && peer_addr.ipaddr() != peer_ip_)) {
     SendBadRequestResponse(msg);
     return;
   }
 
-  // Check that this channel id isn't bound to another transport address, and
-  // that this transport address isn't bound to another channel id.
-  Channel* channel1 = FindChannel(channel_id);
-  Channel* channel2 = FindChannel(peer_attr->GetAddress());
-  if (channel1 != channel2) {
+  if (channel_id_ == -1) {
+    channel_id_ = channel_id;
+  } else if (channel_id_ != channel_id) {
     SendBadRequestResponse(msg);
     return;
   }
+  peer_addr_ = peer_addr;
 
-  // Add or refresh this channel.
-  if (!channel1) {
-    channel1 = new Channel(thread_, channel_id, peer_attr->GetAddress());
-    channel1->SignalDestroyed.connect(this,
-        &TurnServerAllocation::OnChannelDestroyed);
-    channels_.push_back(channel1);
-  } else {
-    channel1->Refresh();
-  }
-
-  // Channel binds also refresh permissions.
-  AddPermission(peer_attr->GetAddress().ipaddr());
-
-  RTC_LOG(LS_INFO) << ToString()
-                   << ": Bound channel, id=" << channel_id
-                   << ", peer=" << peer_attr->GetAddress().ToString();
+  RTC_LOG(LS_INFO) << "Bound channel, id=" << channel_id << ", peer=" << peer_addr.ToString();
 
   // Send a success response.
   TurnMessage response;
@@ -828,11 +845,10 @@ void TurnServerAllocation::HandleChannelBindRequest(const TurnMessage* msg) {
 void TurnServerAllocation::HandleChannelData(const char* data, size_t size) {
   // Extract the channel number from the data.
   uint16_t channel_id = rtc::GetBE16(data);
-  Channel* channel = FindChannel(channel_id);
-  if (channel) {
+  if (channel_id_ != -1 && channel_id == channel_id_) {
     // Send the data to the peer address.
     SendExternal(data + TURN_CHANNEL_HEADER_SIZE,
-                 size - TURN_CHANNEL_HEADER_SIZE, channel->peer());
+                 size - TURN_CHANNEL_HEADER_SIZE, peer_addr_);
   } else {
     RTC_LOG(LS_WARNING) << ToString()
                         << ": Received channel data for invalid channel, id="
@@ -845,17 +861,25 @@ void TurnServerAllocation::OnExternalPacket(
     const char* data, size_t size,
     const rtc::SocketAddress& addr,
     const rtc::PacketTime& packet_time) {
-  RTC_DCHECK(external_socket_.get() == socket);
-  Channel* channel = FindChannel(addr);
-  if (channel) {
+  if (channel_id_ != -1 && addr == peer_addr_) {
     // There is a channel bound to this address. Send as a channel message.
     rtc::ByteBufferWriter buf;
-    buf.WriteUInt16(channel->id());
+    buf.WriteUInt16(channel_id_);
     buf.WriteUInt16(static_cast<uint16_t>(size));
     buf.WriteBytes(data, size);
-    server_->Send(&conn_, buf);
-  } else if (!server_->enable_permission_checks_ ||
-             HasPermission(addr.ipaddr())) {
+    conn_.Send(buf);
+    if (server_->stun_message_observer_) {
+      server_->stun_message_observer_->ReceivedExternalData(
+          this, data, size);
+    }
+  } else if (channel_id_ == -1 && (!server_->enable_permission_checks_ ||
+                                   // NOTE: We don't check port to make it it
+                                   // works with port-dependent NAT.
+                                   peer_ip_ == addr.ipaddr())) {
+    if (!peer_addr_.ipaddr().IsNil() && peer_addr_ != addr) {
+      RTC_LOG(LS_WARNING) << "Received DataIndication from a different address: "
+          << peer_addr_.ToString() << " => " << addr.ToString();
+    }
     // No channel, but a permission exists. Send as a data indication.
     TurnMessage msg;
     msg.SetType(TURN_DATA_INDICATION);
@@ -866,6 +890,10 @@ void TurnServerAllocation::OnExternalPacket(
     msg.AddAttribute(
         absl::make_unique<StunByteStringAttribute>(STUN_ATTR_DATA, data, size));
     server_->SendStun(&conn_, &msg);
+    if (server_->stun_message_observer_) {
+      server_->stun_message_observer_->ReceivedExternalData(
+          this, data, size);
+    }
   } else {
     RTC_LOG(LS_WARNING)
         << ToString()
@@ -884,51 +912,6 @@ int TurnServerAllocation::ComputeLifetime(const TurnMessage* msg) {
   return lifetime;
 }
 
-bool TurnServerAllocation::HasPermission(const rtc::IPAddress& addr) {
-  return (FindPermission(addr) != NULL);
-}
-
-void TurnServerAllocation::AddPermission(const rtc::IPAddress& addr) {
-  Permission* perm = FindPermission(addr);
-  if (!perm) {
-    perm = new Permission(thread_, addr);
-    perm->SignalDestroyed.connect(
-        this, &TurnServerAllocation::OnPermissionDestroyed);
-    perms_.push_back(perm);
-  } else {
-    perm->Refresh();
-  }
-}
-
-TurnServerAllocation::Permission* TurnServerAllocation::FindPermission(
-    const rtc::IPAddress& addr) const {
-  for (PermissionList::const_iterator it = perms_.begin();
-       it != perms_.end(); ++it) {
-    if ((*it)->peer() == addr)
-      return *it;
-  }
-  return NULL;
-}
-
-TurnServerAllocation::Channel* TurnServerAllocation::FindChannel(
-    int channel_id) const {
-  for (ChannelList::const_iterator it = channels_.begin();
-       it != channels_.end(); ++it) {
-    if ((*it)->id() == channel_id)
-      return *it;
-  }
-  return NULL;
-}
-
-TurnServerAllocation::Channel* TurnServerAllocation::FindChannel(
-    const rtc::SocketAddress& addr) const {
-  for (ChannelList::const_iterator it = channels_.begin();
-       it != channels_.end(); ++it) {
-    if ((*it)->peer() == addr)
-      return *it;
-  }
-  return NULL;
-}
 
 void TurnServerAllocation::SendResponse(TurnMessage* msg) {
   // Success responses always have M-I.
@@ -946,72 +929,18 @@ void TurnServerAllocation::SendErrorResponse(const TurnMessage* req, int code,
 }
 
 void TurnServerAllocation::SendExternal(const void* data, size_t size,
-                                  const rtc::SocketAddress& peer) {
+                                        const rtc::SocketAddress& peer) {
   rtc::PacketOptions options;
-  external_socket_->SendTo(data, size, peer, options);
+  if (proto_ == IPPROTO_UDP) {
+    external_udp_socket_->SendTo(data, size, peer, options);
+  } else if (external_tcp_socket_) {
+    external_tcp_socket_->Send(data, size, options);
+  }
 }
 
 void TurnServerAllocation::OnMessage(rtc::Message* msg) {
   RTC_DCHECK(msg->message_id == MSG_ALLOCATION_TIMEOUT);
   SignalDestroyed(this);
-  delete this;
-}
-
-void TurnServerAllocation::OnPermissionDestroyed(Permission* perm) {
-  PermissionList::iterator it = std::find(perms_.begin(), perms_.end(), perm);
-  RTC_DCHECK(it != perms_.end());
-  perms_.erase(it);
-}
-
-void TurnServerAllocation::OnChannelDestroyed(Channel* channel) {
-  ChannelList::iterator it =
-      std::find(channels_.begin(), channels_.end(), channel);
-  RTC_DCHECK(it != channels_.end());
-  channels_.erase(it);
-}
-
-TurnServerAllocation::Permission::Permission(rtc::Thread* thread,
-                                   const rtc::IPAddress& peer)
-    : thread_(thread), peer_(peer) {
-  Refresh();
-}
-
-TurnServerAllocation::Permission::~Permission() {
-  thread_->Clear(this, MSG_ALLOCATION_TIMEOUT);
-}
-
-void TurnServerAllocation::Permission::Refresh() {
-  thread_->Clear(this, MSG_ALLOCATION_TIMEOUT);
-  thread_->PostDelayed(RTC_FROM_HERE, kPermissionTimeout, this,
-                       MSG_ALLOCATION_TIMEOUT);
-}
-
-void TurnServerAllocation::Permission::OnMessage(rtc::Message* msg) {
-  RTC_DCHECK(msg->message_id == MSG_ALLOCATION_TIMEOUT);
-  SignalDestroyed(this);
-  delete this;
-}
-
-TurnServerAllocation::Channel::Channel(rtc::Thread* thread, int id,
-                             const rtc::SocketAddress& peer)
-    : thread_(thread), id_(id), peer_(peer) {
-  Refresh();
-}
-
-TurnServerAllocation::Channel::~Channel() {
-  thread_->Clear(this, MSG_ALLOCATION_TIMEOUT);
-}
-
-void TurnServerAllocation::Channel::Refresh() {
-  thread_->Clear(this, MSG_ALLOCATION_TIMEOUT);
-  thread_->PostDelayed(RTC_FROM_HERE, kChannelTimeout, this,
-                       MSG_ALLOCATION_TIMEOUT);
-}
-
-void TurnServerAllocation::Channel::OnMessage(rtc::Message* msg) {
-  RTC_DCHECK(msg->message_id == MSG_ALLOCATION_TIMEOUT);
-  SignalDestroyed(this);
-  delete this;
 }
 
 }  // namespace cricket

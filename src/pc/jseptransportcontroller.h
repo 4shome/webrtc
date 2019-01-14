@@ -58,6 +58,8 @@ class JsepTransportController : public sigslot::has_slots<> {
         const std::string& mid,
         RtpTransportInternal* rtp_transport,
         cricket::DtlsTransportInternal* dtls_transport) = 0;
+
+    virtual void OnNetworkRouteChanged(const rtc::NetworkRoute& route);
   };
 
   struct Config {
@@ -300,6 +302,7 @@ class JsepTransportController : public sigslot::has_slots<> {
                                       const cricket::Candidates& candidates);
   void OnTransportRoleConflict_n(cricket::IceTransportInternal* transport);
   void OnTransportStateChanged_n(cricket::IceTransportInternal* transport);
+  void OnNetworkRouteChanged_n(absl::optional<rtc::NetworkRoute> route);
 
   void UpdateAggregateStates_n();
 

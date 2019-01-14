@@ -24,6 +24,7 @@
 #include "api/proxy.h"
 #include "api/rtcerror.h"
 #include "api/rtpparameters.h"
+#include "common_types.h"
 #include "rtc_base/refcount.h"
 #include "rtc_base/scoped_ref_ptr.h"
 
@@ -80,6 +81,10 @@ class RtpSenderInterface : public rtc::RefCountInterface {
   // user. This can be used to update the state of the object.
   virtual rtc::scoped_refptr<FrameEncryptorInterface> GetFrameEncryptor() const;
 
+  virtual void AddVideoCodecType(VideoCodecType vct) { vcts.push_back(vct); }
+
+  std::vector<VideoCodecType> vcts;
+
  protected:
   ~RtpSenderInterface() override = default;
 };
@@ -104,6 +109,7 @@ PROXY_METHOD1(void,
               rtc::scoped_refptr<FrameEncryptorInterface>);
 PROXY_CONSTMETHOD0(rtc::scoped_refptr<FrameEncryptorInterface>,
                    GetFrameEncryptor);
+PROXY_METHOD1(void, AddVideoCodecType, VideoCodecType);
 END_PROXY_MAP()
 
 }  // namespace webrtc

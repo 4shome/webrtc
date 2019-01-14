@@ -202,6 +202,8 @@ class VideoEncoder {
 
   virtual bool SupportsNativeHandle() const;
   virtual const char* ImplementationName() const;
+
+  virtual int MaxBitrate() const { return 0; }
 };
 }  // namespace webrtc
 #endif  // API_VIDEO_CODECS_VIDEO_ENCODER_H_

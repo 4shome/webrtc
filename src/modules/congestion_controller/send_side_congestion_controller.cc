@@ -235,8 +235,8 @@ void SendSideCongestionController::OnNetworkRouteChanged(
   bitrate_controller_->ResetBitrates(bitrate_bps, min_bitrate_bps,
                                      max_bitrate_bps);
 
-  transport_feedback_adapter_.SetNetworkIds(network_route.local_network_id,
-                                            network_route.remote_network_id);
+  transport_feedback_adapter_.SetNetworkIds(network_route.local_candidate.network_id(),
+                                            network_route.remote_candidate.network_id());
   {
     rtc::CritScope cs(&bwe_lock_);
     transport_overhead_bytes_per_packet_ = network_route.packet_overhead;

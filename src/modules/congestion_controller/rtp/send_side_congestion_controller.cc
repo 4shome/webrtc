@@ -454,8 +454,8 @@ void SendSideCongestionController::OnNetworkRouteChanged(
     int start_bitrate_bps,
     int min_bitrate_bps,
     int max_bitrate_bps) {
-  transport_feedback_adapter_.SetNetworkIds(network_route.local_network_id,
-                                            network_route.remote_network_id);
+  transport_feedback_adapter_.SetNetworkIds(network_route.local_candidate.network_id(),
+                                            network_route.remote_candidate.network_id());
   transport_overhead_bytes_per_packet_ = network_route.packet_overhead;
 
   NetworkRouteChange msg;

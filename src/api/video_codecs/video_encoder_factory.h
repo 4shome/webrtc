@@ -12,6 +12,7 @@
 #define API_VIDEO_CODECS_VIDEO_ENCODER_FACTORY_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace webrtc {
@@ -47,7 +48,7 @@ class VideoEncoderFactory {
 
   // Creates a VideoEncoder for the specified format.
   virtual std::unique_ptr<VideoEncoder> CreateVideoEncoder(
-      const SdpVideoFormat& format) = 0;
+      const std::string& id, const SdpVideoFormat& format) = 0;
 
   virtual ~VideoEncoderFactory() {}
 };

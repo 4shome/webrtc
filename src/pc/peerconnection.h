@@ -380,6 +380,7 @@ class PeerConnection : public PeerConnectionInternal,
   // Some local ICE candidates have been removed.
   void OnIceCandidatesRemoved(
       const std::vector<cricket::Candidate>& candidates);
+  void OnNetworkRouteChanged(const rtc::NetworkRoute& route) override;
 
   // Update the state, signaling if necessary.
   void ChangeSignalingState(SignalingState signaling_state);

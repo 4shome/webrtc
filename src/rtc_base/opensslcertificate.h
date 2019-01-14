@@ -11,7 +11,7 @@
 #ifndef RTC_BASE_OPENSSLCERTIFICATE_H_
 #define RTC_BASE_OPENSSLCERTIFICATE_H_
 
-#include <openssl/base.h>  // for X509, ssl_ctx_st
+#include <openssl/evp.h>  // for X509, ssl_ctx_st
 
 #include <stddef.h>  // for size_t
 #include <stdint.h>  // for int64_t

@@ -11,7 +11,7 @@
 #ifndef RTC_BASE_OPENSSLIDENTITY_H_
 #define RTC_BASE_OPENSSLIDENTITY_H_
 
-#include <openssl/base.h>  // for EVP_PKEY, ssl_ctx_st
+#include <openssl/evp.h>  // for EVP_PKEY, ssl_ctx_st
 
 #include <ctime>   // for time_t
 #include <memory>  // for unique_ptr

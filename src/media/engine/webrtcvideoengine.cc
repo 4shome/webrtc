@@ -1519,7 +1519,8 @@ WebRtcVideoChannel::WebRtcVideoSendStream::WebRtcVideoSendStream(
     // TODO(deadbeef): Don't duplicate information between send_params,
     // rtp_extensions, options, etc.
     const VideoSendParameters& send_params)
-    : worker_thread_(rtc::Thread::Current()),
+    : id_(sp.id),
+      worker_thread_(rtc::Thread::Current()),
       ssrcs_(sp.ssrcs),
       ssrc_groups_(sp.ssrc_groups),
       call_(call),
@@ -1831,6 +1832,7 @@ WebRtcVideoChannel::WebRtcVideoSendStream::CreateVideoEncoderConfig(
     const VideoCodec& codec) const {
   RTC_DCHECK_RUN_ON(&thread_checker_);
   webrtc::VideoEncoderConfig encoder_config;
+  encoder_config.id = id_;
   encoder_config.codec_type = webrtc::PayloadStringToCodecType(codec.name);
   encoder_config.video_format =
       webrtc::SdpVideoFormat(codec.name, codec.params);
