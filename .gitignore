@@ -4,3 +4,8 @@ libwebrtc.a
 test_webrtc.cc
 test_webrtc
 *.o
+*.swp
+*.swo
+tags
+*.pb.h
+*.pb.cc
