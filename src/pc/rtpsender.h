@@ -61,6 +61,17 @@ class RtpSenderInternal : public RtpSenderInterface {
   // otherwise remains constant. Used to generate IDs for stats.
   // The special value zero means that no track is attached.
   virtual int AttachmentId() const = 0;
+
+  void AddVideoCodecType(VideoCodecType vct) override {
+    vcts_.push_back(vct);
+  }
+
+  std::vector<VideoCodecType> GetVideoCodecTypes() override {
+    return vcts_;
+  }
+
+ private:
+  std::vector<VideoCodecType> vcts_;
 };
 
 // LocalAudioSinkAdapter receives data callback as a sink to the local

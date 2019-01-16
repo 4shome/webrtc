@@ -199,7 +199,7 @@ void AddRtpSenderOptions(
       RTC_DCHECK(sender->media_type() == cricket::MEDIA_TYPE_VIDEO);
       if (video_media_description_options) {
         std::vector<cricket::VideoCodec> video_codecs;
-        for (webrtc::VideoCodecType vct : sender->internal()->vcts) {
+        for (webrtc::VideoCodecType vct : sender->internal()->GetVideoCodecTypes()) {
           video_codecs.emplace_back(vct, ToCodecName(vct));
         }
         video_media_description_options->AddVideoSender(
@@ -3791,12 +3791,15 @@ GetMediaDescriptionOptionsForTransceiver(
       (RtpTransceiverDirectionHasSend(transceiver->direction()) ||
        transceiver->internal()->has_ever_been_used_to_send())) {
     cricket::SenderOptions sender_options;
-    sender_options.track_id = transceiver->sender()->id();
-    sender_options.stream_ids = transceiver->sender()->stream_ids();
-    int num_send_encoding_layers =
-        transceiver->sender()->init_send_encodings().size();
+    auto sender = transceiver->sender();
+    sender_options.track_id = sender->id();
+    sender_options.stream_ids = sender->stream_ids();
+    int num_send_encoding_layers = sender->init_send_encodings().size();
     sender_options.num_sim_layers =
         !num_send_encoding_layers ? 1 : num_send_encoding_layers;
+    for (webrtc::VideoCodecType vct : sender->GetVideoCodecTypes()) {
+        sender_options.video_codecs.emplace_back(vct, ToCodecName(vct));
+    }
     media_description_options.sender_options.push_back(sender_options);
   }
   return media_description_options;
