@@ -286,6 +286,7 @@ bool TurnServer::CheckAuthorization(TurnServerConnection* conn,
 
   // Fail if no M-I.
   if (!mi_attr) {
+    LOG(LS_WARNING) << "Missing MESSAGE_INTEGRITY attribute.";
     SendErrorResponseWithRealmAndNonce(conn, msg, STUN_ERROR_UNAUTHORIZED,
                                        STUN_ERROR_REASON_UNAUTHORIZED);
     return false;
@@ -308,6 +309,7 @@ bool TurnServer::CheckAuthorization(TurnServerConnection* conn,
   // Fail if bad username or M-I.
   // We need |data| and |size| for the call to ValidateMessageIntegrity.
   if (key.empty() || !StunMessage::ValidateMessageIntegrity(data, size, key)) {
+    LOG(LS_WARNING) << "No key or invalid MESSAGE_INTEGRITY.";
     SendErrorResponseWithRealmAndNonce(conn, msg, STUN_ERROR_UNAUTHORIZED,
                                        STUN_ERROR_REASON_UNAUTHORIZED);
     return false;
@@ -355,7 +357,6 @@ void TurnServer::HandleAllocateRequest(TurnServerConnection* conn,
     return;
   }
 
-  // Only UDP is supported right now.
   int proto = transport_attr->value() >> 24;
   if (proto != IPPROTO_UDP && proto != IPPROTO_TCP) {
     SendErrorResponse(conn, msg, STUN_ERROR_UNSUPPORTED_PROTOCOL,

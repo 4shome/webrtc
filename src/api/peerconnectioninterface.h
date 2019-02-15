@@ -375,6 +375,9 @@ class PeerConnectionInterface : public rtc::RefCountInterface {
     bool enable_rtp_data_channel = false;
 
     bool disable_udp_relay = false;
+    bool disable_tcp_relay = false;
+    bool disable_udp_peer_relay = false;
+    bool disable_tcp_peer_relay = false;
 
     // Minimum bitrate at which screencast video tracks will be encoded at.
     // This means adding padding bits up to this bitrate, which can help

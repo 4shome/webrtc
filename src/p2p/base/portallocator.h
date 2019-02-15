@@ -87,6 +87,10 @@ enum {
   // the application to work in a wider variety of environments, at the expense
   // of having to allocate additional candidates.
   PORTALLOCATOR_ENABLE_ANY_ADDRESS_PORTS = 0x8000,
+
+  PORTALLOCATOR_DISABLE_TCP_RELAY = 0x10000,
+  PORTALLOCATOR_DISABLE_UDP_PEER_RELAY = 0x20000,
+  PORTALLOCATOR_DISABLE_TCP_PEER_RELAY = 0x40000,
 };
 
 // Defines various reasons that have caused ICE regathering.

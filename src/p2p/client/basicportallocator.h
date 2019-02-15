@@ -239,6 +239,7 @@ class BasicPortAllocatorSession : public PortAllocatorSession,
   bool allocation_started_;
   bool network_manager_started_;
   bool allocation_sequences_created_;
+  bool ignored_first_network_change_;
   std::vector<PortConfiguration*> configs_;
   std::vector<AllocationSequence*> sequences_;
   std::vector<PortData> ports_;
