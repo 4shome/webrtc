@@ -270,6 +270,7 @@ BasicPortAllocatorSession::BasicPortAllocatorSession(
       allocation_started_(false),
       network_manager_started_(false),
       allocation_sequences_created_(false),
+      ignored_first_network_change_(false),
       prune_turn_ports_(allocator->prune_turn_ports()) {
   allocator_->network_manager()->SignalNetworksChanged.connect(
       this, &BasicPortAllocatorSession::OnNetworksChanged);
@@ -714,6 +715,7 @@ std::vector<rtc::Network*> BasicPortAllocatorSession::GetNetworks() {
   NetworkFilter ignored_filter(
       [this](rtc::Network* network) {
         return rtc::starts_with(network->name().c_str(), "docker") ||
+               rtc::starts_with(network->name().c_str(), "tun") ||
                (allocator_->network_ignore_mask() & network->type());
       },
       "ignored");
@@ -828,6 +830,11 @@ void BasicPortAllocatorSession::DoAllocate(bool disable_equivalent) {
 
 void BasicPortAllocatorSession::OnNetworksChanged() {
   RTC_DCHECK_RUN_ON(network_thread_);
+  if (!ignored_first_network_change_) {
+    // The first network change is not useful.
+    ignored_first_network_change_ = true;
+    return;
+  }
   std::vector<rtc::Network*> networks = GetNetworks();
   std::vector<rtc::Network*> failed_networks;
   for (AllocationSequence* sequence : sequences_) {
@@ -1301,14 +1308,6 @@ void AllocationSequence::DisableEquivalentPhases(rtc::Network* network,
       // Already got this STUN servers covered.
       *flags |= PORTALLOCATOR_DISABLE_STUN;
     }
-    if (!config_->relays.empty()) {
-      // Already got relays covered.
-      // NOTE: This will even skip a _different_ set of relay servers if we
-      // were to be given one, but that never happens in our codebase. Should
-      // probably get rid of the list in PortConfiguration and just keep a
-      // single relay server in each one.
-      *flags |= PORTALLOCATOR_DISABLE_RELAY;
-    }
   }
 }
 
@@ -1493,12 +1492,16 @@ void AllocationSequence::CreateRelayPorts(ProtocolType transport,
     RTC_LOG(LS_VERBOSE) << "AllocationSequence: UDP relay ports disabled, skipping.";
     return;
   }
-  if (IsFlagSet(PORTALLOCATOR_DISABLE_TCP) && peer_transport == cricket::PROTO_TCP) {
-    RTC_LOG(LS_VERBOSE) << "AllocationSequence: Relay with peer TCP disabled, skipping.";
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_TCP_RELAY) && transport == PROTO_TCP) {
+    RTC_LOG(LS_VERBOSE) << "AllocationSequence: TCP relay ports disabled, skipping.";
     return;
   }
-  if (IsFlagSet(PORTALLOCATOR_DISABLE_UDP) && peer_transport == cricket::PROTO_UDP) {
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_UDP_PEER_RELAY) && peer_transport == cricket::PROTO_UDP) {
     RTC_LOG(LS_VERBOSE) << "AllocationSequence: Relay with peer UDP disabled, skipping.";
+    return;
+  }
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_TCP_PEER_RELAY) && peer_transport == cricket::PROTO_TCP) {
+    RTC_LOG(LS_VERBOSE) << "AllocationSequence: Relay with peer TCP disabled, skipping.";
     return;
   }
 
@@ -1600,7 +1603,10 @@ void AllocationSequence::CreateTurnPort(const RelayServerConfig& config,
     // TODO(mallinath) - Enable shared socket mode for TURN ports. Disabled
     // due to webrtc bug https://code.google.com/p/webrtc/issues/detail?id=3537
     if (IsFlagSet(PORTALLOCATOR_ENABLE_SHARED_SOCKET) &&
-        relay_port->proto == PROTO_UDP && udp_socket_) {
+        relay_port->proto == PROTO_UDP && udp_socket_ &&
+        // This is necessary to avoid two TurnPorts (UDP_UDP and UDP_TCP) use the same source UDP
+        // socket.
+        peer_transport == PROTO_UDP) {
       port = session_->allocator()->relay_port_factory()->Create(
           args, udp_socket_.get());
 

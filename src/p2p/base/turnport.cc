@@ -352,7 +352,8 @@ void TurnPort::PrepareAddress() {
     attempted_server_addresses_.insert(server_address_.address);
 
     RTC_LOG(LS_INFO) << ToString() << ": Trying to connect to TURN server via "
-                     << ProtoToString(server_address_.proto) << " @ "
+                     << ProtoToString(server_address_.proto) << "_"
+                     << ProtoToString(peer_transport_) << " @ "
                      << server_address_.address.ToSensitiveString();
     if (!CreateTurnClientSocket()) {
       RTC_LOG(LS_ERROR) << "Failed to create TURN client socket";

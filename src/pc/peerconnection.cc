@@ -695,6 +695,10 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
     int max_ipv6_networks;
     bool disable_link_local_networks;
     bool enable_rtp_data_channel;
+    bool disable_udp_relay;
+    bool disable_tcp_relay;
+    bool disable_udp_peer_relay;
+    bool disable_tcp_peer_relay;
     absl::optional<int> screencast_min_bitrate;
     absl::optional<bool> combined_audio_video_bwe;
     absl::optional<bool> enable_dtls_srtp;
@@ -748,6 +752,10 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
          max_ipv6_networks == o.max_ipv6_networks &&
          disable_link_local_networks == o.disable_link_local_networks &&
          enable_rtp_data_channel == o.enable_rtp_data_channel &&
+         disable_udp_relay == o.disable_udp_relay &&
+         disable_tcp_relay == o.disable_tcp_relay &&
+         disable_udp_peer_relay == o.disable_udp_peer_relay &&
+         disable_tcp_peer_relay == o.disable_tcp_peer_relay &&
          screencast_min_bitrate == o.screencast_min_bitrate &&
          combined_audio_video_bwe == o.combined_audio_video_bwe &&
          enable_dtls_srtp == o.enable_dtls_srtp &&
@@ -4728,6 +4736,18 @@ bool PeerConnection::InitializePortAllocator_n(
   if (configuration.disable_udp_relay) {
     port_allocator_flags_ |= cricket::PORTALLOCATOR_DISABLE_UDP_RELAY;
     RTC_LOG(LS_INFO) << "UDP relay are disabled.";
+  }
+  if (configuration.disable_tcp_relay) {
+    port_allocator_flags_ |= cricket::PORTALLOCATOR_DISABLE_TCP_RELAY;
+    RTC_LOG(LS_INFO) << "TCP relay are disabled.";
+  }
+  if (configuration.disable_udp_peer_relay) {
+    port_allocator_flags_ |= cricket::PORTALLOCATOR_DISABLE_UDP_PEER_RELAY;
+    RTC_LOG(LS_INFO) << "UDP peer relay are disabled.";
+  }
+  if (configuration.disable_tcp_peer_relay) {
+    port_allocator_flags_ |= cricket::PORTALLOCATOR_DISABLE_TCP_PEER_RELAY;
+    RTC_LOG(LS_INFO) << "TCP peer relay are disabled.";
   }
 
   if (configuration.candidate_network_policy ==
