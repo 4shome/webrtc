@@ -107,10 +107,6 @@ void FilterNetworks(NetworkList* networks, NetworkFilter filter) {
   if (start_to_remove == networks->end()) {
     return;
   }
-  RTC_LOG(INFO) << "Filtered out " << filter.description << " networks:";
-  for (auto it = start_to_remove; it != networks->end(); ++it) {
-    RTC_LOG(INFO) << (*it)->ToString();
-  }
   networks->erase(start_to_remove, networks->end());
 }
 
@@ -270,7 +266,6 @@ BasicPortAllocatorSession::BasicPortAllocatorSession(
       allocation_started_(false),
       network_manager_started_(false),
       allocation_sequences_created_(false),
-      ignored_first_network_change_(false),
       prune_turn_ports_(allocator->prune_turn_ports()) {
   allocator_->network_manager()->SignalNetworksChanged.connect(
       this, &BasicPortAllocatorSession::OnNetworksChanged);
@@ -716,7 +711,7 @@ std::vector<rtc::Network*> BasicPortAllocatorSession::GetNetworks() {
       [this](rtc::Network* network) {
         return rtc::starts_with(network->name().c_str(), "docker") ||
                rtc::starts_with(network->name().c_str(), "tun") ||
-               (allocator_->network_ignore_mask() & network->type());
+               (allocator_->network_ignore_mask() & network->type()) != 0;
       },
       "ignored");
   FilterNetworks(&networks, ignored_filter);
@@ -773,7 +768,8 @@ void BasicPortAllocatorSession::DoAllocate(bool disable_equivalent) {
         << "Machine has no networks; no ports will be allocated";
     done_signal_needed = true;
   } else {
-    RTC_LOG(LS_INFO) << "Allocate ports on " << networks.size() << " networks";
+    RTC_LOG(LS_INFO) << "Allocate ports on " << networks.size()
+                     << " networks for '" << content_name() << "'.";
     PortConfiguration* config = configs_.empty() ? nullptr : configs_.back();
     for (uint32_t i = 0; i < networks.size(); ++i) {
       uint32_t sequence_flags = flags();
@@ -830,11 +826,6 @@ void BasicPortAllocatorSession::DoAllocate(bool disable_equivalent) {
 
 void BasicPortAllocatorSession::OnNetworksChanged() {
   RTC_DCHECK_RUN_ON(network_thread_);
-  if (!ignored_first_network_change_) {
-    // The first network change is not useful.
-    ignored_first_network_change_ = true;
-    return;
-  }
   std::vector<rtc::Network*> networks = GetNetworks();
   std::vector<rtc::Network*> failed_networks;
   for (AllocationSequence* sequence : sequences_) {
