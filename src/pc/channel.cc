@@ -16,6 +16,7 @@
 
 #include "absl/memory/memory.h"
 #include "api/call/audio_sink.h"
+#include "api/rtptransceiverinterface.h"
 #include "media/base/mediaconstants.h"
 #include "media/base/rtputils.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
@@ -798,23 +799,25 @@ bool VoiceChannel::SetLocalContent_w(const MediaContentDescription* content,
       GetFilteredRtpHeaderExtensions(audio->rtp_header_extensions());
   UpdateRtpHeaderExtensionMap(rtp_header_extensions);
 
-  AudioRecvParameters recv_params = last_recv_params_;
-  RtpParametersFromMediaDescription(audio, rtp_header_extensions, &recv_params);
-  if (!media_channel()->SetRecvParameters(recv_params)) {
-    SafeSetError("Failed to set local audio description recv parameters.",
-                 error_desc);
-    return false;
+  if (content->direction() == webrtc::RtpTransceiverDirection::kSendRecv ||
+      content->direction() == webrtc::RtpTransceiverDirection::kRecvOnly) {
+      AudioRecvParameters recv_params = last_recv_params_;
+      RtpParametersFromMediaDescription(audio, rtp_header_extensions, &recv_params);
+      if (!media_channel()->SetRecvParameters(recv_params)) {
+          SafeSetError("Failed to set local audio description recv parameters.",
+                       error_desc);
+          return false;
+      }
+      for (const AudioCodec& codec : audio->codecs()) {
+          AddHandledPayloadType(codec.id);
+      }
+      // Need to re-register the sink to update the handled payload.
+      if (!RegisterRtpDemuxerSink()) {
+          RTC_LOG(LS_ERROR) << "Failed to set up audio demuxing.";
+          return false;
+      }
+      last_recv_params_ = recv_params;
   }
-  for (const AudioCodec& codec : audio->codecs()) {
-    AddHandledPayloadType(codec.id);
-  }
-  // Need to re-register the sink to update the handled payload.
-  if (!RegisterRtpDemuxerSink()) {
-    RTC_LOG(LS_ERROR) << "Failed to set up audio demuxing.";
-    return false;
-  }
-
-  last_recv_params_ = recv_params;
 
   // TODO(pthatcher): Move local streams into AudioSendParameters, and
   // only give it to the media channel once we have a remote

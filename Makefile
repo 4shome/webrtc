@@ -19,7 +19,7 @@ src/logging/rtc_event_log/rtc_event_log.pb.cc: src/logging/rtc_event_log/rtc_eve
 
 C_SRCS/Linux=
 
-C_SRCS/MinGW=src/modules/audio_coding/codecs/ilbc/window32_w32.c
+C_SRCS/MinGW=
 
 C_SRCS/Darwin=
 
@@ -29,7 +29,12 @@ C_SRCS/i686=
 
 C_SRCS/armv7l=src/common_audio/signal_processing/cross_correlation_neon.c \
               src/common_audio/signal_processing/downsample_fast_neon.c \
-              src/common_audio/signal_processing/min_max_operations_neon.c
+              src/common_audio/signal_processing/min_max_operations_neon.c \
+              src/modules/audio_coding/codecs/isac/fix/source/entropy_coding_neon.c \
+              src/modules/audio_coding/codecs/isac/fix/source/filters_neon.c \
+              src/modules/audio_coding/codecs/isac/fix/source/filterbanks_neon.c \
+              src/modules/audio_coding/codecs/isac/fix/source/lattice_neon.c \
+              src/modules/audio_coding/codecs/isac/fix/source/transform_neon.c
 
 C_SRCS=src/common_audio/ring_buffer.c \
        src/common_audio/signal_processing/auto_correlation.c \
@@ -138,7 +143,36 @@ C_SRCS=src/common_audio/ring_buffer.c \
        src/modules/audio_coding/codecs/ilbc/unpack_bits.c \
        src/modules/audio_coding/codecs/ilbc/vq3.c \
        src/modules/audio_coding/codecs/ilbc/vq4.c \
+       src/modules/audio_coding/codecs/ilbc/window32_w32.c \
        src/modules/audio_coding/codecs/ilbc/xcorr_coef.c \
+       src/modules/audio_coding/codecs/isac/fix/source/arith_routines.c \
+       src/modules/audio_coding/codecs/isac/fix/source/arith_routines_hist.c \
+       src/modules/audio_coding/codecs/isac/fix/source/arith_routines_logist.c \
+       src/modules/audio_coding/codecs/isac/fix/source/bandwidth_estimator.c \
+       src/modules/audio_coding/codecs/isac/fix/source/decode.c \
+       src/modules/audio_coding/codecs/isac/fix/source/decode_bwe.c \
+       src/modules/audio_coding/codecs/isac/fix/source/decode_plc.c \
+       src/modules/audio_coding/codecs/isac/fix/source/encode.c \
+       src/modules/audio_coding/codecs/isac/fix/source/entropy_coding.c \
+       src/modules/audio_coding/codecs/isac/fix/source/fft.c \
+       src/modules/audio_coding/codecs/isac/fix/source/filterbanks.c \
+       src/modules/audio_coding/codecs/isac/fix/source/filterbank_tables.c \
+       src/modules/audio_coding/codecs/isac/fix/source/filters.c \
+       src/modules/audio_coding/codecs/isac/fix/source/initialize.c \
+       src/modules/audio_coding/codecs/isac/fix/source/isacfix.c \
+       src/modules/audio_coding/codecs/isac/fix/source/lattice.c \
+       src/modules/audio_coding/codecs/isac/fix/source/lattice_c.c \
+       src/modules/audio_coding/codecs/isac/fix/source/lpc_masking_model.c \
+       src/modules/audio_coding/codecs/isac/fix/source/lpc_tables.c \
+       src/modules/audio_coding/codecs/isac/fix/source/spectrum_ar_model_tables.c \
+       src/modules/audio_coding/codecs/isac/fix/source/pitch_estimator.c \
+       src/modules/audio_coding/codecs/isac/fix/source/pitch_estimator_c.c \
+       src/modules/audio_coding/codecs/isac/fix/source/pitch_filter.c \
+       src/modules/audio_coding/codecs/isac/fix/source/pitch_filter_c.c \
+       src/modules/audio_coding/codecs/isac/fix/source/pitch_gain_tables.c \
+       src/modules/audio_coding/codecs/isac/fix/source/pitch_lag_tables.c \
+       src/modules/audio_coding/codecs/isac/fix/source/transform.c \
+       src/modules/audio_coding/codecs/isac/fix/source/transform_tables.c \
        src/modules/audio_coding/codecs/isac/main/source/arith_routines.c \
        src/modules/audio_coding/codecs/isac/main/source/arith_routines_hist.c \
        src/modules/audio_coding/codecs/isac/main/source/arith_routines_logist.c \
@@ -240,8 +274,16 @@ CXX_SRCS=src/api/audio/audio_frame.cc \
          src/api/audio_codecs/builtin_audio_encoder_factory.cc \
          src/api/audio_codecs/g711/audio_decoder_g711.cc \
          src/api/audio_codecs/g711/audio_encoder_g711.cc \
+         src/api/audio_codecs/g722/audio_decoder_g722.cc \
+         src/api/audio_codecs/g722/audio_encoder_g722.cc \
+         src/api/audio_codecs/ilbc/audio_decoder_ilbc.cc \
+         src/api/audio_codecs/ilbc/audio_encoder_ilbc.cc \
+         src/api/audio_codecs/isac/audio_decoder_isac_fix.cc \
+         src/api/audio_codecs/isac/audio_encoder_isac_fix.cc \
          src/api/audio_codecs/L16/audio_decoder_L16.cc \
          src/api/audio_codecs/L16/audio_encoder_L16.cc \
+         src/api/audio_codecs/opus/audio_decoder_opus.cc \
+         src/api/audio_codecs/opus/audio_encoder_opus.cc \
          src/api/audio_codecs/opus/audio_encoder_opus_config.cc \
          src/api/audio_options.cc \
          src/api/call/transport.cc \
@@ -434,6 +476,8 @@ CXX_SRCS=src/api/audio/audio_frame.cc \
          src/modules/audio_coding/codecs/g711/audio_encoder_pcm.cc \
          src/modules/audio_coding/codecs/g722/audio_encoder_g722.cc \
          src/modules/audio_coding/codecs/ilbc/audio_encoder_ilbc.cc \
+         src/modules/audio_coding/codecs/isac/fix/source/audio_decoder_isacfix.cc \
+         src/modules/audio_coding/codecs/isac/fix/source/audio_encoder_isacfix.cc \
          src/modules/audio_coding/codecs/isac/locked_bandwidth_info.cc \
          src/modules/audio_coding/codecs/isac/main/source/audio_decoder_isac.cc \
          src/modules/audio_coding/codecs/isac/main/source/audio_encoder_isac.cc \
@@ -1122,7 +1166,8 @@ WEBRTC_DEFS=-DHAVE_WEBRTC_VIDEO -DHAVE_WEBRTC_VOICE -DWEBRTC_INCLUDE_INTERNAL_AU
             -DWEBRTC_NS_FLOAT -DWEBRTC_CODEC_OPUS -DWEBRTC_CODEC_ISAC -DWEBRTC_USE_H264 \
             -DWEBRTC_BUILD_LIBEVENT -DWEBRTC_INTELLIGIBILITY_ENHANCER=0 -DWEBRTC_APM_DEBUG_DUMP=0 \
             -DGOOGLE_PROTOBUF_NO_RTTI -DWEBRTC_USE_EPOLL -DWEBRTC_OPUS_SUPPORT_120MS_PTIME=0 \
-            -DWEBRTC_OPUS_VARIABLE_COMPLEXITY=0 -DWEBRTC_USE_BUILTIN_ISAC_FIX
+            -DWEBRTC_OPUS_VARIABLE_COMPLEXITY=0 -DWEBRTC_USE_BUILTIN_ILBC \
+            -DWEBRTC_USE_BUILTIN_ISAC_FIX -DWEBRTC_USE_BUILTIN_OPUS
 
 SSL_DEFS=-DFEATURE_ENABLE_SSL -DSSL_USE_OPENSSL -DOPENSSL -DHAVE_OPENSSL_SSL_H
 
@@ -1255,6 +1300,7 @@ endif
 
 define TEST_WEBRTC_CC_SRC
 #include <iostream>
+#include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/mediastreaminterface.h>
 #include <api/peerconnectioninterface.h>
 #include <api/video_codecs/video_decoder_factory.h>
@@ -1266,10 +1312,11 @@ int main(int argc, char** argv) {
         return 1;
     }
     auto factory = webrtc::CreatePeerConnectionFactory(
-		nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-		nullptr, nullptr, nullptr, nullptr);
+        nullptr, nullptr, nullptr, nullptr,
+        webrtc::CreateBuiltinAudioEncoderFactory(),
+        nullptr, nullptr, nullptr, nullptr, nullptr);
     webrtc::PeerConnectionInterface::RTCConfiguration config;
-	auto pc = factory->CreatePeerConnection(config, webrtc::PeerConnectionDependencies(nullptr));
+    auto pc = factory->CreatePeerConnection(config, webrtc::PeerConnectionDependencies(nullptr));
     auto video_source = factory->CreateVideoSource(nullptr, nullptr);
     auto video_track = factory->CreateVideoTrack("test", video_source);;
     auto stream = factory->CreateLocalMediaStream("test");
