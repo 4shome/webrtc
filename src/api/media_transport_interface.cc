@@ -17,60 +17,84 @@
 
 #include "api/media_transport_interface.h"
 
+#include <cstdint>
+#include <utility>
+
 namespace webrtc {
 
-MediaTransportEncodedAudioFrame::~MediaTransportEncodedAudioFrame() {}
+MediaTransportSettings::MediaTransportSettings() = default;
+MediaTransportSettings::MediaTransportSettings(const MediaTransportSettings&) =
+    default;
+MediaTransportSettings& MediaTransportSettings::operator=(
+    const MediaTransportSettings&) = default;
+MediaTransportSettings::~MediaTransportSettings() = default;
 
-MediaTransportEncodedAudioFrame::MediaTransportEncodedAudioFrame(
-    int sampling_rate_hz,
-    int starting_sample_index,
-    int samples_per_channel,
-    int sequence_number,
-    FrameType frame_type,
-    uint8_t payload_type,
-    std::vector<uint8_t> encoded_data)
-    : sampling_rate_hz_(sampling_rate_hz),
-      starting_sample_index_(starting_sample_index),
-      samples_per_channel_(samples_per_channel),
-      sequence_number_(sequence_number),
-      frame_type_(frame_type),
-      payload_type_(payload_type),
-      encoded_data_(std::move(encoded_data)) {}
 
-MediaTransportEncodedAudioFrame& MediaTransportEncodedAudioFrame::operator=(
-    const MediaTransportEncodedAudioFrame&) = default;
+SendDataParams::SendDataParams() = default;
+SendDataParams::SendDataParams(const SendDataParams&) = default;
 
-MediaTransportEncodedAudioFrame& MediaTransportEncodedAudioFrame::operator=(
-    MediaTransportEncodedAudioFrame&&) = default;
+RTCErrorOr<std::unique_ptr<MediaTransportInterface>>
+MediaTransportFactory::CreateMediaTransport(
+    rtc::PacketTransportInternal* packet_transport,
+    rtc::Thread* network_thread,
+    const MediaTransportSettings& settings) {
+  return std::unique_ptr<MediaTransportInterface>(nullptr);
+}
 
-MediaTransportEncodedAudioFrame::MediaTransportEncodedAudioFrame(
-    const MediaTransportEncodedAudioFrame&) = default;
+RTCErrorOr<std::unique_ptr<MediaTransportInterface>>
+MediaTransportFactory::CreateMediaTransport(
+    rtc::Thread* network_thread,
+    const MediaTransportSettings& settings) {
+  return std::unique_ptr<MediaTransportInterface>(nullptr);
+}
 
-MediaTransportEncodedAudioFrame::MediaTransportEncodedAudioFrame(
-    MediaTransportEncodedAudioFrame&&) = default;
+std::string MediaTransportFactory::GetTransportName() const {
+  return "";
+}
 
-MediaTransportEncodedVideoFrame::~MediaTransportEncodedVideoFrame() {}
+MediaTransportInterface::MediaTransportInterface() = default;
+MediaTransportInterface::~MediaTransportInterface() = default;
 
-MediaTransportEncodedVideoFrame::MediaTransportEncodedVideoFrame(
-    int64_t frame_id,
-    std::vector<int64_t> referenced_frame_ids,
-    VideoCodecType codec_type,
-    const webrtc::EncodedImage& encoded_image)
-    : codec_type_(codec_type),
-      encoded_image_(encoded_image),
-      frame_id_(frame_id),
-      referenced_frame_ids_(std::move(referenced_frame_ids)) {}
+absl::optional<std::string>
+MediaTransportInterface::GetTransportParametersOffer() const {
+  return absl::nullopt;
+}
 
-MediaTransportEncodedVideoFrame& MediaTransportEncodedVideoFrame::operator=(
-    const MediaTransportEncodedVideoFrame&) = default;
+void MediaTransportInterface::Connect(
+    rtc::PacketTransportInternal* packet_transport) {}
 
-MediaTransportEncodedVideoFrame& MediaTransportEncodedVideoFrame::operator=(
-    MediaTransportEncodedVideoFrame&&) = default;
+void MediaTransportInterface::SetKeyFrameRequestCallback(
+    MediaTransportKeyFrameRequestCallback* callback) {}
 
-MediaTransportEncodedVideoFrame::MediaTransportEncodedVideoFrame(
-    const MediaTransportEncodedVideoFrame&) = default;
+absl::optional<TargetTransferRate>
+MediaTransportInterface::GetLatestTargetTransferRate() {
+  return absl::nullopt;
+}
 
-MediaTransportEncodedVideoFrame::MediaTransportEncodedVideoFrame(
-    MediaTransportEncodedVideoFrame&&) = default;
+void MediaTransportInterface::AddNetworkChangeCallback(
+    MediaTransportNetworkChangeCallback* callback) {}
+
+void MediaTransportInterface::RemoveNetworkChangeCallback(
+    MediaTransportNetworkChangeCallback* callback) {}
+
+void MediaTransportInterface::SetFirstAudioPacketReceivedObserver(
+    AudioPacketReceivedObserver* observer) {}
+
+void MediaTransportInterface::AddTargetTransferRateObserver(
+    TargetTransferRateObserver* observer) {}
+void MediaTransportInterface::RemoveTargetTransferRateObserver(
+    TargetTransferRateObserver* observer) {}
+
+void MediaTransportInterface::AddRttObserver(
+    MediaTransportRttObserver* observer) {}
+void MediaTransportInterface::RemoveRttObserver(
+    MediaTransportRttObserver* observer) {}
+
+size_t MediaTransportInterface::GetAudioPacketOverhead() const {
+  return 0;
+}
+
+void MediaTransportInterface::SetAllocatedBitrateLimits(
+    const MediaTransportAllocatedBitrateLimits& limits) {}
 
 }  // namespace webrtc

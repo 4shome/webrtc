@@ -27,7 +27,7 @@ class MockGainControl : public GainControl {
   MOCK_METHOD1(Enable, int(bool enable));
   MOCK_CONST_METHOD0(is_enabled, bool());
   MOCK_METHOD1(set_stream_analog_level, int(int level));
-  MOCK_METHOD0(stream_analog_level, int());
+  MOCK_CONST_METHOD0(stream_analog_level, int());
   MOCK_METHOD1(set_mode, int(Mode mode));
   MOCK_CONST_METHOD0(mode, Mode());
   MOCK_METHOD1(set_target_level_dbfs, int(int level));
@@ -40,13 +40,6 @@ class MockGainControl : public GainControl {
   MOCK_CONST_METHOD0(analog_level_minimum, int());
   MOCK_CONST_METHOD0(analog_level_maximum, int());
   MOCK_CONST_METHOD0(stream_is_saturated, bool());
-};
-
-class MockHighPassFilter : public HighPassFilter {
- public:
-  virtual ~MockHighPassFilter() {}
-  MOCK_METHOD1(Enable, int(bool enable));
-  MOCK_CONST_METHOD0(is_enabled, bool());
 };
 
 class MockLevelEstimator : public LevelEstimator {
@@ -110,14 +103,13 @@ class MockVoiceDetection : public VoiceDetection {
   MOCK_CONST_METHOD0(frame_size_ms, int());
 };
 
-class MockAudioProcessing : public testing::NiceMock<AudioProcessing> {
+class MockAudioProcessing : public ::testing::NiceMock<AudioProcessing> {
  public:
   MockAudioProcessing()
-      : gain_control_(new testing::NiceMock<MockGainControl>()),
-        high_pass_filter_(new testing::NiceMock<MockHighPassFilter>()),
-        level_estimator_(new testing::NiceMock<MockLevelEstimator>()),
-        noise_suppression_(new testing::NiceMock<MockNoiseSuppression>()),
-        voice_detection_(new testing::NiceMock<MockVoiceDetection>()) {}
+      : gain_control_(new ::testing::NiceMock<MockGainControl>()),
+        level_estimator_(new ::testing::NiceMock<MockLevelEstimator>()),
+        noise_suppression_(new ::testing::NiceMock<MockNoiseSuppression>()),
+        voice_detection_(new ::testing::NiceMock<MockVoiceDetection>()) {}
 
   virtual ~MockAudioProcessing() {}
 
@@ -171,6 +163,8 @@ class MockAudioProcessing : public testing::NiceMock<AudioProcessing> {
   MOCK_METHOD1(set_stream_key_pressed, void(bool key_pressed));
   MOCK_METHOD1(set_delay_offset_ms, void(int offset));
   MOCK_CONST_METHOD0(delay_offset_ms, int());
+  MOCK_METHOD1(set_stream_analog_level, void(int));
+  MOCK_CONST_METHOD0(recommended_stream_analog_level, int());
 
   virtual void AttachAecDump(std::unique_ptr<AecDump> aec_dump) {}
   MOCK_METHOD0(DetachAecDump, void());
@@ -180,12 +174,8 @@ class MockAudioProcessing : public testing::NiceMock<AudioProcessing> {
   MOCK_METHOD0(DetachPlayoutAudioGenerator, void());
 
   MOCK_METHOD0(UpdateHistogramsOnCallEnd, void());
-  MOCK_CONST_METHOD0(GetStatistics, AudioProcessingStatistics());
   MOCK_CONST_METHOD1(GetStatistics, AudioProcessingStats(bool));
   virtual MockGainControl* gain_control() const { return gain_control_.get(); }
-  virtual MockHighPassFilter* high_pass_filter() const {
-    return high_pass_filter_.get();
-  }
   virtual MockLevelEstimator* level_estimator() const {
     return level_estimator_.get();
   }
@@ -200,7 +190,6 @@ class MockAudioProcessing : public testing::NiceMock<AudioProcessing> {
 
  private:
   std::unique_ptr<MockGainControl> gain_control_;
-  std::unique_ptr<MockHighPassFilter> high_pass_filter_;
   std::unique_ptr<MockLevelEstimator> level_estimator_;
   std::unique_ptr<MockNoiseSuppression> noise_suppression_;
   std::unique_ptr<MockVoiceDetection> voice_detection_;

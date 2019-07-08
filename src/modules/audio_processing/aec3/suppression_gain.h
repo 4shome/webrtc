@@ -12,14 +12,19 @@
 #define MODULES_AUDIO_PROCESSING_AEC3_SUPPRESSION_GAIN_H_
 
 #include <array>
+#include <memory>
 #include <vector>
 
+#include "absl/types/optional.h"
+#include "api/array_view.h"
 #include "api/audio/echo_canceller3_config.h"
 #include "modules/audio_processing/aec3/aec3_common.h"
 #include "modules/audio_processing/aec3/aec_state.h"
+#include "modules/audio_processing/aec3/fft_data.h"
 #include "modules/audio_processing/aec3/moving_average.h"
 #include "modules/audio_processing/aec3/render_signal_analyzer.h"
-#include "rtc_base/constructormagic.h"
+#include "modules/audio_processing/logging/apm_data_dumper.h"
+#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -30,13 +35,10 @@ class SuppressionGain {
                   int sample_rate_hz);
   ~SuppressionGain();
   void GetGain(
-      const std::array<float, kFftLengthBy2Plus1>& suppressor_input_spectrum,
       const std::array<float, kFftLengthBy2Plus1>& nearend_spectrum,
       const std::array<float, kFftLengthBy2Plus1>& echo_spectrum,
       const std::array<float, kFftLengthBy2Plus1>& residual_echo_spectrum,
       const std::array<float, kFftLengthBy2Plus1>& comfort_noise_spectrum,
-      const FftData& linear_aec_fft,
-      const FftData& capture_fft,
       const RenderSignalAnalyzer& render_signal_analyzer,
       const AecState& aec_state,
       const std::vector<std::vector<float>>& render,
@@ -73,8 +75,7 @@ class SuppressionGain {
       const std::array<float, kFftLengthBy2Plus1>& comfort_noise,
       std::array<float, kFftLengthBy2Plus1>* gain);
 
-  void GetMinGain(rtc::ArrayView<const float> suppressor_input,
-                  rtc::ArrayView<const float> weighted_residual_echo,
+  void GetMinGain(rtc::ArrayView<const float> weighted_residual_echo,
                   bool low_noise_render,
                   bool saturated_echo,
                   rtc::ArrayView<float> min_gain) const;
@@ -140,7 +141,6 @@ class SuppressionGain {
   LowNoiseRenderDetector low_render_detector_;
   bool initial_state_ = true;
   int initial_state_change_counter_ = 0;
-  const bool enable_new_suppression_;
   aec3::MovingAverage moving_average_;
   const GainParameters nearend_params_;
   const GainParameters normal_params_;

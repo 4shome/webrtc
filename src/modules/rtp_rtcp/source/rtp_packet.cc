@@ -10,11 +10,10 @@
 
 #include "modules/rtp_rtcp/source/rtp_packet.h"
 
+#include <cstdint>
 #include <cstring>
 #include <utility>
 
-#include "api/rtpparameters.h"
-#include "common_types.h"  // NOLINT(build/include)
 #include "modules/rtp_rtcp/source/byte_io.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -61,12 +60,10 @@ RtpPacket::RtpPacket(const ExtensionManager* extensions)
 RtpPacket::RtpPacket(const RtpPacket&) = default;
 
 RtpPacket::RtpPacket(const ExtensionManager* extensions, size_t capacity)
-    : buffer_(capacity) {
+    : extensions_(extensions ? *extensions : ExtensionManager()),
+      buffer_(capacity) {
   RTC_DCHECK_GE(capacity, kFixedHeaderSize);
   Clear();
-  if (extensions) {
-    extensions_ = *extensions;
-  }
 }
 
 RtpPacket::~RtpPacket() {}
@@ -211,8 +208,7 @@ rtc::ArrayView<uint8_t> RtpPacket::AllocateRawExtension(int id, size_t length) {
   const bool two_byte_header_required =
       id > RtpExtension::kOneByteHeaderExtensionMaxId ||
       length > RtpExtension::kOneByteHeaderExtensionMaxValueSize || length == 0;
-  RTC_CHECK(!two_byte_header_required ||
-            extensions_.IsMixedOneTwoByteHeaderSupported());
+  RTC_CHECK(!two_byte_header_required || extensions_.ExtmapAllowMixed());
 
   uint16_t profile_id;
   if (extensions_size_ > 0) {
@@ -553,7 +549,7 @@ rtc::ArrayView<uint8_t> RtpPacket::AllocateExtension(ExtensionType type,
                                                      size_t length) {
   // TODO(webrtc:7990): Add support for empty extensions (length==0).
   if (length == 0 || length > RtpExtension::kMaxValueSize ||
-      (!extensions_.IsMixedOneTwoByteHeaderSupported() &&
+      (!extensions_.ExtmapAllowMixed() &&
        length > RtpExtension::kOneByteHeaderExtensionMaxValueSize)) {
     return nullptr;
   }
@@ -563,11 +559,16 @@ rtc::ArrayView<uint8_t> RtpPacket::AllocateExtension(ExtensionType type,
     // Extension not registered.
     return nullptr;
   }
-  if (!extensions_.IsMixedOneTwoByteHeaderSupported() &&
+  if (!extensions_.ExtmapAllowMixed() &&
       id > RtpExtension::kOneByteHeaderExtensionMaxId) {
     return nullptr;
   }
   return AllocateRawExtension(id, length);
+}
+
+bool RtpPacket::HasExtension(ExtensionType type) const {
+  // TODO(webrtc:7990): Add support for empty extensions (length==0).
+  return !FindExtension(type).empty();
 }
 
 }  // namespace webrtc

@@ -15,12 +15,15 @@
 
 namespace webrtc {
 namespace {
-class NullCallback : public video_coding::OnReceivedFrameCallback {
-  void OnReceivedFrame(std::unique_ptr<video_coding::RtpFrameObject> frame) {}
+class NullCallback : public video_coding::OnAssembledFrameCallback {
+  void OnAssembledFrame(std::unique_ptr<video_coding::RtpFrameObject> frame) {}
 };
 }  // namespace
 
 void FuzzOneInput(const uint8_t* data, size_t size) {
+  if (size > 200000) {
+    return;
+  }
   VCMPacket packet;
   NullCallback callback;
   SimulatedClock clock(0);

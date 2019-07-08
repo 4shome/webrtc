@@ -19,10 +19,9 @@ CPPLINT_BLACKLIST = [
   'common_types.cc',
   'common_types.h',
   'examples/objc',
-  'media/base/streamparams.h',
-  'media/base/videocommon.h',
-  'media/engine/fakewebrtcdeviceinfo.h',
-  'media/sctp/sctptransport.cc',
+  'media/base/stream_params.h',
+  'media/base/video_common.h',
+  'media/sctp/sctp_transport.cc',
   'modules/audio_coding',
   'modules/audio_device',
   'modules/audio_processing',
@@ -30,8 +29,8 @@ CPPLINT_BLACKLIST = [
   'modules/include/module_common_types.h',
   'modules/utility',
   'modules/video_capture',
-  'p2p/base/pseudotcp.cc',
-  'p2p/base/pseudotcp.h',
+  'p2p/base/pseudo_tcp.cc',
+  'p2p/base/pseudo_tcp.h',
   'rtc_base',
   'sdk/android/src/jni',
   'sdk/objc',
@@ -84,7 +83,6 @@ LEGACY_API_DIRS = (
   'modules/rtp_rtcp/source',
   'modules/utility/include',
   'modules/video_coding/codecs/h264/include',
-  'modules/video_coding/codecs/i420/include',
   'modules/video_coding/codecs/vp8/include',
   'modules/video_coding/codecs/vp9/include',
   'modules/video_coding/include',
@@ -451,6 +449,26 @@ def CheckNoWarningSuppressionFlagsAreAdded(gn_files, input_api, output_api,
     return [output_api.PresubmitError(msg, errors)]
   return []
 
+
+def CheckNoTestCaseUsageIsAdded(input_api, output_api, source_file_filter,
+                                error_formatter=_ReportFileAndLine):
+  error_msg = ('Usage of legacy GoogleTest API detected!\nPlease use the '
+               'new API: https://github.com/google/googletest/blob/master/'
+               'googletest/docs/primer.md#beware-of-the-nomenclature.\n'
+               'Affected files:\n')
+  errors = []  # 2-element tuples with (file, line number)
+  test_case_re = input_api.re.compile(r'TEST_CASE')
+  file_filter = lambda f: (source_file_filter(f)
+                           and f.LocalPath().endswith('.cc'))
+  for f in input_api.AffectedSourceFiles(file_filter):
+    for line_num, line in f.ChangedContents():
+      if test_case_re.search(line):
+        errors.append(error_formatter(f.LocalPath(), line_num))
+  if errors:
+    return [output_api.PresubmitError(error_msg, errors)]
+  return []
+
+
 def CheckNoStreamUsageIsAdded(input_api, output_api,
                               source_file_filter,
                               error_formatter=_ReportFileAndLine):
@@ -481,7 +499,8 @@ def CheckNoStreamUsageIsAdded(input_api, output_api,
   file_filter = lambda x: (input_api.FilterSourceFile(x)
                            and source_file_filter(x))
   for f in input_api.AffectedSourceFiles(file_filter):
-    if f.LocalPath() == 'PRESUBMIT.py':
+    # Usage of stringstream is allowed under examples/.
+    if f.LocalPath() == 'PRESUBMIT.py' or f.LocalPath().startswith('examples'):
       continue
     for line_num, line in f.ChangedContents():
       if ((include_re.search(line) or usage_re.search(line))
@@ -561,7 +580,7 @@ def CheckGnGen(input_api, output_api):
   """
   with _AddToPath(input_api.os_path.join(
       input_api.PresubmitLocalPath(), 'tools_webrtc', 'presubmit_checks_lib')):
-    from gn_check import RunGnCheck
+    from build_helpers import RunGnCheck
   errors = RunGnCheck(FindSrcDirPath(input_api.PresubmitLocalPath()))[:5]
   if errors:
     return [output_api.PresubmitPromptWarning(
@@ -861,9 +880,93 @@ def CommonChecks(input_api, output_api):
       input_api, output_api, source_file_filter=non_third_party_sources))
   results.extend(CheckNoStreamUsageIsAdded(
       input_api, output_api, non_third_party_sources))
+  results.extend(CheckNoTestCaseUsageIsAdded(
+      input_api, output_api, non_third_party_sources))
   results.extend(CheckAddedDepsHaveTargetApprovals(input_api, output_api))
+  results.extend(CheckApiDepsFileIsUpToDate(input_api, output_api))
+  results.extend(CheckAbslMemoryInclude(
+      input_api, output_api, non_third_party_sources))
   return results
 
+
+def CheckApiDepsFileIsUpToDate(input_api, output_api):
+  """Check that 'include_rules' in api/DEPS is up to date.
+
+  The file api/DEPS must be kept up to date in order to avoid to avoid to
+  include internal header from WebRTC's api/ headers.
+
+  This check is focused on ensuring that 'include_rules' contains a deny
+  rule for each root level directory. More focused allow rules can be
+  added to 'specific_include_rules'.
+  """
+  results = []
+  api_deps = os.path.join(input_api.PresubmitLocalPath(), 'api', 'DEPS')
+  with open(api_deps) as f:
+    deps_content = _ParseDeps(f.read())
+
+  include_rules = deps_content.get('include_rules', [])
+
+  # Only check top level directories affected by the current CL.
+  dirs_to_check = set()
+  for f in input_api.AffectedFiles():
+    path_tokens = [t for t in f.LocalPath().split(os.sep) if t]
+    if len(path_tokens) > 1:
+      if (path_tokens[0] != 'api' and
+          os.path.isdir(os.path.join(input_api.PresubmitLocalPath(),
+                                     path_tokens[0]))):
+        dirs_to_check.add(path_tokens[0])
+
+  missing_include_rules = set()
+  for p in dirs_to_check:
+    rule = '-%s' % p
+    if rule not in include_rules:
+      missing_include_rules.add(rule)
+
+  if missing_include_rules:
+    error_msg = [
+      'include_rules = [\n',
+      '  ...\n',
+    ]
+
+    for r in sorted(missing_include_rules):
+      error_msg.append('  "%s",\n' % str(r))
+
+    error_msg.append('  ...\n')
+    error_msg.append(']\n')
+
+    results.append(output_api.PresubmitError(
+        'New root level directory detected! WebRTC api/ headers should '
+        'not #include headers from \n'
+        'the new directory, so please update "include_rules" in file\n'
+        '"%s". Example:\n%s\n' % (api_deps, ''.join(error_msg))))
+
+  return results
+
+def CheckAbslMemoryInclude(input_api, output_api, source_file_filter):
+  pattern = input_api.re.compile(
+      r'^#include\s*"absl/memory/memory.h"', input_api.re.MULTILINE)
+  file_filter = lambda f: (f.LocalPath().endswith(('.cc', '.h'))
+                           and source_file_filter(f))
+
+  files = []
+  for f in input_api.AffectedFiles(
+      include_deletes=False, file_filter=file_filter):
+    contents = input_api.ReadFile(f)
+    if pattern.search(contents):
+      continue
+    for _, line in f.ChangedContents():
+      if 'absl::make_unique' in line or 'absl::WrapUnique' in line:
+        files.append(f)
+        break
+
+  if len(files):
+    return [output_api.PresubmitError(
+        'Please include "absl/memory/memory.h" header for'
+        ' absl::make_unique or absl::WrapUnique.\nThis header may or'
+        ' may not be included transitively depending on the C++ standard'
+        ' version.',
+        files)]
+  return []
 
 def CheckChangeOnUpload(input_api, output_api):
   results = []

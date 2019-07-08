@@ -18,26 +18,26 @@ FakeFrameDecryptor::FakeFrameDecryptor(uint8_t fake_key,
                                        uint8_t expected_postfix_byte)
     : fake_key_(fake_key), expected_postfix_byte_(expected_postfix_byte) {}
 
-int FakeFrameDecryptor::Decrypt(cricket::MediaType media_type,
-                                const std::vector<uint32_t>& csrcs,
-                                rtc::ArrayView<const uint8_t> additional_data,
-                                rtc::ArrayView<const uint8_t> encrypted_frame,
-                                rtc::ArrayView<uint8_t> frame,
-                                size_t* bytes_written) {
+FakeFrameDecryptor::Result FakeFrameDecryptor::Decrypt(
+    cricket::MediaType media_type,
+    const std::vector<uint32_t>& csrcs,
+    rtc::ArrayView<const uint8_t> additional_data,
+    rtc::ArrayView<const uint8_t> encrypted_frame,
+    rtc::ArrayView<uint8_t> frame) {
   if (fail_decryption_) {
-    return 1;
+    return Result(Status::kFailedToDecrypt, 0);
   }
 
   RTC_CHECK_EQ(frame.size() + 1, encrypted_frame.size());
   for (size_t i = 0; i < frame.size(); i++) {
-    frame[i] ^= fake_key_;
+    frame[i] = encrypted_frame[i] ^ fake_key_;
   }
 
   if (encrypted_frame[frame.size()] != expected_postfix_byte_) {
-    return 1;
+    return Result(Status::kFailedToDecrypt, 0);
   }
 
-  return 0;
+  return Result(Status::kOk, frame.size());
 }
 
 size_t FakeFrameDecryptor::GetMaxPlaintextByteSize(

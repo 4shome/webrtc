@@ -11,7 +11,9 @@
 #include <memory>
 #include <utility>
 
+#include "absl/memory/memory.h"
 #include "api/test/test_dependency_factory.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/thread_checker.h"
 
 namespace webrtc {
@@ -27,7 +29,7 @@ std::unique_ptr<TestDependencyFactory> TestDependencyFactory::instance_ =
     nullptr;
 
 const TestDependencyFactory& TestDependencyFactory::GetInstance() {
-  RTC_DCHECK(GetThreadChecker()->CalledOnValidThread());
+  RTC_DCHECK(GetThreadChecker()->IsCurrent());
   if (instance_ == nullptr) {
     instance_ = absl::make_unique<TestDependencyFactory>();
   }
@@ -36,14 +38,14 @@ const TestDependencyFactory& TestDependencyFactory::GetInstance() {
 
 void TestDependencyFactory::SetInstance(
     std::unique_ptr<TestDependencyFactory> instance) {
-  RTC_DCHECK(GetThreadChecker()->CalledOnValidThread());
+  RTC_DCHECK(GetThreadChecker()->IsCurrent());
   RTC_CHECK(instance_ == nullptr);
   instance_ = std::move(instance);
 }
 
 std::unique_ptr<VideoQualityTestFixtureInterface::InjectionComponents>
 TestDependencyFactory::CreateComponents() const {
-  RTC_DCHECK(GetThreadChecker()->CalledOnValidThread());
+  RTC_DCHECK(GetThreadChecker()->IsCurrent());
   return nullptr;
 }
 

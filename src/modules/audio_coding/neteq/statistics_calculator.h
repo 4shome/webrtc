@@ -15,7 +15,7 @@
 #include <string>
 
 #include "modules/audio_coding/neteq/include/neteq.h"
-#include "rtc_base/constructormagic.h"
+#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -83,13 +83,19 @@ class StatisticsCalculator {
   // Reports that |num_samples| samples were decoded from secondary packets.
   void SecondaryDecodedSamples(int num_samples);
 
-  // Rerport that the packet buffer was flushed.
+  // Reports that the packet buffer was flushed.
   void FlushedPacketBuffer();
 
-  // Logs a delayed packet outage event of |outage_duration_ms|. A delayed
-  // packet outage event is defined as an expand period caused not by an actual
-  // packet loss, but by a delayed packet.
-  virtual void LogDelayedPacketOutageEvent(int outage_duration_ms);
+  // Reports that the jitter buffer received a packet.
+  void ReceivedPacket();
+
+  // Reports that a received packet was delayed by |delay_ms| milliseconds.
+  virtual void RelativePacketArrivalDelay(size_t delay_ms);
+
+  // Logs a delayed packet outage event of |num_samples| expanded at a sample
+  // rate of |fs_hz|. A delayed packet outage event is defined as an expand
+  // period caused not by an actual packet loss, but by a delayed packet.
+  virtual void LogDelayedPacketOutageEvent(int num_samples, int fs_hz);
 
   // Returns the current network statistics in |stats|. The current sample rate
   // is |fs_hz|, the total number of samples in packet buffer and sync buffer

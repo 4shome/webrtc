@@ -18,7 +18,7 @@
 #include <vector>
 
 #include "absl/types/optional.h"
-#include "rtc_base/criticalsection.h"
+#include "rtc_base/critical_section.h"
 #include "rtc_base/random.h"
 #include "rtc_base/thread_annotations.h"
 
@@ -61,11 +61,11 @@ struct BuiltInNetworkBehaviorConfig {
   bool allow_reordering = false;
   // The average length of a burst of lost packets.
   int avg_burst_loss_length = -1;
+  // Additional bytes to add to packet size.
+  int packet_overhead = 0;
+  // Enable CoDel active queue management.
+  bool codel_active_queue_management = false;
 };
-
-// TODO(bugs.webrtc.org/9630) remove it after migration to new API.
-// Deprecated. DO NOT USE. Use BuiltInNetworkBehaviorConfig instead.
-using DefaultNetworkSimulationConfig = BuiltInNetworkBehaviorConfig;
 
 class NetworkBehaviorInterface {
  public:
@@ -78,10 +78,6 @@ class NetworkBehaviorInterface {
   virtual absl::optional<int64_t> NextDeliveryTimeUs() const = 0;
   virtual ~NetworkBehaviorInterface() = default;
 };
-
-// TODO(bugs.webrtc.org/9630) remove it after migration to new API.
-// Deprecated. DO NOT USE. Use NetworkBehaviorInterface instead.
-using NetworkSimulationInterface = NetworkBehaviorInterface;
 
 }  // namespace webrtc
 

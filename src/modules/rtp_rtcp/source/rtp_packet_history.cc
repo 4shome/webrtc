@@ -125,8 +125,7 @@ void RtpPacketHistory::PutRtpPacket(std::unique_ptr<RtpPacketToSend> packet,
 }
 
 std::unique_ptr<RtpPacketToSend> RtpPacketHistory::GetPacketAndSetSendTime(
-    uint16_t sequence_number,
-    bool verify_rtt) {
+    uint16_t sequence_number) {
   rtc::CritScope cs(&lock_);
   if (mode_ == StorageMode::kDisabled) {
     return nullptr;
@@ -139,7 +138,7 @@ std::unique_ptr<RtpPacketToSend> RtpPacketHistory::GetPacketAndSetSendTime(
   }
 
   StoredPacket& packet = rtp_it->second;
-  if (verify_rtt && !VerifyRtt(rtp_it->second, now_ms)) {
+  if (!VerifyRtt(rtp_it->second, now_ms)) {
     return nullptr;
   }
 
@@ -159,8 +158,7 @@ std::unique_ptr<RtpPacketToSend> RtpPacketHistory::GetPacketAndSetSendTime(
 }
 
 absl::optional<RtpPacketHistory::PacketState> RtpPacketHistory::GetPacketState(
-    uint16_t sequence_number,
-    bool verify_rtt) const {
+    uint16_t sequence_number) const {
   rtc::CritScope cs(&lock_);
   if (mode_ == StorageMode::kDisabled) {
     return absl::nullopt;
@@ -171,7 +169,7 @@ absl::optional<RtpPacketHistory::PacketState> RtpPacketHistory::GetPacketState(
     return absl::nullopt;
   }
 
-  if (verify_rtt && !VerifyRtt(rtp_it->second, clock_->TimeInMilliseconds())) {
+  if (!VerifyRtt(rtp_it->second, clock_->TimeInMilliseconds())) {
     return absl::nullopt;
   }
 
@@ -317,7 +315,7 @@ RtpPacketHistory::PacketState RtpPacketHistory::StoredPacketToPacketState(
   state.send_time_ms = stored_packet.send_time_ms;
   state.capture_time_ms = stored_packet.packet->capture_time_ms();
   state.ssrc = stored_packet.packet->Ssrc();
-  state.payload_size = stored_packet.packet->size();
+  state.packet_size = stored_packet.packet->size();
   state.times_retransmitted = stored_packet.times_retransmitted;
   return state;
 }

@@ -9,10 +9,18 @@
  */
 
 #include "api/units/data_rate.h"
+#include "rtc_base/logging.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 namespace test {
+
+TEST(DataRateTest, CompilesWithChecksAndLogs) {
+  DataRate a = DataRate::kbps(300);
+  DataRate b = DataRate::kbps(210);
+  RTC_CHECK_GT(a, b);
+  RTC_LOG(LS_INFO) << a;
+}
 
 TEST(DataRateTest, ConstExpr) {
   constexpr int64_t kValue = 12345;
@@ -129,6 +137,9 @@ TEST(DataRateTest, MathOperations) {
   EXPECT_EQ((rate_a * kFloatValue).bps(), kValueA * kFloatValue);
 
   EXPECT_EQ(rate_a / rate_b, static_cast<double>(kValueA) / kValueB);
+
+  EXPECT_EQ((rate_a / 10).bps(), kValueA / 10);
+  EXPECT_NEAR((rate_a / 0.5).bps(), kValueA * 2, 1);
 
   DataRate mutable_rate = DataRate::bps(kValueA);
   mutable_rate += rate_b;

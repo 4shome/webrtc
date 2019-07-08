@@ -48,6 +48,7 @@
 #include <ws2tcpip.h>
 #endif
 #include <usrsctp.h>
+#include "programs_helper.h"
 
 #define MAX_PACKET_SIZE (1<<16)
 #define LINE_LENGTH (1<<20)
@@ -81,7 +82,7 @@ handle_packets(void *arg)
 		length = recv(*fdp, buf, MAX_PACKET_SIZE, 0);
 		if (length > 0) {
 			if ((dump_buf = usrsctp_dumppacket(buf, (size_t)length, SCTP_DUMP_INBOUND)) != NULL) {
-				//fprintf(stderr, "%s", dump_buf);
+				/* fprintf(stderr, "%s", dump_buf); */
 				usrsctp_freedumpbuffer(dump_buf);
 			}
 			usrsctp_conninput(fdp, buf, (size_t)length, 0);
@@ -110,7 +111,7 @@ conn_output(void *addr, void *buf, size_t length, uint8_t tos, uint8_t set_df)
 	fdp = (int *)addr;
 #endif
 	if ((dump_buf = usrsctp_dumppacket(buf, length, SCTP_DUMP_OUTBOUND)) != NULL) {
-		//fprintf(stderr, "%s", dump_buf);
+		/* fprintf(stderr, "%s", dump_buf); */
 		usrsctp_freedumpbuffer(dump_buf);
 	}
 #ifdef _WIN32
@@ -254,16 +255,6 @@ print_addresses(struct socket *sock)
 	printf("\n");
 }
 #endif
-
-void
-debug_printf(const char *format, ...)
-{
-	va_list ap;
-
-	va_start(ap, format);
-	vprintf(format, ap);
-	va_end(ap);
-}
 
 int
 main(void)
@@ -485,7 +476,7 @@ main(void)
 	}
 	memset(line, 'A', LINE_LENGTH);
 	sndinfo.snd_sid = 1;
-	sndinfo.snd_flags = 0;
+	sndinfo.snd_flags = 0; /* SCTP_UNORDERED */
 	sndinfo.snd_ppid = htonl(DISCARD_PPID);
 	sndinfo.snd_context = 0;
 	sndinfo.snd_assoc_id = 0;
