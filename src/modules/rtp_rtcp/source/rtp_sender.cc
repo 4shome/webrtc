@@ -1154,6 +1154,10 @@ uint32_t RTPSender::BitrateSent() const {
   return total_bitrate_sent_.Rate(clock_->TimeInMilliseconds()).value_or(0);
 }
 
+uint32_t RTPSender::PacketsSent() const {
+    return rtp_stats_.transmitted.packets;
+}
+
 void RTPSender::SetRtpState(const RtpState& rtp_state) {
   rtc::CritScope lock(&send_critsect_);
   sequence_number_ = rtp_state.sequence_number;

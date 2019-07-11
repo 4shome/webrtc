@@ -163,6 +163,7 @@ class RTPSender {
   StreamDataCountersCallback* GetRtpStatisticsCallback() const;
 
   uint32_t BitrateSent() const;
+  uint32_t PacketsSent() const;
 
   void SetRtpState(const RtpState& rtp_state);
   RtpState GetRtpState() const;

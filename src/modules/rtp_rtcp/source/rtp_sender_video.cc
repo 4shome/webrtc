@@ -711,7 +711,6 @@ bool RTPSenderVideo::SendVideo(VideoFrameType frame_type,
     } else {
       SendVideoPacket(std::move(packet), storage);
     }
-    ++*packets_sent;
 
     if (first_frame) {
       if (i == 0) {
@@ -740,6 +739,7 @@ bool RTPSenderVideo::SendVideo(VideoFrameType frame_type,
 
   TRACE_EVENT_ASYNC_END1("webrtc", "Video", capture_time_ms, "timestamp",
                          rtp_timestamp);
+  *packets_sent = rtp_sender_->PacketsSent();
   return true;
 }
 
