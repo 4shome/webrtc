@@ -223,15 +223,15 @@ void RtpTransportControllerSend::OnNetworkRouteChanged(
     return;
   }
   if (kv->second.connected != network_route.connected ||
-      kv->second.local_network_id != network_route.local_network_id ||
-      kv->second.remote_network_id != network_route.remote_network_id) {
+      kv->second.local_candidate.network_id() != network_route.local_candidate.network_id() ||
+      kv->second.remote_candidate.network_id() != network_route.remote_candidate.network_id()) {
     kv->second = network_route;
     BitrateConstraints bitrate_config = bitrate_configurator_.GetConfig();
     RTC_LOG(LS_INFO) << "Network route changed on transport " << transport_name
                      << ": new local network id "
-                     << network_route.local_network_id
+                     << network_route.local_candidate.network_id()
                      << " new remote network id "
-                     << network_route.remote_network_id
+                     << network_route.remote_candidate.network_id()
                      << " Reset bitrates to min: "
                      << bitrate_config.min_bitrate_bps
                      << " bps, start: " << bitrate_config.start_bitrate_bps
@@ -241,7 +241,7 @@ void RtpTransportControllerSend::OnNetworkRouteChanged(
 
     if (reset_feedback_on_route_change_)
       transport_feedback_adapter_.SetNetworkIds(
-          network_route.local_network_id, network_route.remote_network_id);
+          network_route.local_candidate.network_id(), network_route.remote_candidate.network_id());
     transport_overhead_bytes_per_packet_ = network_route.packet_overhead;
 
     NetworkRouteChange msg;

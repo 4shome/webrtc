@@ -17,6 +17,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/memory/memory.h"
+#include "api/bitrate_constraints.h"
 #include "api/video/encoded_image.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_bitrate_allocator_factory.h"
@@ -745,10 +746,12 @@ void VideoStreamEncoder::ReconfigureEncoder() {
     ReleaseEncoder();
     if (pending_encoder_creation_) {
       encoder_ = settings_.encoder_factory->CreateVideoEncoder(
-          encoder_config_.video_format);
+          encoder_config_.id, encoder_config_.video_format);
       // TODO(nisse): What to do if creating the encoder fails? Crash,
       // or just discard incoming frames?
       RTC_CHECK(encoder_);
+      encoder_config_.max_bitrate_bps = webrtc::MinPositive(
+          encoder_->MaxBitrate(), encoder_config_.max_bitrate_bps);
       codec_info_ = settings_.encoder_factory->QueryVideoEncoder(
           encoder_config_.video_format);
     }

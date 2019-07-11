@@ -425,6 +425,8 @@ class PeerConnection : public PeerConnectionInternal,
   // Update the state, signaling if necessary.
   void ChangeSignalingState(SignalingState signaling_state)
       RTC_RUN_ON(signaling_thread());
+  void OnNetworkRouteChanged(const rtc::NetworkRoute& route) override;
+      RTC_RUN_ON(signaling_thread());
 
   // Signals from MediaStreamObserver.
   void OnAudioTrackAdded(AudioTrackInterface* track,

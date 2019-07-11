@@ -58,11 +58,12 @@ class TurnPort : public Port {
       const RelayCredentials& credentials,
       int server_priority,
       const std::string& origin,
+      cricket::ProtocolType peer_transport,
       webrtc::TurnCustomizer* customizer) {
     // Using `new` to access a non-public constructor.
     return absl::WrapUnique(new TurnPort(
         thread, factory, network, socket, username, password, server_address,
-        credentials, server_priority, origin, customizer));
+        credentials, server_priority, origin, peer_transport, customizer));
   }
   // TODO(steveanton): Remove once downstream clients have moved to |Create|.
   static std::unique_ptr<TurnPort> CreateUnique(
@@ -76,10 +77,11 @@ class TurnPort : public Port {
       const RelayCredentials& credentials,
       int server_priority,
       const std::string& origin,
+      cricket::ProtocolType peer_transport,
       webrtc::TurnCustomizer* customizer) {
     return Create(thread, factory, network, socket, username, password,
                   server_address, credentials, server_priority, origin,
-                  customizer);
+                  peer_transport, customizer);
   }
 
   // Create a TURN port that will use a new socket, bound to |network| and
@@ -96,6 +98,7 @@ class TurnPort : public Port {
       const RelayCredentials& credentials,
       int server_priority,
       const std::string& origin,
+      cricket::ProtocolType peer_transport,
       const std::vector<std::string>& tls_alpn_protocols,
       const std::vector<std::string>& tls_elliptic_curves,
       webrtc::TurnCustomizer* customizer,
@@ -104,37 +107,22 @@ class TurnPort : public Port {
     return absl::WrapUnique(
         new TurnPort(thread, factory, network, min_port, max_port, username,
                      password, server_address, credentials, server_priority,
-                     origin, tls_alpn_protocols, tls_elliptic_curves,
+                     origin, peer_transport, tls_alpn_protocols, tls_elliptic_curves,
                      customizer, tls_cert_verifier));
-  }
-  // TODO(steveanton): Remove once downstream clients have moved to |Create|.
-  static std::unique_ptr<TurnPort> CreateUnique(
-      rtc::Thread* thread,
-      rtc::PacketSocketFactory* factory,
-      rtc::Network* network,
-      uint16_t min_port,
-      uint16_t max_port,
-      const std::string& username,  // ice username.
-      const std::string& password,  // ice password.
-      const ProtocolAddress& server_address,
-      const RelayCredentials& credentials,
-      int server_priority,
-      const std::string& origin,
-      const std::vector<std::string>& tls_alpn_protocols,
-      const std::vector<std::string>& tls_elliptic_curves,
-      webrtc::TurnCustomizer* customizer,
-      rtc::SSLCertificateVerifier* tls_cert_verifier = nullptr) {
-    return Create(thread, factory, network, min_port, max_port, username,
-                  password, server_address, credentials, server_priority,
-                  origin, tls_alpn_protocols, tls_elliptic_curves, customizer,
-                  tls_cert_verifier);
   }
 
   ~TurnPort() override;
 
+  bool received_response() const { return received_response_; }
+  void set_received_response() { received_response_ = true; }
+
   const ProtocolAddress& server_address() const { return server_address_; }
   // Returns an empty address if the local address has not been assigned.
   rtc::SocketAddress GetLocalAddress() const;
+
+  void set_peer_ip(const std::string& peer_ip) {
+    peer_ip_ = peer_ip;
+  }
 
   bool ready() const { return state_ == STATE_READY; }
   bool connected() const {
@@ -243,6 +231,7 @@ class TurnPort : public Port {
            const RelayCredentials& credentials,
            int server_priority,
            const std::string& origin,
+           cricket::ProtocolType peer_transport,
            webrtc::TurnCustomizer* customizer);
 
   TurnPort(rtc::Thread* thread,
@@ -256,6 +245,7 @@ class TurnPort : public Port {
            const RelayCredentials& credentials,
            int server_priority,
            const std::string& origin,
+           cricket::ProtocolType peer_transport,
            const std::vector<std::string>& tls_alpn_protocols,
            const std::vector<std::string>& tls_elliptic_curves,
            webrtc::TurnCustomizer* customizer,
@@ -362,12 +352,15 @@ class TurnPort : public Port {
   rtc::SSLCertificateVerifier* tls_cert_verifier_;
   RelayCredentials credentials_;
   AttemptedServerSet attempted_server_addresses_;
+  std::string peer_ip_;
+  const cricket::ProtocolType peer_transport_;
 
   rtc::AsyncPacketSocket* socket_;
   SocketOptionsMap socket_options_;
   rtc::AsyncResolverInterface* resolver_;
   int error_;
   rtc::DiffServCodePoint stun_dscp_value_;
+  bool received_response_ = false;
 
   StunRequestManager request_manager_;
   std::string realm_;       // From 401/438 response message.

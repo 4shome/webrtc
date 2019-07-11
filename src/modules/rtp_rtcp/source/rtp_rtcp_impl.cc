@@ -175,17 +175,19 @@ void ModuleRtpRtcpImpl::Process() {
     if (rtcp_receiver_.RtcpRrTimeout()) {
       RTC_LOG_F(LS_WARNING) << "Timeout: No RTCP RR received.";
     } else if (rtcp_receiver_.RtcpRrSequenceNumberTimeout()) {
-      RTC_LOG_F(LS_WARNING) << "Timeout: No increase in RTCP RR extended "
+      RTC_LOG_F(LS_VERBOSE) << "Timeout: No increase in RTCP RR extended "
                                "highest sequence number.";
     }
 
     if (remote_bitrate_ && rtcp_sender_.TMMBR()) {
+      RTC_LOG_F(LS_INFO) << "Checking for target bandwidth ...";
       unsigned int target_bitrate = 0;
       std::vector<unsigned int> ssrcs;
       if (remote_bitrate_->LatestEstimate(&ssrcs, &target_bitrate)) {
         if (!ssrcs.empty()) {
           target_bitrate = target_bitrate / ssrcs.size();
         }
+        RTC_LOG_F(LS_INFO) << "target_bitrate: " << target_bitrate;
         rtcp_sender_.SetTargetBitrate(target_bitrate);
       }
     }

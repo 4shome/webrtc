@@ -44,6 +44,8 @@ struct SenderOptions {
   SimulcastLayerList simulcast_layers;
   // Use |num_sim_layers| to indicate legacy simulcast.
   int num_sim_layers;
+  AudioCodecs audio_codecs;
+  VideoCodecs video_codecs;
 };
 
 // Options for an individual media description/"m=" section.
@@ -57,12 +59,14 @@ struct MediaDescriptionOptions {
   // TODO(deadbeef): When we don't support Plan B, there will only be one
   // sender per media description and this can be simplified.
   void AddAudioSender(const std::string& track_id,
-                      const std::vector<std::string>& stream_ids);
+                      const std::vector<std::string>& stream_ids,
+                      const AudioCodecs& codecs);
   void AddVideoSender(const std::string& track_id,
                       const std::vector<std::string>& stream_ids,
                       const std::vector<RidDescription>& rids,
                       const SimulcastLayerList& simulcast_layers,
-                      int num_sim_layers);
+                      int num_sim_layers,
+                      const VideoCodecs& codecs);
 
   // Internally just uses sender_options.
   void AddRtpDataChannel(const std::string& track_id,
@@ -83,7 +87,9 @@ struct MediaDescriptionOptions {
                          const std::vector<std::string>& stream_ids,
                          const std::vector<RidDescription>& rids,
                          const SimulcastLayerList& simulcast_layers,
-                         int num_sim_layers);
+                         int num_sim_layers,
+                         const AudioCodecs& audio_codecs,
+                         const VideoCodecs& video_codecs);
 };
 
 // Provides a mechanism for describing how m= sections should be generated.

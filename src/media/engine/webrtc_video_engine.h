@@ -347,6 +347,7 @@ class WebRtcVideoChannel : public VideoMediaChannel, public webrtc::Transport {
     webrtc::DegradationPreference GetDegradationPreference() const
         RTC_EXCLUSIVE_LOCKS_REQUIRED(&thread_checker_);
 
+    const std::string id_;
     rtc::ThreadChecker thread_checker_;
     rtc::AsyncInvoker invoker_;
     rtc::Thread* worker_thread_;

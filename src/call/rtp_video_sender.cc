@@ -425,11 +425,12 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
   int64_t expected_retransmission_time_ms =
       rtp_streams_[stream_index].rtp_rtcp->ExpectedRetransmissionTimeMs();
 
+  uint32_t packets_sent = 0;
   bool send_result = rtp_streams_[stream_index].sender_video->SendVideo(
       encoded_image._frameType, rtp_config_.payload_type, rtp_timestamp,
       encoded_image.capture_time_ms_, encoded_image.data(),
       encoded_image.size(), fragmentation, &rtp_video_header,
-      expected_retransmission_time_ms);
+      expected_retransmission_time_ms, &packets_sent);
   if (frame_count_observer_) {
     FrameCounts& counts = frame_counts_[stream_index];
     if (encoded_image._frameType == VideoFrameType::kVideoFrameKey) {
@@ -445,7 +446,7 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
   if (!send_result)
     return Result(Result::ERROR_SEND_FAILED);
 
-  return Result(Result::OK, rtp_timestamp);
+  return Result(Result::OK, rtp_timestamp, packets_sent);
 }
 
 void RtpVideoSender::OnBitrateAllocationUpdated(

@@ -13,6 +13,8 @@
 
 #include <stdint.h>
 
+#include "api/candidate.h"
+
 // TODO(honghaiz): Make a directory that describes the interfaces and structs
 // the media code can rely on and the network code can implement, and both can
 // depend on that, but not depend on each other. Then, move this file to that
@@ -21,8 +23,8 @@ namespace rtc {
 
 struct NetworkRoute {
   bool connected = false;
-  uint16_t local_network_id = 0;
-  uint16_t remote_network_id = 0;
+  cricket::Candidate local_candidate;
+  cricket::Candidate remote_candidate;
   // Last packet id sent on the PREVIOUS route.
   int last_sent_packet_id = -1;
   // The overhead in bytes from IP layer and above.

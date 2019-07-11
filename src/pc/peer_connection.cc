@@ -191,6 +191,19 @@ bool IsValidOfferToReceiveMedia(int value) {
          (value <= Options::kMaxOfferToReceiveMedia);
 }
 
+std::string ToCodecName(webrtc::VideoCodecType vct) {
+  switch (vct) {
+    case webrtc::kVideoCodecVP8:
+      return cricket::kVp8CodecName;
+    case webrtc::kVideoCodecVP9:
+      return cricket::kVp9CodecName;
+    case webrtc::kVideoCodecH264:
+      return cricket::kH264CodecName;
+  }
+  return "";
+}
+
+
 // Add options to |[audio/video]_media_description_options| from |senders|.
 void AddPlanBRtpSenderOptions(
     const std::vector<rtc::scoped_refptr<
@@ -202,14 +215,18 @@ void AddPlanBRtpSenderOptions(
     if (sender->media_type() == cricket::MEDIA_TYPE_AUDIO) {
       if (audio_media_description_options) {
         audio_media_description_options->AddAudioSender(
-            sender->id(), sender->internal()->stream_ids());
+            sender->id(), sender->internal()->stream_ids(), {});
       }
     } else {
       RTC_DCHECK(sender->media_type() == cricket::MEDIA_TYPE_VIDEO);
       if (video_media_description_options) {
+        std::vector<cricket::VideoCodec> video_codecs;
+        for (webrtc::VideoCodecType vct : sender->internal()->GetVideoCodecTypes()) {
+          video_codecs.emplace_back(vct, ToCodecName(vct));
+        }
         video_media_description_options->AddVideoSender(
             sender->id(), sender->internal()->stream_ids(), {},
-            SimulcastLayerList(), num_sim_layers);
+            SimulcastLayerList(), num_sim_layers, video_codecs);
       }
     }
   }
@@ -755,6 +772,10 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
     int max_ipv6_networks;
     bool disable_link_local_networks;
     bool enable_rtp_data_channel;
+    bool disable_udp_relay;
+    bool disable_tcp_relay;
+    bool disable_udp_peer_relay;
+    bool disable_tcp_peer_relay;
     absl::optional<int> screencast_min_bitrate;
     absl::optional<bool> combined_audio_video_bwe;
     absl::optional<bool> enable_dtls_srtp;
@@ -818,6 +839,10 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
          max_ipv6_networks == o.max_ipv6_networks &&
          disable_link_local_networks == o.disable_link_local_networks &&
          enable_rtp_data_channel == o.enable_rtp_data_channel &&
+         disable_udp_relay == o.disable_udp_relay &&
+         disable_tcp_relay == o.disable_tcp_relay &&
+         disable_udp_peer_relay == o.disable_udp_peer_relay &&
+         disable_tcp_peer_relay == o.disable_tcp_peer_relay &&
          screencast_min_bitrate == o.screencast_min_bitrate &&
          combined_audio_video_bwe == o.combined_audio_video_bwe &&
          enable_dtls_srtp == o.enable_dtls_srtp &&
@@ -1415,7 +1440,7 @@ PeerConnection::AddTrackUnifiedPlan(
     auto receiver = CreateReceiver(media_type, rtc::CreateRandomUuid());
     transceiver = CreateAndAddTransceiver(sender, receiver);
     transceiver->internal()->set_created_by_addtrack(true);
-    transceiver->internal()->set_direction(RtpTransceiverDirection::kSendRecv);
+    transceiver->internal()->set_direction(RtpTransceiverDirection::kSendOnly);
   }
   return transceiver->sender();
 }
@@ -4175,6 +4200,15 @@ void PeerConnection::OnIceCandidatesRemoved(
   Observer()->OnIceCandidatesRemoved(candidates);
 }
 
+void PeerConnection::OnNetworkRouteChanged(const rtc::NetworkRoute& route) {
+  RTC_DCHECK(signaling_thread()->IsCurrent());
+  if (IsClosed()) {
+    return;
+  }
+  observer_->OnIceSelectedCandidatePairChanged(
+      route.local_candidate, route.remote_candidate, route.connected);
+}
+
 void PeerConnection::ChangeSignalingState(
     PeerConnectionInterface::SignalingState signaling_state) {
   if (signaling_state_ == signaling_state) {
@@ -4409,8 +4443,12 @@ GetMediaDescriptionOptionsForTransceiver(
   }
 
   cricket::SenderOptions sender_options;
-  sender_options.track_id = transceiver->sender()->id();
-  sender_options.stream_ids = transceiver->sender()->stream_ids();
+  auto sender = transceiver->sender();
+  sender_options.track_id = sender->id();
+  sender_options.stream_ids = sender->stream_ids();
+  for (webrtc::VideoCodecType vct : sender->GetVideoCodecTypes()) {
+    sender_options.video_codecs.emplace_back(vct, ToCodecName(vct));
+  }
 
   // The following sets up RIDs and Simulcast.
   // RIDs are included if Simulcast is requested or if any RID was specified.
@@ -5414,6 +5452,26 @@ PeerConnection::InitializePortAllocator_n(
   if (configuration.tcp_candidate_policy == kTcpCandidatePolicyDisabled) {
     port_allocator_flags |= cricket::PORTALLOCATOR_DISABLE_TCP;
     RTC_LOG(LS_INFO) << "TCP candidates are disabled.";
+  } else if (configuration.tcp_candidate_policy == kTcpCandidatePolicyNoUdp) {
+    port_allocator_flags |= cricket::PORTALLOCATOR_DISABLE_UDP;
+    RTC_LOG(LS_INFO) << "UDP candidates are disabled.";
+  }
+
+  if (configuration.disable_udp_relay) {
+    port_allocator_flags |= cricket::PORTALLOCATOR_DISABLE_UDP_RELAY;
+    RTC_LOG(LS_INFO) << "UDP relay are disabled.";
+  }
+  if (configuration.disable_tcp_relay) {
+    port_allocator_flags |= cricket::PORTALLOCATOR_DISABLE_TCP_RELAY;
+    RTC_LOG(LS_INFO) << "TCP relay are disabled.";
+  }
+  if (configuration.disable_udp_peer_relay) {
+    port_allocator_flags |= cricket::PORTALLOCATOR_DISABLE_UDP_PEER_RELAY;
+    RTC_LOG(LS_INFO) << "UDP peer relay are disabled.";
+  }
+  if (configuration.disable_tcp_peer_relay) {
+    port_allocator_flags |= cricket::PORTALLOCATOR_DISABLE_TCP_PEER_RELAY;
+    RTC_LOG(LS_INFO) << "TCP peer relay are disabled.";
   }
 
   if (configuration.candidate_network_policy ==

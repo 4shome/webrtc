@@ -22,11 +22,12 @@
 #include <type_traits>
 #include <utility>
 
+#include <event.h>
+
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "api/task_queue/queued_task.h"
 #include "api/task_queue/task_queue_base.h"
-#include "base/third_party/libevent/event.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/critical_section.h"
 #include "rtc_base/logging.h"

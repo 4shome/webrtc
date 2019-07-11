@@ -69,7 +69,8 @@ class RTPSenderVideo {
                  size_t payload_size,
                  const RTPFragmentationHeader* fragmentation,
                  const RTPVideoHeader* video_header,
-                 int64_t expected_retransmission_time_ms);
+                 int64_t expected_retransmission_time_ms,
+                 uint32_t* packets_sent);
 
   void RegisterPayloadType(int8_t payload_type, absl::string_view payload_name);
 

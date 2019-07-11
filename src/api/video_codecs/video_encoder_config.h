@@ -128,6 +128,7 @@ class VideoEncoderConfig {
   ~VideoEncoderConfig();
   std::string ToString() const;
 
+  std::string id;
   // TODO(nisse): Consolidate on one of these.
   VideoCodecType codec_type;
   SdpVideoFormat video_format;

@@ -488,6 +488,8 @@ JsepTransportController::CreateDtlsTransport(
       this, &JsepTransportController::OnTransportStateChanged_n);
   dtls->ice_transport()->SignalIceTransportStateChanged.connect(
       this, &JsepTransportController::OnTransportStateChanged_n);
+  dtls->ice_transport()->SignalNetworkRouteChanged.connect(
+      this, &JsepTransportController::OnNetworkRouteChanged_n);
   return dtls;
 }
 
@@ -1282,6 +1284,16 @@ void JsepTransportController::OnTransportStateChanged_n(
 void JsepTransportController::OnMediaTransportStateChanged_n() {
   SignalMediaTransportStateChanged();
   UpdateAggregateStates_n();
+}
+
+void JsepTransportController::OnNetworkRouteChanged_n(absl::optional<rtc::NetworkRoute> route) {
+  RTC_DCHECK(network_thread_->IsCurrent());
+  if (route.has_value()) {
+    invoker_.AsyncInvoke<void>(
+        RTC_FROM_HERE, signaling_thread_,
+        rtc::Bind(&JsepTransportController::Observer::OnNetworkRouteChanged,
+                  config_.transport_observer, *route));
+  }
 }
 
 void JsepTransportController::UpdateAggregateStates_n() {

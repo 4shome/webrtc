@@ -31,7 +31,6 @@
 #include "media/engine/webrtc_media_engine.h"
 #include "modules/audio_device/audio_device_impl.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
-#include "modules/audio_processing/aec_dump/aec_dump_factory.h"
 #include "modules/audio_processing/include/audio_processing.h"
 #include "rtc_base/arraysize.h"
 #include "rtc_base/byte_order.h"
@@ -224,16 +223,20 @@ void WebRtcVoiceEngine::Init() {
           "rtc-low-prio", webrtc::TaskQueueFactory::Priority::LOW)));
 
   // Load our audio codec lists.
-  RTC_LOG(LS_INFO) << "Supported send codecs in order of preference:";
-  send_codecs_ = CollectCodecs(encoder_factory_->GetSupportedEncoders());
-  for (const AudioCodec& codec : send_codecs_) {
-    RTC_LOG(LS_INFO) << ToString(codec);
+  if (encoder_factory_) {
+    RTC_LOG(LS_INFO) << "Supported send codecs in order of preference:";
+    send_codecs_ = CollectCodecs(encoder_factory_->GetSupportedEncoders());
+    for (const AudioCodec& codec : send_codecs_) {
+      RTC_LOG(LS_INFO) << ToString(codec);
+    }
   }
 
-  RTC_LOG(LS_INFO) << "Supported recv codecs in order of preference:";
-  recv_codecs_ = CollectCodecs(decoder_factory_->GetSupportedDecoders());
-  for (const AudioCodec& codec : recv_codecs_) {
-    RTC_LOG(LS_INFO) << ToString(codec);
+  if (decoder_factory_) {
+    RTC_LOG(LS_INFO) << "Supported recv codecs in order of preference:";
+    recv_codecs_ = CollectCodecs(decoder_factory_->GetSupportedDecoders());
+    for (const AudioCodec& codec : recv_codecs_) {
+      RTC_LOG(LS_INFO) << ToString(codec);
+    }
   }
 
 #if defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
@@ -576,24 +579,12 @@ void WebRtcVoiceEngine::UnregisterChannel(WebRtcVoiceMediaChannel* channel) {
 
 bool WebRtcVoiceEngine::StartAecDump(rtc::PlatformFile file,
                                      int64_t max_size_bytes) {
-  RTC_DCHECK(worker_thread_checker_.IsCurrent());
-  auto aec_dump = webrtc::AecDumpFactory::Create(
-      file, max_size_bytes, low_priority_worker_queue_.get());
-  if (!aec_dump) {
-    return false;
-  }
-  apm()->AttachAecDump(std::move(aec_dump));
-  return true;
+  RTC_LOG(LS_INFO) << "Skip AEC dump.";
+  return false;
 }
 
 void WebRtcVoiceEngine::StartAecDump(const std::string& filename) {
-  RTC_DCHECK(worker_thread_checker_.IsCurrent());
-
-  auto aec_dump = webrtc::AecDumpFactory::Create(
-      filename, -1, low_priority_worker_queue_.get());
-  if (aec_dump) {
-    apm()->AttachAecDump(std::move(aec_dump));
-  }
+  RTC_LOG(LS_INFO) << "Skip AEC dump.";
 }
 
 void WebRtcVoiceEngine::StopAecDump() {

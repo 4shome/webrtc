@@ -60,6 +60,7 @@ class JsepTransportController : public sigslot::has_slots<> {
         RtpTransportInternal* rtp_transport,
         rtc::scoped_refptr<DtlsTransport> dtls_transport,
         MediaTransportInterface* media_transport) = 0;
+    virtual void OnNetworkRouteChanged(const rtc::NetworkRoute& route);
   };
 
   struct Config {
@@ -354,6 +355,7 @@ class JsepTransportController : public sigslot::has_slots<> {
   void OnTransportRoleConflict_n(cricket::IceTransportInternal* transport);
   void OnTransportStateChanged_n(cricket::IceTransportInternal* transport);
   void OnMediaTransportStateChanged_n();
+  void OnNetworkRouteChanged_n(absl::optional<rtc::NetworkRoute> route);
 
   void UpdateAggregateStates_n();
 

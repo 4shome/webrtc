@@ -437,7 +437,8 @@ bool RTPSenderVideo::SendVideo(VideoFrameType frame_type,
                                size_t payload_size,
                                const RTPFragmentationHeader* fragmentation,
                                const RTPVideoHeader* video_header,
-                               int64_t expected_retransmission_time_ms) {
+                               int64_t expected_retransmission_time_ms,
+                               uint32_t* packets_sent) {
   TRACE_EVENT_ASYNC_STEP1("webrtc", "Video", capture_time_ms, "Send", "type",
                           FrameTypeToString(frame_type));
 
@@ -710,6 +711,7 @@ bool RTPSenderVideo::SendVideo(VideoFrameType frame_type,
     } else {
       SendVideoPacket(std::move(packet), storage);
     }
+    ++*packets_sent;
 
     if (first_frame) {
       if (i == 0) {

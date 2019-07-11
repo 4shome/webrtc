@@ -1865,10 +1865,8 @@ void P2PTransportChannel::SwitchSelectedConnection(Connection* conn) {
 
     network_route_.emplace(rtc::NetworkRoute());
     network_route_->connected = ReadyToSend(selected_connection_);
-    network_route_->local_network_id =
-        selected_connection_->local_candidate().network_id();
-    network_route_->remote_network_id =
-        selected_connection_->remote_candidate().network_id();
+    network_route_->local_candidate = selected_connection_->local_candidate();
+    network_route_->remote_candidate = selected_connection_->remote_candidate();
     network_route_->last_sent_packet_id = last_sent_packet_id_;
     network_route_->packet_overhead =
         GetIpOverhead(
