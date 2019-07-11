@@ -1042,15 +1042,17 @@ void RTCPReceiver::TriggerCallbacksFromRtcpPacket(
       rtcp_bandwidth_observer_->OnReceivedEstimatedBitrate(
           packet_information.receiver_estimated_max_bitrate_bps);
     }
-    if ((packet_information.packet_type_flags & kRtcpSr) ||
-        (packet_information.packet_type_flags & kRtcpRr)) {
+    if (!packet_information.report_blocks.empty() &&
+        ((packet_information.packet_type_flags & kRtcpSr) ||
+         (packet_information.packet_type_flags & kRtcpRr))) {
       int64_t now_ms = clock_->TimeInMilliseconds();
       rtcp_bandwidth_observer_->OnReceivedRtcpReceiverReport(
           packet_information.report_blocks, packet_information.rtt_ms, now_ms);
     }
   }
-  if ((packet_information.packet_type_flags & kRtcpSr) ||
-      (packet_information.packet_type_flags & kRtcpRr)) {
+  if (!packet_information.report_blocks.empty() &&
+      ((packet_information.packet_type_flags & kRtcpSr) ||
+       (packet_information.packet_type_flags & kRtcpRr))) {
     rtp_rtcp_->OnReceivedRtcpReportBlocks(packet_information.report_blocks);
   }
 
