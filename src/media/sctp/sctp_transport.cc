@@ -521,7 +521,7 @@ bool SctpTransport::SendData(const SendDataParams& params,
   spa.sendv_flags |= SCTP_SEND_SNDINFO_VALID;
   spa.sendv_sndinfo.snd_sid = params.sid;
   spa.sendv_sndinfo.snd_ppid = rtc::HostToNetwork32(GetPpid(params.type));
-  spa.sendv_sndinfo.snd_flags |= SCTP_EOR;
+  //spa.sendv_sndinfo.snd_flags |= SCTP_EOR;
 
   // Ordered implies reliable.
   if (!params.ordered) {
@@ -730,13 +730,13 @@ bool SctpTransport::ConfigureSctpSocket() {
   }
 
   // Explicit EOR.
-  uint32_t eor = 1;
+  /*uint32_t eor = 1;
   if (usrsctp_setsockopt(sock_, IPPROTO_SCTP, SCTP_EXPLICIT_EOR, &eor,
                          sizeof(eor))) {
     RTC_LOG_ERRNO(LS_ERROR) << debug_name_ << "->ConfigureSctpSocket(): "
                             << "Failed to set SCTP_EXPLICIT_EOR.";
     return false;
-  }
+  }*/
 
   // Subscribe to SCTP event notifications.
   int event_types[] = {SCTP_ASSOC_CHANGE, SCTP_PEER_ADDR_CHANGE,
