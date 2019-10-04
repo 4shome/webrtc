@@ -308,7 +308,7 @@ CXX_SRCS=src/api/audio/audio_frame.cc \
          src/api/rtp_transceiver_interface.cc \
          src/api/sctp_transport_interface.cc \
          src/api/stats_types.cc \
-         src/api/task_queue/default_task_queue_factory_libevent.cc \
+         src/api/task_queue/default_task_queue_factory_stdlib.cc \
          src/api/task_queue/global_task_queue_factory.cc \
          src/api/task_queue/task_queue_base.cc \
          src/api/transport/bitrate_settings.cc \
@@ -1019,7 +1019,7 @@ CXX_SRCS=src/api/audio/audio_frame.cc \
          src/rtc_base/synchronization/yield_policy.cc \
          src/rtc_base/system/file_wrapper.cc \
          src/rtc_base/task_queue.cc \
-         src/rtc_base/task_queue_libevent.cc \
+         src/rtc_base/task_queue_stdlib.cc \
          src/rtc_base/task_utils/repeating_task.cc \
          src/rtc_base/third_party/base64/base64.cc \
          src/rtc_base/thread.cc \
@@ -1182,7 +1182,7 @@ COMMON_DEFS=-DHAVE_INT16_T -DHAVE_INT32_T -DHAVE_INT8_T -DHAVE_UINT16_T -DHAVE_U
 WEBRTC_DEFS=-DHAVE_WEBRTC_VIDEO -DHAVE_WEBRTC_VOICE -DWEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE \
             -DWEBRTC_DUMMY_AUDIO_BUILD -DWEBRTC_THREAD_RR -DWEBRTC_CLOCK_TYPE_REALTIME \
             -DWEBRTC_NS_FLOAT -DWEBRTC_CODEC_OPUS -DWEBRTC_CODEC_ISAC -DWEBRTC_USE_H264 \
-            -DWEBRTC_BUILD_LIBEVENT -DWEBRTC_INTELLIGIBILITY_ENHANCER=0 -DWEBRTC_APM_DEBUG_DUMP=0 \
+            -DWEBRTC_INTELLIGIBILITY_ENHANCER=0 -DWEBRTC_APM_DEBUG_DUMP=0 \
             -DGOOGLE_PROTOBUF_NO_RTTI -DWEBRTC_USE_EPOLL -DWEBRTC_OPUS_SUPPORT_120MS_PTIME=0 \
             -DWEBRTC_OPUS_VARIABLE_COMPLEXITY=0 -DWEBRTC_USE_BUILTIN_ILBC \
             -DWEBRTC_USE_BUILTIN_ISAC_FIX -DWEBRTC_USE_BUILTIN_OPUS
@@ -1353,7 +1353,7 @@ test_webrtc.cc:
 
 test_webrtc: test_webrtc.cc libwebrtc.a
 	$(CXX) $(DEFS) $(INCS) $(CXXFLAGS) -Isrc test_webrtc.cc -o $@ \
-	   ./libwebrtc.a -Wl,-Bstatic -lopus -labsl -levent -lssl -lcrypto -Wl,-Bdynamic -ldl
+	   ./libwebrtc.a -Wl,-Bstatic -lopus -labsl -lssl -lcrypto -Wl,-Bdynamic -ldl
 
 clean:
 	rm -f $(OBJS) objs.txt libwebrtc.a
