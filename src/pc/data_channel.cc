@@ -630,7 +630,7 @@ bool DataChannel::SendDataMessage(const DataBuffer& buffer,
   }
 
   if (send_result == cricket::SDR_BLOCK) {
-    if (!queue_if_blocked || QueueSendDataMessage(buffer)) {
+    if (!queue_if_blocked || !QueueSendDataMessage(buffer)) {
       return false;
     }
     return true;
