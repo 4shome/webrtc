@@ -31,10 +31,26 @@ C_SRCS/armv7l=src/common_audio/signal_processing/cross_correlation_neon.c \
               src/common_audio/signal_processing/downsample_fast_neon.c \
               src/common_audio/signal_processing/min_max_operations_neon.c \
               src/modules/audio_coding/codecs/isac/fix/source/entropy_coding_neon.c \
-              src/modules/audio_coding/codecs/isac/fix/source/filters_neon.c \
               src/modules/audio_coding/codecs/isac/fix/source/filterbanks_neon.c \
+              src/modules/audio_coding/codecs/isac/fix/source/filters_neon.c \
               src/modules/audio_coding/codecs/isac/fix/source/lattice_neon.c \
-              src/modules/audio_coding/codecs/isac/fix/source/transform_neon.c
+              src/modules/audio_coding/codecs/isac/fix/source/transform_neon.c \
+              src/modules/audio_processing/ns/noise_suppression_x.c \
+              src/modules/audio_processing/ns/nsx_core.c \
+              src/modules/audio_processing/ns/nsx_core_neon.c
+
+
+C_SRCS/aarch64=src/common_audio/signal_processing/cross_correlation_neon.c \
+               src/common_audio/signal_processing/downsample_fast_neon.c \
+               src/common_audio/signal_processing/min_max_operations_neon.c \
+               src/modules/audio_coding/codecs/isac/fix/source/entropy_coding_neon.c \
+               src/modules/audio_coding/codecs/isac/fix/source/filterbanks_neon.c \
+               src/modules/audio_coding/codecs/isac/fix/source/filters_neon.c \
+               src/modules/audio_coding/codecs/isac/fix/source/lattice_neon.c \
+               src/modules/audio_coding/codecs/isac/fix/source/transform_neon.c \
+               src/modules/audio_processing/ns/noise_suppression_x.c \
+               src/modules/audio_processing/ns/nsx_core.c \
+               src/modules/audio_processing/ns/nsx_core_neon.c
 
 C_SRCS=src/common_audio/ring_buffer.c \
        src/common_audio/signal_processing/auto_correlation.c \
@@ -259,10 +275,16 @@ CXX_SRCS/i686=src/common_audio/fir_filter_sse.cc \
 CXX_SRCS/armv7l=src/common_audio/fir_filter_neon.cc \
                 src/common_audio/resampler/sinc_resampler_neon.cc \
                 src/modules/audio_processing/aec/aec_core_neon.cc \
-                src/modules/audio_processing/aec/aec_rdft_neon.cc \
                 src/modules/audio_processing/aecm/aecm_core_neon.cc \
-                src/modules/video_processing/util/denoiser_filter_neon.cc \
-                src/modules/audio_processing/utility/ooura_fft_neon.cc
+                src/modules/audio_processing/utility/ooura_fft_neon.cc \
+                src/modules/video_processing/util/denoiser_filter_neon.cc
+
+CXX_SRCS/aarch64=src/common_audio/fir_filter_neon.cc \
+                 src/common_audio/resampler/sinc_resampler_neon.cc \
+                 src/modules/audio_processing/aec/aec_core_neon.cc \
+                 src/modules/audio_processing/aecm/aecm_core_neon.cc \
+                 src/modules/audio_processing/utility/ooura_fft_neon.cc \
+                 src/modules/video_processing/util/denoiser_filter_neon.cc
 
 CXX_SRCS=src/api/audio/audio_frame.cc \
          src/api/audio/echo_canceller3_config.cc \
@@ -1074,6 +1096,11 @@ YUV_SRCS/armv7l=src/third_party/libyuv/source/compare_neon.cc \
                 src/third_party/libyuv/source/row_neon.cc \
                 src/third_party/libyuv/source/scale_neon.cc
 
+YUV_SRCS/aarch64=src/third_party/libyuv/source/compare_neon64.cc \
+                 src/third_party/libyuv/source/rotate_neon64.cc \
+                 src/third_party/libyuv/source/row_neon64.cc \
+                 src/third_party/libyuv/source/scale_neon64.cc
+
 YUV_SRCS=src/third_party/libyuv/source/compare.cc \
          src/third_party/libyuv/source/compare_common.cc \
          src/third_party/libyuv/source/compare_gcc.cc \
@@ -1131,7 +1158,6 @@ USRSCTP_SRCS=src/third_party/usrsctp/usrsctplib/user_environment.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_auth.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_bsd_addr.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_callout.c \
-             src/third_party/usrsctp/usrsctplib/netinet/sctp_callout_queue.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_cc_functions.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_crc32.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_indata.c \
@@ -1195,7 +1221,8 @@ PROTOCOL_DEFS=-DHAVE_SRTP -DSRTP_RELATIVE_PATH -DHAVE_SCTP
 DEFS/Linux=-DWEBRTC_POSIX -DWEBRTC_LINUX -DLINUX
 DEFS/Darwin=-DWEBRTC_POSIX -DWEBRTC_MAC
 DEFS/MinGW=-DWEBRTC_WIN -D_Check_return_= -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0601
-DEFS/armv7l=-DWEBRTC_HAS_NEON
+DEFS/armv7l=-DWEBRTC_HAS_NEON -DWEBRTC_NS_FIXED -DWEBRTC_AUDIOPROC_FIXED_PROFILE
+DEFS/aarch64=-DWEBRTC_HAS_NEON -DWEBRTC_NS_FIXED -DWEBRTC_AUDIOPROC_FIXED_PROFILE
 
 LIBSRTP_DEFS=-DPACKAGE_STRING='"libsrtp2 2.0.0-pre"' -DPACKAGE_VERSION='"2.0.0-pre"' \
              -DHAVE_CONFIG_H -DOPENSSL -DHAVE_STDLIB_H -DHAVE_STRING_H -DHAVE_STDINT_H \
@@ -1254,6 +1281,7 @@ CFLAGS/MINGW=
 CFLAGS/x86_64=-msse2
 CFLAGS/i686=-msse2
 CFLAGS/armv7l=-mfpu=neon -fPIC
+CFLAGS/aarch64=-fPIC
 CFLAGS=$(COMMON_CFLAGS) $(CFLAGS/$(OS)) $(CFLAGS/$(ARCH))
 
 CXXFLAGS=-std=gnu++11 $(CFLAGS) -fno-exceptions -funwind-tables -fno-rtti -fno-threadsafe-statics \
