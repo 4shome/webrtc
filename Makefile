@@ -1158,6 +1158,7 @@ USRSCTP_SRCS=src/third_party/usrsctp/usrsctplib/user_environment.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_auth.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_bsd_addr.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_callout.c \
+             src/third_party/usrsctp/usrsctplib/netinet/sctp_callout_queue.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_cc_functions.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_crc32.c \
              src/third_party/usrsctp/usrsctplib/netinet/sctp_indata.c \

@@ -231,7 +231,7 @@ bool IsCodecBlacklistedForSimulcast(const std::string& codec_name) {
 static int GetMaxDefaultVideoBitrateKbps(int width,
                                          int height,
                                          bool is_screenshare) {
-  int max_bitrate;
+  /*int max_bitrate;
   if (width * height <= 320 * 240) {
     max_bitrate = 600;
   } else if (width * height <= 640 * 480) {
@@ -243,7 +243,8 @@ static int GetMaxDefaultVideoBitrateKbps(int width,
   }
   if (is_screenshare)
     max_bitrate = std::max(max_bitrate, 1200);
-  return max_bitrate;
+  return max_bitrate;*/
+  return 10000;
 }
 
 bool GetVp9LayersFromFieldTrialGroup(size_t* num_spatial_layers,
