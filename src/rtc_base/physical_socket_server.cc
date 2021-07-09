@@ -61,6 +61,7 @@
 
 #if defined(WEBRTC_POSIX)
 #include <netinet/tcp.h>  // for TCP_NODELAY
+#include <linux/sockios.h>
 #define IP_MTU 14  // Until this is integrated from linux/in.h to netinet/in.h
 typedef void* SockOptArg;
 
