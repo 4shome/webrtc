@@ -15,11 +15,13 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <list>
 #include <map>
+#include <memory>
+#include <utility>
 
 #include "rtc_base/checks.h"
-#include "rtc_base/mac_utils.h"
 
 static_assert(static_cast<webrtc::WindowId>(kCGNullWindowID) ==
                   webrtc::kNullWindowId,
@@ -29,15 +31,33 @@ namespace webrtc {
 
 namespace {
 
-// Get CFDictionaryRef from |id| and call |on_window| against it. This function
-// returns false if native APIs fail, typically it indicates that the |id| does
-// not represent a window. |on_window| will not be called if false is returned
+// WindowName of the status indicator dot shown since Monterey in the taskbar.
+// Testing on 12.2.1 shows this is independent of system language setting.
+const CFStringRef kStatusIndicator = CFSTR("StatusIndicator");
+const CFStringRef kStatusIndicatorOwnerName = CFSTR("Window Server");
+
+bool ToUtf8(const CFStringRef str16, std::string* str8) {
+  size_t maxlen = CFStringGetMaximumSizeForEncoding(CFStringGetLength(str16),
+                                                    kCFStringEncodingUTF8) +
+                  1;
+  std::unique_ptr<char[]> buffer(new char[maxlen]);
+  if (!buffer ||
+      !CFStringGetCString(str16, buffer.get(), maxlen, kCFStringEncodingUTF8)) {
+    return false;
+  }
+  str8->assign(buffer.get());
+  return true;
+}
+
+// Get CFDictionaryRef from `id` and call `on_window` against it. This function
+// returns false if native APIs fail, typically it indicates that the `id` does
+// not represent a window. `on_window` will not be called if false is returned
 // from this function.
 bool GetWindowRef(CGWindowID id,
                   rtc::FunctionView<void(CFDictionaryRef)> on_window) {
   RTC_DCHECK(on_window);
 
-  // TODO(zijiehe): |id| is a 32-bit integer, casting it to an array seems not
+  // TODO(zijiehe): `id` is a 32-bit integer, casting it to an array seems not
   // safe enough. Maybe we should create a new
   // const void* arr[] = {
   //   reinterpret_cast<void*>(id) }
@@ -66,7 +86,8 @@ bool GetWindowRef(CGWindowID id,
 }  // namespace
 
 bool GetWindowList(rtc::FunctionView<bool(CFDictionaryRef)> on_window,
-                   bool ignore_minimized) {
+                   bool ignore_minimized,
+                   bool only_zero_layer) {
   RTC_DCHECK(on_window);
 
   // Only get on screen, non-desktop windows.
@@ -110,7 +131,7 @@ bool GetWindowList(rtc::FunctionView<bool(CFDictionaryRef)> on_window,
     if (!CFNumberGetValue(window_layer, kCFNumberIntType, &layer)) {
       continue;
     }
-    if (layer != 0) {
+    if (only_zero_layer && layer != 0) {
       continue;
     }
 
@@ -129,6 +150,17 @@ bool GetWindowList(rtc::FunctionView<bool(CFDictionaryRef)> on_window,
       continue;
     }
 
+    CFStringRef window_owner_name = reinterpret_cast<CFStringRef>(
+        CFDictionaryGetValue(window, kCGWindowOwnerName));
+    // Ignore the red dot status indicator shown in the stats bar. Unlike the
+    // rest of the system UI it has a window_layer of 0, so was otherwise
+    // included. See crbug.com/1297731.
+    if (window_title && CFEqual(window_title, kStatusIndicator) &&
+        window_owner_name &&
+        CFEqual(window_owner_name, kStatusIndicatorOwnerName)) {
+      continue;
+    }
+
     if (!on_window(window)) {
       break;
     }
@@ -139,7 +171,8 @@ bool GetWindowList(rtc::FunctionView<bool(CFDictionaryRef)> on_window,
 }
 
 bool GetWindowList(DesktopCapturer::SourceList* windows,
-                   bool ignore_minimized) {
+                   bool ignore_minimized,
+                   bool only_zero_layer) {
   // Use a std::list so that iterators are preversed upon insertion and
   // deletion.
   std::list<DesktopCapturer::Source> sources;
@@ -189,7 +222,7 @@ bool GetWindowList(DesktopCapturer::SourceList* windows,
         }
         return true;
       },
-      ignore_minimized);
+      ignore_minimized, only_zero_layer);
 
   if (!ret)
     return false;
@@ -227,6 +260,15 @@ bool IsWindowFullScreen(const MacDesktopConfiguration& desktop_config,
   return fullscreen;
 }
 
+bool IsWindowFullScreen(const MacDesktopConfiguration& desktop_config,
+                        CGWindowID id) {
+  bool fullscreen = false;
+  GetWindowRef(id, [&](CFDictionaryRef window) {
+    fullscreen = IsWindowFullScreen(desktop_config, window);
+  });
+  return fullscreen;
+}
+
 bool IsWindowOnScreen(CFDictionaryRef window) {
   CFBooleanRef on_screen = reinterpret_cast<CFBooleanRef>(
       CFDictionaryGetValue(window, kCGWindowIsOnscreen));
@@ -247,7 +289,7 @@ std::string GetWindowTitle(CFDictionaryRef window) {
   CFStringRef title = reinterpret_cast<CFStringRef>(
       CFDictionaryGetValue(window, kCGWindowName));
   std::string result;
-  if (title && rtc::ToUtf8(title, &result)) {
+  if (title && ToUtf8(title, &result)) {
     return result;
   }
 
@@ -268,7 +310,7 @@ std::string GetWindowOwnerName(CFDictionaryRef window) {
   CFStringRef owner_name = reinterpret_cast<CFStringRef>(
       CFDictionaryGetValue(window, kCGWindowOwnerName));
   std::string result;
-  if (owner_name && rtc::ToUtf8(owner_name, &result)) {
+  if (owner_name && ToUtf8(owner_name, &result)) {
     return result;
   }
   return std::string();
@@ -277,7 +319,7 @@ std::string GetWindowOwnerName(CFDictionaryRef window) {
 std::string GetWindowOwnerName(CGWindowID id) {
   std::string owner_name;
   if (GetWindowRef(id, [&owner_name](CFDictionaryRef window) {
-        owner_name = GetWindowOwnerPid(window);
+        owner_name = GetWindowOwnerName(window);
       })) {
     return owner_name;
   }

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "absl/memory/memory.h"
+#include "rtc_base/time_utils.h"
 
 namespace webrtc {
 
@@ -22,6 +23,7 @@ RtcEventGenericAckReceived::CreateLogs(
     const std::vector<AckedPacket>& acked_packets) {
   std::vector<std::unique_ptr<RtcEventGenericAckReceived>> result;
   int64_t time_us = rtc::TimeMicros();
+  result.reserve(acked_packets.size());
   for (const AckedPacket& packet : acked_packets) {
     result.emplace_back(new RtcEventGenericAckReceived(
         time_us, packet_number, packet.packet_number,
@@ -49,13 +51,5 @@ RtcEventGenericAckReceived::RtcEventGenericAckReceived(
     const RtcEventGenericAckReceived& packet) = default;
 
 RtcEventGenericAckReceived::~RtcEventGenericAckReceived() = default;
-
-RtcEvent::Type RtcEventGenericAckReceived::GetType() const {
-  return RtcEvent::Type::GenericAckReceived;
-}
-
-bool RtcEventGenericAckReceived::IsConfigEvent() const {
-  return false;
-}
 
 }  // namespace webrtc

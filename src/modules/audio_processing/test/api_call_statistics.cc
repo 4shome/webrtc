@@ -15,8 +15,9 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <string>
 
-#include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
 #include "rtc_base/time_utils.h"
 
 namespace webrtc {
@@ -73,9 +74,9 @@ void ApiCallStatistics::PrintReport() const {
             << "   avg: " << avg_capture << " us" << std::endl;
 }
 
-void ApiCallStatistics::WriteReportToFile(const std::string& filename) const {
+void ApiCallStatistics::WriteReportToFile(absl::string_view filename) const {
   std::unique_ptr<std::ofstream> out =
-      absl::make_unique<std::ofstream>(filename);
+      std::make_unique<std::ofstream>(std::string(filename));
   for (auto v : calls_) {
     if (v.call_type == CallType::kRender) {
       *out << "render, ";

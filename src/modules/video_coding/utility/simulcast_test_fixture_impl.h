@@ -28,10 +28,9 @@ namespace test {
 
 class SimulcastTestFixtureImpl final : public SimulcastTestFixture {
  public:
-  SimulcastTestFixtureImpl(
-      std::unique_ptr<VideoEncoderFactory> encoder_factory,
-      std::unique_ptr<VideoDecoderFactory> decoder_factory,
-      SdpVideoFormat video_format);
+  SimulcastTestFixtureImpl(std::unique_ptr<VideoEncoderFactory> encoder_factory,
+                           std::unique_ptr<VideoDecoderFactory> decoder_factory,
+                           SdpVideoFormat video_format);
   ~SimulcastTestFixtureImpl() final;
 
   // Implements SimulcastTestFixture.
@@ -51,6 +50,7 @@ class SimulcastTestFixtureImpl final : public SimulcastTestFixture {
   void TestSpatioTemporalLayers321PatternEncoder() override;
   void TestStrideEncodeDecode() override;
   void TestDecodeWidthHeightSet() override;
+  void TestEncoderInfoForDefaultTemporalLayerProfileHasFpsAllocation() override;
 
   static void DefaultSettings(VideoCodec* settings,
                               const int* temporal_layer_profile,
@@ -64,10 +64,10 @@ class SimulcastTestFixtureImpl final : public SimulcastTestFixture {
   void SetUpCodec(const int* temporal_layer_profile);
   void SetUpRateAllocator();
   void SetRates(uint32_t bitrate_kbps, uint32_t fps);
-  void RunActiveStreamsTest(const std::vector<bool> active_streams);
-  void UpdateActiveStreams(const std::vector<bool> active_streams);
+  void RunActiveStreamsTest(std::vector<bool> active_streams);
+  void UpdateActiveStreams(std::vector<bool> active_streams);
   void ExpectStreams(VideoFrameType frame_type,
-                     const std::vector<bool> expected_streams_active);
+                     std::vector<bool> expected_streams_active);
   void ExpectStreams(VideoFrameType frame_type, int expected_video_streams);
   void VerifyTemporalIdxAndSyncForAllSpatialLayers(
       TestEncodedImageCallback* encoder_callback,

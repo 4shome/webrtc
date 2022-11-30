@@ -65,7 +65,7 @@ int32_t TestPack::SendData(AudioFrameType frame_type,
                            uint32_t timestamp,
                            const uint8_t* payload_data,
                            size_t payload_size,
-                           const RTPFragmentationHeader* fragmentation) {
+                           int64_t absolute_capture_timestamp_ms) {
   RTPHeader rtp_header;
   int32_t status;
 
@@ -113,8 +113,7 @@ TestAllCodecs::TestAllCodecs()
       channel_a_to_b_(NULL),
       test_count_(0),
       packet_size_samples_(0),
-      packet_size_bytes_(0) {
-}
+      packet_size_bytes_(0) {}
 
 TestAllCodecs::~TestAllCodecs() {
   if (channel_a_to_b_ != NULL) {
@@ -321,7 +320,7 @@ void TestAllCodecs::RegisterSendCodec(char side,
   // If G.722, store half the size to compensate for the timestamp bug in the
   // RFC for G.722.
   // If iSAC runs in adaptive mode, packet size in samples can change on the
-  // fly, so we exclude this test by setting |packet_size_samples_| to -1.
+  // fly, so we exclude this test by setting `packet_size_samples_` to -1.
   int clockrate_hz = sampling_freq_hz;
   size_t num_channels = 1;
   if (absl::EqualsIgnoreCase(codec_name, "G722")) {
@@ -361,13 +360,15 @@ void TestAllCodecs::RegisterSendCodec(char side,
       my_acm = acm_b_.get();
       break;
     }
-    default: { break; }
+    default: {
+      break;
+    }
   }
   ASSERT_TRUE(my_acm != NULL);
 
   auto factory = CreateBuiltinAudioEncoderFactory();
   constexpr int payload_type = 17;
-  SdpAudioFormat format = { codec_name, clockrate_hz, num_channels };
+  SdpAudioFormat format = {codec_name, clockrate_hz, num_channels};
   format.parameters["ptime"] = rtc::ToString(rtc::CheckedDivExact(
       packet_size, rtc::CheckedDivExact(sampling_freq_hz, 1000)));
   my_acm->SetEncoder(

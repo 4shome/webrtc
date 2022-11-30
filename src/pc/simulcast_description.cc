@@ -8,14 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <utility>
-
 #include "pc/simulcast_description.h"
+
 #include "rtc_base/checks.h"
 
 namespace cricket {
 
-SimulcastLayer::SimulcastLayer(const std::string& rid, bool is_paused)
+SimulcastLayer::SimulcastLayer(absl::string_view rid, bool is_paused)
     : rid{rid}, is_paused{is_paused} {
   RTC_DCHECK(!rid.empty());
 }

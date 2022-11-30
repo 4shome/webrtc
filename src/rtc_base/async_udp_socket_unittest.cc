@@ -8,10 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "rtc_base/async_udp_socket.h"
+
 #include <memory>
 #include <string>
 
-#include "rtc_base/async_udp_socket.h"
 #include "rtc_base/gunit.h"
 #include "rtc_base/physical_socket_server.h"
 #include "rtc_base/virtual_socket_server.h"
@@ -23,7 +24,7 @@ class AsyncUdpSocketTest : public ::testing::Test, public sigslot::has_slots<> {
   AsyncUdpSocketTest()
       : pss_(new rtc::PhysicalSocketServer),
         vss_(new rtc::VirtualSocketServer(pss_.get())),
-        socket_(vss_->CreateAsyncSocket(SOCK_DGRAM)),
+        socket_(vss_->CreateSocket(SOCK_DGRAM)),
         udp_socket_(new AsyncUDPSocket(socket_)),
         ready_to_send_(false) {
     udp_socket_->SignalReadyToSend.connect(this,
@@ -35,7 +36,7 @@ class AsyncUdpSocketTest : public ::testing::Test, public sigslot::has_slots<> {
  protected:
   std::unique_ptr<PhysicalSocketServer> pss_;
   std::unique_ptr<VirtualSocketServer> vss_;
-  AsyncSocket* socket_;
+  Socket* socket_;
   std::unique_ptr<AsyncUDPSocket> udp_socket_;
   bool ready_to_send_;
 };

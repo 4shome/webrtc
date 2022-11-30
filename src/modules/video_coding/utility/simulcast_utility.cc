@@ -8,11 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <algorithm>
+#include "modules/video_coding/utility/simulcast_utility.h"
 
+#include <algorithm>
 #include <cmath>
 
-#include "modules/video_coding/utility/simulcast_utility.h"
 #include "rtc_base/checks.h"
 
 namespace webrtc {
@@ -84,15 +84,8 @@ bool SimulcastUtility::ValidSimulcastParameters(const VideoCodec& codec,
 }
 
 bool SimulcastUtility::IsConferenceModeScreenshare(const VideoCodec& codec) {
-  if (codec.mode != VideoCodecMode::kScreensharing ||
-      NumberOfTemporalLayers(codec, 0) != 2) {
-    return false;
-  }
-  // Fixed default bitrates for legacy screenshare layers mode.
-  return (codec.numberOfSimulcastStreams == 0 && codec.maxBitrate == 1000) ||
-         (codec.numberOfSimulcastStreams >= 1 &&
-          codec.simulcastStream[0].maxBitrate == 1000 &&
-          codec.simulcastStream[0].targetBitrate == 200);
+  return codec.mode == VideoCodecMode::kScreensharing &&
+         codec.legacy_conference_mode;
 }
 
 int SimulcastUtility::NumberOfTemporalLayers(const VideoCodec& codec,

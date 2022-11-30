@@ -13,12 +13,14 @@
 #include <memory>
 
 #include "api/call/transport.h"
+#include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_base.h"
 #include "api/test/simulated_network.h"
 #include "call/call.h"
 #include "call/simulated_packet_receiver.h"
-#include "rtc_base/synchronization/sequence_checker.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/task_utils/repeating_task.h"
 #include "rtc_base/thread_annotations.h"
-#include "test/single_threaded_task_queue.h"
 
 namespace webrtc {
 
@@ -29,24 +31,25 @@ class Demuxer {
  public:
   explicit Demuxer(const std::map<uint8_t, MediaType>& payload_type_map);
   ~Demuxer() = default;
+
+  Demuxer(const Demuxer&) = delete;
+  Demuxer& operator=(const Demuxer&) = delete;
+
   MediaType GetMediaType(const uint8_t* packet_data,
-                         const size_t packet_length) const;
+                         size_t packet_length) const;
   const std::map<uint8_t, MediaType> payload_type_map_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(Demuxer);
 };
 
 // Objects of this class are expected to be allocated and destroyed  on the
 // same task-queue - the one that's passed in via the constructor.
 class DirectTransport : public Transport {
  public:
-  DirectTransport(SingleThreadedTaskQueueForTesting* task_queue,
+  DirectTransport(TaskQueueBase* task_queue,
                   std::unique_ptr<SimulatedPacketReceiverInterface> pipe,
                   Call* send_call,
                   const std::map<uint8_t, MediaType>& payload_type_map);
 
   ~DirectTransport() override;
-
-  RTC_DEPRECATED void StopSending();
 
   // TODO(holmer): Look into moving this to the constructor.
   virtual void SetReceiver(PacketReceiver* receiver);
@@ -65,15 +68,13 @@ class DirectTransport : public Transport {
 
   Call* const send_call_;
 
-  SingleThreadedTaskQueueForTesting* const task_queue_;
+  TaskQueueBase* const task_queue_;
 
-  rtc::CriticalSection process_lock_;
-  absl::optional<SingleThreadedTaskQueueForTesting::TaskId> next_process_task_
-      RTC_GUARDED_BY(&process_lock_);
+  Mutex process_lock_;
+  RepeatingTaskHandle next_process_task_ RTC_GUARDED_BY(&process_lock_);
 
   const Demuxer demuxer_;
   const std::unique_ptr<SimulatedPacketReceiverInterface> fake_network_;
-
 };
 }  // namespace test
 }  // namespace webrtc

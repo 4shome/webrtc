@@ -8,25 +8,59 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "api/audio_codecs/builtin_audio_decoder_factory.h"
-#include "api/audio_codecs/builtin_audio_encoder_factory.h"
-#include "api/video_codecs/builtin_video_decoder_factory.h"
-#include "api/video_codecs/builtin_video_encoder_factory.h"
+#include <stddef.h>
+
+#include <algorithm>
+#include <map>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
+#include "api/call/call_factory_interface.h"
+#include "api/field_trials_view.h"
+#include "api/jsep.h"
+#include "api/media_stream_interface.h"
+#include "api/media_types.h"
+#include "api/peer_connection_interface.h"
+#include "api/rtc_error.h"
+#include "api/rtp_parameters.h"
+#include "api/rtp_receiver_interface.h"
+#include "api/rtp_sender_interface.h"
+#include "api/rtp_transceiver_direction.h"
+#include "api/rtp_transceiver_interface.h"
+#include "api/scoped_refptr.h"
+#include "api/task_queue/default_task_queue_factory.h"
+#include "api/task_queue/task_queue_factory.h"
+#include "api/transport/field_trial_based_config.h"
+#include "api/transport/sctp_transport_factory_interface.h"
+#include "media/base/media_engine.h"
+#include "media/base/stream_params.h"
 #include "media/engine/webrtc_media_engine.h"
-#include "modules/audio_processing/include/audio_processing.h"
+#include "media/engine/webrtc_media_engine_defaults.h"
+#include "modules/audio_device/include/audio_device.h"
+#include "p2p/base/p2p_constants.h"
+#include "p2p/base/port_allocator.h"
+#include "p2p/base/transport_info.h"
+#include "pc/channel_interface.h"
 #include "pc/media_session.h"
-#include "pc/peer_connection_factory.h"
 #include "pc/peer_connection_wrapper.h"
 #include "pc/sdp_utils.h"
+#include "pc/session_description.h"
+#include "pc/test/mock_peer_connection_observers.h"
+#include "rtc_base/rtc_certificate_generator.h"
+#include "rtc_base/thread.h"
+#include "test/gtest.h"
 #ifdef WEBRTC_ANDROID
 #include "pc/test/android_test_initializer.h"
 #endif
-#include "absl/memory/memory.h"
 #include "pc/test/fake_audio_capture_module.h"
-#include "pc/test/fake_sctp_transport.h"
-#include "rtc_base/gunit.h"
 #include "rtc_base/virtual_socket_server.h"
 #include "test/gmock.h"
+#include "test/pc/sctp/fake_sctp_transport.h"
 
 // This file contains tests that ensure the PeerConnection's implementation of
 // CreateOffer/CreateAnswer/SetLocalDescription/SetRemoteDescription conform
@@ -38,36 +72,28 @@ namespace webrtc {
 
 using cricket::MediaContentDescription;
 using RTCConfiguration = PeerConnectionInterface::RTCConfiguration;
-using ::testing::Values;
 using ::testing::Combine;
 using ::testing::ElementsAre;
 using ::testing::UnorderedElementsAre;
+using ::testing::Values;
 
-class PeerConnectionFactoryForJsepTest : public PeerConnectionFactory {
- public:
-  PeerConnectionFactoryForJsepTest()
-      : PeerConnectionFactory([] {
-          PeerConnectionFactoryDependencies dependencies;
-          dependencies.worker_thread = rtc::Thread::Current();
-          dependencies.network_thread = rtc::Thread::Current();
-          dependencies.signaling_thread = rtc::Thread::Current();
-          dependencies.media_engine = cricket::WebRtcMediaEngineFactory::Create(
-              rtc::scoped_refptr<AudioDeviceModule>(
-                  FakeAudioCaptureModule::Create()),
-              CreateBuiltinAudioEncoderFactory(),
-              CreateBuiltinAudioDecoderFactory(),
-              CreateBuiltinVideoEncoderFactory(),
-              CreateBuiltinVideoDecoderFactory(), nullptr,
-              AudioProcessingBuilder().Create());
-          dependencies.call_factory = CreateCallFactory();
-          return dependencies;
-        }()) {}
-
-  std::unique_ptr<cricket::SctpTransportInternalFactory>
-  CreateSctpTransportInternalFactory() {
-    return absl::make_unique<FakeSctpTransportFactory>();
-  }
-};
+PeerConnectionFactoryDependencies CreatePeerConnectionFactoryDependencies() {
+  PeerConnectionFactoryDependencies dependencies;
+  dependencies.worker_thread = rtc::Thread::Current();
+  dependencies.network_thread = rtc::Thread::Current();
+  dependencies.signaling_thread = rtc::Thread::Current();
+  dependencies.task_queue_factory = CreateDefaultTaskQueueFactory();
+  dependencies.trials = std::make_unique<FieldTrialBasedConfig>();
+  cricket::MediaEngineDependencies media_deps;
+  media_deps.task_queue_factory = dependencies.task_queue_factory.get();
+  media_deps.adm = FakeAudioCaptureModule::Create();
+  media_deps.trials = dependencies.trials.get();
+  SetMediaEngineDefaults(&media_deps);
+  dependencies.media_engine = cricket::CreateMediaEngine(std::move(media_deps));
+  dependencies.call_factory = CreateCallFactory();
+  dependencies.sctp_factory = std::make_unique<FakeSctpTransportFactory>();
+  return dependencies;
+}
 
 class PeerConnectionJsepTest : public ::testing::Test {
  protected:
@@ -87,19 +113,19 @@ class PeerConnectionJsepTest : public ::testing::Test {
   }
 
   WrapperPtr CreatePeerConnection(const RTCConfiguration& config) {
-    rtc::scoped_refptr<PeerConnectionFactory> pc_factory(
-        new rtc::RefCountedObject<PeerConnectionFactoryForJsepTest>());
-    RTC_CHECK(pc_factory->Initialize());
-    auto observer = absl::make_unique<MockPeerConnectionObserver>();
-    auto pc = pc_factory->CreatePeerConnection(config, nullptr, nullptr,
-                                               observer.get());
-    if (!pc) {
+    rtc::scoped_refptr<PeerConnectionFactoryInterface> pc_factory =
+        CreateModularPeerConnectionFactory(
+            CreatePeerConnectionFactoryDependencies());
+    auto observer = std::make_unique<MockPeerConnectionObserver>();
+    auto result = pc_factory->CreatePeerConnectionOrError(
+        config, PeerConnectionDependencies(observer.get()));
+    if (!result.ok()) {
       return nullptr;
     }
 
-    observer->SetPeerConnectionInterface(pc.get());
-    return absl::make_unique<PeerConnectionWrapper>(pc_factory, pc,
-                                                    std::move(observer));
+    observer->SetPeerConnectionInterface(result.value().get());
+    return std::make_unique<PeerConnectionWrapper>(
+        pc_factory, result.MoveValue(), std::move(observer));
   }
 
   std::unique_ptr<rtc::VirtualSocketServer> vss_;
@@ -215,7 +241,7 @@ TEST_F(PeerConnectionJsepTest,
        StoppedTransceiverHasNoMediaSectionInInitialOffer) {
   auto caller = CreatePeerConnection();
   auto transceiver = caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
-  transceiver->Stop();
+  transceiver->StopInternal();
 
   auto offer = caller->CreateOffer();
   EXPECT_EQ(0u, offer->description()->contents().size());
@@ -303,7 +329,7 @@ TEST_F(PeerConnectionJsepTest,
   auto caller = CreatePeerConnection();
   caller->AddAudioTrack("a");
   auto caller_audio = caller->pc()->GetTransceivers()[0];
-  caller_audio->SetDirection(RtpTransceiverDirection::kSendOnly);
+  caller_audio->SetDirectionWithError(RtpTransceiverDirection::kSendOnly);
   auto callee = CreatePeerConnection();
   callee->AddAudioTrack("a");
 
@@ -361,16 +387,18 @@ TEST_F(PeerConnectionJsepTest, SetRemoteOfferDoesNotReuseStoppedTransceiver) {
   caller->AddAudioTrack("a");
   auto callee = CreatePeerConnection();
   callee->AddAudioTrack("a");
-  callee->pc()->GetTransceivers()[0]->Stop();
+  callee->pc()->GetTransceivers()[0]->StopInternal();
 
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
 
   auto transceivers = callee->pc()->GetTransceivers();
   ASSERT_EQ(2u, transceivers.size());
-  EXPECT_EQ(absl::nullopt, transceivers[0]->mid());
-  EXPECT_TRUE(transceivers[0]->stopped());
-  EXPECT_EQ(caller->pc()->GetTransceivers()[0]->mid(), transceivers[1]->mid());
-  EXPECT_FALSE(transceivers[1]->stopped());
+  // The stopped transceiver is removed in SetLocalDescription(answer)
+  ASSERT_TRUE(callee->SetLocalDescription(callee->CreateAnswer()));
+  transceivers = callee->pc()->GetTransceivers();
+  ASSERT_EQ(1u, transceivers.size());
+  EXPECT_EQ(caller->pc()->GetTransceivers()[0]->mid(), transceivers[0]->mid());
+  EXPECT_FALSE(transceivers[0]->stopped());
 }
 
 // Test that audio and video transceivers created on the remote side with
@@ -435,7 +463,7 @@ TEST_F(PeerConnectionJsepTest, CreateAnswerRejectsStoppedTransceiver) {
 
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
 
-  callee->pc()->GetTransceivers()[0]->Stop();
+  callee->pc()->GetTransceivers()[0]->StopInternal();
 
   auto answer = callee->CreateAnswer();
   auto contents = answer->description()->contents();
@@ -472,7 +500,7 @@ TEST_F(PeerConnectionJsepTest, CreateAnswerNegotiatesDirection) {
 TEST_F(PeerConnectionJsepTest, SetLocalAnswerUpdatesCurrentDirection) {
   auto caller = CreatePeerConnection();
   auto caller_audio = caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
-  caller_audio->SetDirection(RtpTransceiverDirection::kRecvOnly);
+  caller_audio->SetDirectionWithError(RtpTransceiverDirection::kRecvOnly);
   auto callee = CreatePeerConnection();
   callee->AddAudioTrack("a");
 
@@ -497,7 +525,7 @@ TEST_F(PeerConnectionJsepTest, SetRemoteAnswerUpdatesCurrentDirection) {
   auto callee = CreatePeerConnection();
   callee->AddAudioTrack("a");
   auto callee_audio = callee->pc()->GetTransceivers()[0];
-  callee_audio->SetDirection(RtpTransceiverDirection::kSendOnly);
+  callee_audio->SetDirectionWithError(RtpTransceiverDirection::kSendOnly);
 
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
   ASSERT_TRUE(
@@ -512,6 +540,42 @@ TEST_F(PeerConnectionJsepTest, SetRemoteAnswerUpdatesCurrentDirection) {
             transceivers[0]->current_direction());
 }
 
+TEST_F(PeerConnectionJsepTest,
+       ChangeDirectionFromRecvOnlyToSendRecvDoesNotBreakVideoNegotiation) {
+  auto caller = CreatePeerConnection();
+  auto caller_transceiver = caller->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  auto callee = CreatePeerConnection();
+  caller_transceiver->SetDirectionWithError(RtpTransceiverDirection::kRecvOnly);
+
+  ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  ASSERT_TRUE(
+      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
+
+  caller_transceiver->SetDirectionWithError(RtpTransceiverDirection::kSendRecv);
+
+  ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  ASSERT_TRUE(
+      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
+}
+
+TEST_F(PeerConnectionJsepTest,
+       ChangeDirectionFromRecvOnlyToSendRecvDoesNotBreakAudioNegotiation) {
+  auto caller = CreatePeerConnection();
+  auto caller_transceiver = caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  caller_transceiver->SetDirectionWithError(RtpTransceiverDirection::kRecvOnly);
+
+  ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  ASSERT_TRUE(
+      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
+
+  caller_transceiver->SetDirectionWithError(RtpTransceiverDirection::kSendRecv);
+
+  ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  ASSERT_TRUE(
+      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
+}
+
 // Tests for multiple round trips.
 
 // Test that setting a transceiver with the inactive direction does not stop it
@@ -521,7 +585,7 @@ TEST_F(PeerConnectionJsepTest, SettingTransceiverInactiveDoesNotStopIt) {
   caller->AddAudioTrack("a");
   auto callee = CreatePeerConnection();
   callee->AddAudioTrack("a");
-  callee->pc()->GetTransceivers()[0]->SetDirection(
+  callee->pc()->GetTransceivers()[0]->SetDirectionWithError(
       RtpTransceiverDirection::kInactive);
 
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
@@ -546,7 +610,7 @@ TEST_F(PeerConnectionJsepTest,
       caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
 
   ASSERT_TRUE(transceiver->mid());
-  transceiver->Stop();
+  transceiver->StopInternal();
 
   auto reoffer = caller->CreateOffer();
   auto contents = reoffer->description()->contents();
@@ -567,13 +631,15 @@ TEST_F(PeerConnectionJsepTest,
   ASSERT_TRUE(
       caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
 
-  transceiver->Stop();
+  transceiver->StopInternal();
 
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
 
   auto transceivers = callee->pc()->GetTransceivers();
-  EXPECT_TRUE(transceivers[0]->stopped());
-  EXPECT_TRUE(transceivers[0]->mid());
+  EXPECT_EQ(1u, transceivers.size());
+  ASSERT_TRUE(callee->SetLocalDescription(callee->CreateAnswer()));
+  transceivers = callee->pc()->GetTransceivers();
+  EXPECT_EQ(0u, transceivers.size());
 }
 
 // Test that CreateOffer will only generate a recycled media section if the
@@ -589,7 +655,7 @@ TEST_F(PeerConnectionJsepTest,
       caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
 
   auto second_transceiver = caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
-  first_transceiver->Stop();
+  first_transceiver->StopInternal();
 
   auto reoffer = caller->CreateOffer();
   auto contents = reoffer->description()->contents();
@@ -608,14 +674,17 @@ TEST_F(PeerConnectionJsepTest,
   auto callee = CreatePeerConnection();
 
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
-  callee->pc()->GetTransceivers()[0]->Stop();
+  std::string first_mid = *first_transceiver->mid();
+  ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
+  callee->pc()->GetTransceivers()[0]->StopInternal();
+  ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
   ASSERT_TRUE(
       caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
   EXPECT_TRUE(first_transceiver->stopped());
-  // First transceivers aren't dissociated yet.
-  ASSERT_NE(absl::nullopt, first_transceiver->mid());
-  std::string first_mid = *first_transceiver->mid();
-  EXPECT_EQ(first_mid, callee->pc()->GetTransceivers()[0]->mid());
+  // First transceivers are dissociated on caller side.
+  ASSERT_EQ(absl::nullopt, first_transceiver->mid());
+  // They are disassociated on callee side.
+  ASSERT_EQ(0u, callee->pc()->GetTransceivers().size());
 
   // New offer exchange with new transceivers that recycles the m section
   // correctly.
@@ -633,10 +702,11 @@ TEST_F(PeerConnectionJsepTest,
   ASSERT_TRUE(
       caller->SetLocalDescription(CloneSessionDescription(offer.get())));
   EXPECT_EQ(absl::nullopt, first_transceiver->mid());
-  EXPECT_EQ(second_mid, caller->pc()->GetTransceivers()[1]->mid());
+  ASSERT_EQ(1u, caller->pc()->GetTransceivers().size());
+  EXPECT_EQ(second_mid, caller->pc()->GetTransceivers()[0]->mid());
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(offer)));
-  EXPECT_EQ(absl::nullopt, callee->pc()->GetTransceivers()[0]->mid());
-  EXPECT_EQ(second_mid, callee->pc()->GetTransceivers()[1]->mid());
+  ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
+  EXPECT_EQ(second_mid, callee->pc()->GetTransceivers()[0]->mid());
 
   // The new answer should also recycle the m section correctly.
   auto answer = callee->CreateAnswer();
@@ -650,13 +720,11 @@ TEST_F(PeerConnectionJsepTest,
       callee->SetLocalDescription(CloneSessionDescription(answer.get())));
   ASSERT_TRUE(caller->SetRemoteDescription(std::move(answer)));
   auto caller_transceivers = caller->pc()->GetTransceivers();
-  ASSERT_EQ(2u, caller_transceivers.size());
-  EXPECT_EQ(absl::nullopt, caller_transceivers[0]->mid());
-  EXPECT_EQ(second_mid, caller_transceivers[1]->mid());
+  ASSERT_EQ(1u, caller_transceivers.size());
+  EXPECT_EQ(second_mid, caller_transceivers[0]->mid());
   auto callee_transceivers = callee->pc()->GetTransceivers();
-  ASSERT_EQ(2u, callee_transceivers.size());
-  EXPECT_EQ(absl::nullopt, callee_transceivers[0]->mid());
-  EXPECT_EQ(second_mid, callee_transceivers[1]->mid());
+  ASSERT_EQ(1u, callee_transceivers.size());
+  EXPECT_EQ(second_mid, callee_transceivers[0]->mid());
 }
 
 // Test that creating/setting a local offer that recycles an m= section is
@@ -667,7 +735,7 @@ TEST_F(PeerConnectionJsepTest, CreateOfferRecyclesWhenOfferingTwice) {
   auto first_transceiver = caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
   auto callee = CreatePeerConnection();
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
-  first_transceiver->Stop();
+  first_transceiver->StopInternal();
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
   caller->AddAudioTrack("audio2");
 
@@ -678,7 +746,8 @@ TEST_F(PeerConnectionJsepTest, CreateOfferRecyclesWhenOfferingTwice) {
   ASSERT_EQ(1u, offer_contents.size());
   EXPECT_FALSE(offer_contents[0].rejected);
   ASSERT_TRUE(caller->SetLocalDescription(std::move(offer)));
-  EXPECT_FALSE(caller->pc()->GetTransceivers()[1]->stopped());
+  ASSERT_EQ(1u, caller->pc()->GetTransceivers().size());
+  EXPECT_FALSE(caller->pc()->GetTransceivers()[0]->stopped());
   std::string second_mid = offer_contents[0].name;
 
   // Create another new offer and set the local description again without the
@@ -693,10 +762,9 @@ TEST_F(PeerConnectionJsepTest, CreateOfferRecyclesWhenOfferingTwice) {
   ASSERT_TRUE(caller->SetLocalDescription(std::move(second_offer)));
   // Make sure that the caller's transceivers are associated correctly.
   auto caller_transceivers = caller->pc()->GetTransceivers();
-  ASSERT_EQ(2u, caller_transceivers.size());
-  EXPECT_EQ(absl::nullopt, caller_transceivers[0]->mid());
-  EXPECT_EQ(second_mid, caller_transceivers[1]->mid());
-  EXPECT_FALSE(caller_transceivers[1]->stopped());
+  ASSERT_EQ(1u, caller_transceivers.size());
+  EXPECT_EQ(second_mid, caller_transceivers[0]->mid());
+  EXPECT_FALSE(caller_transceivers[0]->stopped());
 }
 
 // Test that the offer/answer and transceivers for both the caller and callee
@@ -732,7 +800,7 @@ TEST_P(RecycleMediaSectionTest, CurrentLocalAndCurrentRemoteRejected) {
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
 
   std::string first_mid = *first_transceiver->mid();
-  first_transceiver->Stop();
+  first_transceiver->StopInternal();
 
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
 
@@ -759,11 +827,9 @@ TEST_P(RecycleMediaSectionTest, CurrentLocalAndCurrentRemoteRejected) {
   // create a new transceiver for the media section.
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(offer)));
   auto callee_transceivers = callee->pc()->GetTransceivers();
-  ASSERT_EQ(2u, callee_transceivers.size());
-  EXPECT_EQ(absl::nullopt, callee_transceivers[0]->mid());
-  EXPECT_EQ(first_type_, callee_transceivers[0]->media_type());
-  EXPECT_EQ(second_mid, callee_transceivers[1]->mid());
-  EXPECT_EQ(second_type_, callee_transceivers[1]->media_type());
+  ASSERT_EQ(1u, callee_transceivers.size());
+  EXPECT_EQ(second_mid, callee_transceivers[0]->mid());
+  EXPECT_EQ(second_type_, callee_transceivers[0]->media_type());
 
   // The answer should have only one media section for the new transceiver.
   auto answer = callee->CreateAnswer();
@@ -780,8 +846,8 @@ TEST_P(RecycleMediaSectionTest, CurrentLocalAndCurrentRemoteRejected) {
   // Setting the remote answer should succeed and not create any new
   // transceivers.
   ASSERT_TRUE(caller->SetRemoteDescription(std::move(answer)));
-  ASSERT_EQ(2u, caller->pc()->GetTransceivers().size());
-  ASSERT_EQ(2u, callee->pc()->GetTransceivers().size());
+  ASSERT_EQ(1u, caller->pc()->GetTransceivers().size());
+  ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
 }
 
 // Test that recycling works properly when a new transceiver recycles an m=
@@ -796,7 +862,7 @@ TEST_P(RecycleMediaSectionTest, CurrentRemoteOnlyRejected) {
   std::string first_mid = *caller_first_transceiver->mid();
   ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
   auto callee_first_transceiver = callee->pc()->GetTransceivers()[0];
-  callee_first_transceiver->Stop();
+  callee_first_transceiver->StopInternal();
 
   // The answer will have a rejected m= section.
   ASSERT_TRUE(
@@ -824,11 +890,9 @@ TEST_P(RecycleMediaSectionTest, CurrentRemoteOnlyRejected) {
   // create a new transceiver for the media section.
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(offer)));
   auto callee_transceivers = callee->pc()->GetTransceivers();
-  ASSERT_EQ(2u, callee_transceivers.size());
-  EXPECT_EQ(absl::nullopt, callee_transceivers[0]->mid());
-  EXPECT_EQ(first_type_, callee_transceivers[0]->media_type());
-  EXPECT_EQ(second_mid, callee_transceivers[1]->mid());
-  EXPECT_EQ(second_type_, callee_transceivers[1]->media_type());
+  ASSERT_EQ(1u, callee_transceivers.size());
+  EXPECT_EQ(second_mid, callee_transceivers[0]->mid());
+  EXPECT_EQ(second_type_, callee_transceivers[0]->media_type());
 
   // The answer should have only one media section for the new transceiver.
   auto answer = callee->CreateAnswer();
@@ -845,8 +909,8 @@ TEST_P(RecycleMediaSectionTest, CurrentRemoteOnlyRejected) {
   // Setting the remote answer should succeed and not create any new
   // transceivers.
   ASSERT_TRUE(caller->SetRemoteDescription(std::move(answer)));
-  ASSERT_EQ(2u, caller->pc()->GetTransceivers().size());
-  ASSERT_EQ(2u, callee->pc()->GetTransceivers().size());
+  ASSERT_EQ(1u, caller->pc()->GetTransceivers().size());
+  ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
 }
 
 // Test that recycling works properly when a new transceiver recycles an m=
@@ -861,7 +925,7 @@ TEST_P(RecycleMediaSectionTest, CurrentLocalOnlyRejected) {
   std::string first_mid = *caller_first_transceiver->mid();
   ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
   auto callee_first_transceiver = callee->pc()->GetTransceivers()[0];
-  callee_first_transceiver->Stop();
+  callee_first_transceiver->StopInternal();
 
   // The answer will have a rejected m= section.
   ASSERT_TRUE(
@@ -889,11 +953,9 @@ TEST_P(RecycleMediaSectionTest, CurrentLocalOnlyRejected) {
   // create a new transceiver for the media section.
   ASSERT_TRUE(caller->SetRemoteDescription(std::move(offer)));
   auto caller_transceivers = caller->pc()->GetTransceivers();
-  ASSERT_EQ(2u, caller_transceivers.size());
-  EXPECT_EQ(absl::nullopt, caller_transceivers[0]->mid());
-  EXPECT_EQ(first_type_, caller_transceivers[0]->media_type());
-  EXPECT_EQ(second_mid, caller_transceivers[1]->mid());
-  EXPECT_EQ(second_type_, caller_transceivers[1]->media_type());
+  ASSERT_EQ(1u, caller_transceivers.size());
+  EXPECT_EQ(second_mid, caller_transceivers[0]->mid());
+  EXPECT_EQ(second_type_, caller_transceivers[0]->media_type());
 
   // The answer should have only one media section for the new transceiver.
   auto answer = caller->CreateAnswer();
@@ -910,8 +972,8 @@ TEST_P(RecycleMediaSectionTest, CurrentLocalOnlyRejected) {
   // Setting the remote answer should succeed and not create any new
   // transceivers.
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(answer)));
-  ASSERT_EQ(2u, callee->pc()->GetTransceivers().size());
-  ASSERT_EQ(2u, caller->pc()->GetTransceivers().size());
+  ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
+  ASSERT_EQ(1u, caller->pc()->GetTransceivers().size());
 }
 
 // Test that a m= section is *not* recycled if the media section is only
@@ -924,7 +986,7 @@ TEST_P(RecycleMediaSectionTest, PendingLocalRejectedAndNoRemote) {
   ASSERT_TRUE(caller->SetLocalDescription(caller->CreateOffer()));
 
   std::string first_mid = *caller_first_transceiver->mid();
-  caller_first_transceiver->Stop();
+  caller_first_transceiver->StopInternal();
 
   // The reoffer will have a rejected m= section.
   ASSERT_TRUE(caller->SetLocalDescription(caller->CreateOffer()));
@@ -962,7 +1024,7 @@ TEST_P(RecycleMediaSectionTest, PendingLocalRejectedAndNotRejectedRemote) {
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
 
   std::string first_mid = *caller_first_transceiver->mid();
-  caller_first_transceiver->Stop();
+  caller_first_transceiver->StopInternal();
 
   // The reoffer will have a rejected m= section.
   ASSERT_TRUE(caller->SetLocalDescription(caller->CreateOffer()));
@@ -1002,7 +1064,7 @@ TEST_P(RecycleMediaSectionTest, PendingRemoteRejectedAndNoLocal) {
   ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
   auto callee_first_transceiver = callee->pc()->GetTransceivers()[0];
   std::string first_mid = *callee_first_transceiver->mid();
-  caller_first_transceiver->Stop();
+  caller_first_transceiver->StopInternal();
 
   // The reoffer will have a rejected m= section.
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
@@ -1039,7 +1101,7 @@ TEST_P(RecycleMediaSectionTest, PendingRemoteRejectedAndNotRejectedLocal) {
   ASSERT_EQ(1u, callee->pc()->GetTransceivers().size());
   auto callee_first_transceiver = callee->pc()->GetTransceivers()[0];
   std::string first_mid = *callee_first_transceiver->mid();
-  caller_first_transceiver->Stop();
+  caller_first_transceiver->StopInternal();
 
   // The reoffer will have a rejected m= section.
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
@@ -1083,7 +1145,7 @@ TEST_F(PeerConnectionJsepTest, DataChannelDoesNotRecycleMediaSection) {
 
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
 
-  transceiver->Stop();
+  transceiver->StopInternal();
 
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
 
@@ -1301,7 +1363,7 @@ TEST_F(PeerConnectionJsepTest,
 
   auto caller = CreatePeerConnection();
   auto transceiver = caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
-  transceiver->sender()->SetTrack(caller->CreateAudioTrack(kTrackId));
+  transceiver->sender()->SetTrack(caller->CreateAudioTrack(kTrackId).get());
 
   auto offer = caller->CreateOffer();
   auto contents = offer->description()->contents();
@@ -1370,7 +1432,7 @@ TEST_F(PeerConnectionJsepTest, IncludeMsidEvenIfDirectionHasChanged) {
 
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
 
-  caller->pc()->GetTransceivers()[0]->SetDirection(
+  caller->pc()->GetTransceivers()[0]->SetDirectionWithError(
       RtpTransceiverDirection::kInactive);
 
   // The transceiver direction on both sides will turn to inactive.
@@ -1398,7 +1460,7 @@ TEST_F(PeerConnectionJsepTest, RemoveMsidIfTransceiverStopped) {
 
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
 
-  transceiver->Stop();
+  transceiver->StopInternal();
 
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
 
@@ -1555,8 +1617,9 @@ TEST_F(PeerConnectionJsepTest, CurrentDirectionResetWhenRtpTransceiverStopped) {
   ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
 
   ASSERT_TRUE(transceiver->current_direction());
-  transceiver->Stop();
-  EXPECT_FALSE(transceiver->current_direction());
+  transceiver->StopInternal();
+  EXPECT_EQ(transceiver->current_direction(),
+            RtpTransceiverDirection::kStopped);
 }
 
 // Test that you can't set an answer on a PeerConnection before setting the
@@ -1577,7 +1640,7 @@ TEST_F(PeerConnectionJsepTest, AnswerBeforeOfferFails) {
 // two video tracks.
 TEST_F(PeerConnectionJsepTest, TwoVideoPlanBToUnifiedPlanFails) {
   RTCConfiguration config_planb;
-  config_planb.sdp_semantics = SdpSemantics::kPlanB;
+  config_planb.sdp_semantics = SdpSemantics::kPlanB_DEPRECATED;
   auto caller = CreatePeerConnection(config_planb);
   auto callee = CreatePeerConnection();
   caller->AddVideoTrack("video1");
@@ -1593,7 +1656,7 @@ TEST_F(PeerConnectionJsepTest, TwoVideoPlanBToUnifiedPlanFails) {
 TEST_F(PeerConnectionJsepTest, OneVideoUnifiedPlanToTwoVideoPlanBFails) {
   auto caller = CreatePeerConnection();
   RTCConfiguration config_planb;
-  config_planb.sdp_semantics = SdpSemantics::kPlanB;
+  config_planb.sdp_semantics = SdpSemantics::kPlanB_DEPRECATED;
   auto callee = CreatePeerConnection(config_planb);
   caller->AddVideoTrack("video");
   callee->AddVideoTrack("video1");
@@ -1728,6 +1791,618 @@ TEST_F(PeerConnectionJsepTest, SetLocalDescriptionFailsMissingMid) {
       "Failed to set local offer sdp: A media section is missing a MID "
       "attribute.",
       error);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackSupportedInUnifiedPlan) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+  config.enable_implicit_rollback = true;
+  auto caller = CreatePeerConnection(config);
+  auto callee = CreatePeerConnection(config);
+  EXPECT_TRUE(caller->CreateOfferAndSetAsLocal());
+  EXPECT_TRUE(caller->SetLocalDescription(caller->CreateRollback()));
+  EXPECT_TRUE(caller->CreateOfferAndSetAsLocal());
+  EXPECT_TRUE(caller->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_TRUE(caller->CreateOfferAndSetAsLocal());
+  EXPECT_TRUE(caller->SetRemoteDescription(callee->CreateOffer()));
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackNotSupportedInPlanB) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kPlanB_DEPRECATED;
+  config.enable_implicit_rollback = true;
+  auto caller = CreatePeerConnection(config);
+  auto callee = CreatePeerConnection(config);
+  EXPECT_TRUE(caller->CreateOfferAndSetAsLocal());
+  EXPECT_FALSE(caller->SetLocalDescription(caller->CreateRollback()));
+  EXPECT_FALSE(caller->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_FALSE(caller->SetRemoteDescription(callee->CreateOffer()));
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackFailsInStableState) {
+  auto caller = CreatePeerConnection();
+  EXPECT_FALSE(caller->SetLocalDescription(caller->CreateRollback()));
+  EXPECT_FALSE(caller->SetRemoteDescription(caller->CreateRollback()));
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackToStableStateAndClearLocalOffer) {
+  auto caller = CreatePeerConnection();
+  EXPECT_TRUE(caller->CreateOfferAndSetAsLocal());
+  EXPECT_TRUE(caller->SetLocalDescription(caller->CreateRollback()));
+  EXPECT_EQ(caller->signaling_state(), PeerConnectionInterface::kStable);
+  EXPECT_EQ(caller->pc()->pending_local_description(), nullptr);
+
+  EXPECT_TRUE(caller->CreateOfferAndSetAsLocal());
+  EXPECT_TRUE(caller->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(caller->signaling_state(), PeerConnectionInterface::kStable);
+  EXPECT_EQ(caller->pc()->pending_local_description(), nullptr);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackToStableStateAndClearRemoteOffer) {
+  auto caller = CreatePeerConnection();
+  auto callee = CreatePeerConnection();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->signaling_state(), PeerConnectionInterface::kStable);
+  EXPECT_EQ(callee->pc()->pending_remote_description(), nullptr);
+
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->SetLocalDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->signaling_state(), PeerConnectionInterface::kStable);
+  EXPECT_EQ(callee->pc()->pending_remote_description(), nullptr);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackImplicitly) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+  config.enable_implicit_rollback = true;
+  auto caller = CreatePeerConnection(config);
+  auto callee = CreatePeerConnection(config);
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_EQ(callee->signaling_state(),
+            PeerConnectionInterface::kHaveRemoteOffer);
+  EXPECT_TRUE(callee->CreateAnswerAndSetAsLocal());
+  EXPECT_FALSE(callee->observer()->legacy_renegotiation_needed());
+  EXPECT_FALSE(callee->observer()->has_negotiation_needed_event());
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackImplicitlyNegotatiationNotNeeded) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+  config.enable_implicit_rollback = true;
+  auto caller = CreatePeerConnection(config);
+  auto callee = CreatePeerConnection(config);
+  caller->AddAudioTrack("a");
+  callee->AddAudioTrack("b");
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  callee->observer()->clear_legacy_renegotiation_needed();
+  callee->observer()->clear_latest_negotiation_needed_event();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_EQ(callee->signaling_state(),
+            PeerConnectionInterface::kHaveRemoteOffer);
+  EXPECT_TRUE(callee->CreateAnswerAndSetAsLocal());
+  // No negotiation needed as track got attached in the answer.
+  EXPECT_FALSE(callee->observer()->legacy_renegotiation_needed());
+  EXPECT_FALSE(callee->observer()->has_negotiation_needed_event());
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 0u);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackImplicitlyAndNegotiationNeeded) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+  config.enable_implicit_rollback = true;
+  auto caller = CreatePeerConnection(config);
+  auto callee = CreatePeerConnection(config);
+  callee->AddAudioTrack("a");
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  callee->observer()->clear_legacy_renegotiation_needed();
+  callee->observer()->clear_latest_negotiation_needed_event();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_EQ(callee->signaling_state(),
+            PeerConnectionInterface::kHaveRemoteOffer);
+  EXPECT_FALSE(callee->observer()->legacy_renegotiation_needed());
+  EXPECT_FALSE(callee->observer()->has_negotiation_needed_event());
+  EXPECT_TRUE(callee->CreateAnswerAndSetAsLocal());
+  EXPECT_TRUE(callee->observer()->legacy_renegotiation_needed());
+  EXPECT_TRUE(callee->observer()->has_negotiation_needed_event());
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 0u);
+}
+
+TEST_F(PeerConnectionJsepTest, AttemptToRollbackImplicitly) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+  config.enable_implicit_rollback = true;
+  auto caller = CreatePeerConnection(config);
+  auto callee = CreatePeerConnection(config);
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  EXPECT_FALSE(callee->SetRemoteDescription(
+      CreateSessionDescription(SdpType::kOffer, "invalid sdp")));
+  EXPECT_EQ(callee->signaling_state(),
+            PeerConnectionInterface::kHaveLocalOffer);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackRemovesTransceiver) {
+  auto caller = CreatePeerConnection();
+  caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  ASSERT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  auto transceiver = callee->pc()->GetTransceivers()[0];
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 0u);
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 1u);
+  // The removed transceiver should be stopped and its receiver track should be
+  // ended.
+  EXPECT_TRUE(transceiver->stopping());
+  EXPECT_TRUE(transceiver->stopping());
+  EXPECT_EQ(transceiver->receiver()->track()->state(),
+            MediaStreamTrackInterface::kEnded);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackKeepsTransceiverAndClearsMid) {
+  auto caller = CreatePeerConnection();
+  caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  callee->AddAudioTrack("a");
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  // Transceiver can't be removed as track was added to it.
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  // Mid got cleared to make it reusable.
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->mid(), absl::nullopt);
+  // Transceiver should be counted as addTrack-created after rollback.
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 1u);
+  // Because the transceiver is reusable, it must not be stopped and its
+  // receiver track must still be live.
+  auto transceiver = callee->pc()->GetTransceivers()[0];
+  EXPECT_FALSE(transceiver->stopping());
+  EXPECT_FALSE(transceiver->stopping());
+  EXPECT_EQ(transceiver->receiver()->track()->state(),
+            MediaStreamTrackInterface::kLive);
+}
+
+TEST_F(PeerConnectionJsepTest,
+       RollbackKeepsTransceiverAfterAddTrackEvenWhenTrackIsNulled) {
+  auto caller = CreatePeerConnection();
+  caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  callee->AddAudioTrack("a");
+  callee->pc()->GetTransceivers()[0]->sender()->SetTrack(nullptr);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->sender()->track(), nullptr);
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  // Transceiver can't be removed as track was added to it.
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  // Mid got cleared to make it reusable.
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->mid(), absl::nullopt);
+  // Transceiver should be counted as addTrack-created after rollback.
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 1u);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackRestoresMid) {
+  auto caller = CreatePeerConnection();
+  caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  callee->AddAudioTrack("a");
+  auto offer = callee->CreateOffer();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  EXPECT_NE(callee->pc()->GetTransceivers()[0]->mid(), absl::nullopt);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->mid(), absl::nullopt);
+  EXPECT_TRUE(callee->SetLocalDescription(std::move(offer)));
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackRestoresInitSendEncodings) {
+  auto caller = CreatePeerConnection();
+  RtpTransceiverInit init;
+  init.direction = RtpTransceiverDirection::kSendRecv;
+  RtpEncodingParameters encoding;
+  encoding.rid = "hi";
+  init.send_encodings.push_back(encoding);
+  encoding.rid = "mid";
+  init.send_encodings.push_back(encoding);
+  encoding.rid = "lo";
+  init.send_encodings.push_back(encoding);
+  caller->AddTransceiver(cricket::MEDIA_TYPE_VIDEO, init);
+  auto encodings =
+      caller->pc()->GetTransceivers()[0]->sender()->init_send_encodings();
+  EXPECT_TRUE(caller->SetLocalDescription(caller->CreateOffer()));
+  EXPECT_NE(caller->pc()->GetTransceivers()[0]->sender()->init_send_encodings(),
+            encodings);
+  EXPECT_TRUE(caller->SetLocalDescription(caller->CreateRollback()));
+  EXPECT_EQ(caller->pc()->GetTransceivers()[0]->sender()->init_send_encodings(),
+            encodings);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackDoesNotAffectSendEncodings) {
+  auto caller = CreatePeerConnection();
+  auto callee = CreatePeerConnection();
+  RtpTransceiverInit init;
+  init.direction = RtpTransceiverDirection::kSendOnly;
+  RtpEncodingParameters encoding;
+  encoding.rid = "hi";
+  init.send_encodings.push_back(encoding);
+  encoding.rid = "mid";
+  init.send_encodings.push_back(encoding);
+  encoding.rid = "lo";
+  init.send_encodings.push_back(encoding);
+  caller->AddTransceiver(cricket::MEDIA_TYPE_VIDEO, init);
+  callee->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal());
+  caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal());
+  auto params = caller->pc()->GetTransceivers()[0]->sender()->GetParameters();
+  EXPECT_TRUE(params.encodings[0].active);
+  params.encodings[0].active = false;
+  caller->pc()->GetTransceivers()[0]->sender()->SetParameters(params);
+  auto offer = caller->CreateOffer();
+  std::string offer_string;
+  EXPECT_TRUE(offer.get()->ToString(&offer_string));
+  std::string simulcast_line =
+      offer_string.substr(offer_string.find("a=simulcast"));
+  EXPECT_FALSE(simulcast_line.empty());
+  EXPECT_TRUE(caller->SetLocalDescription(std::move(offer)));
+  EXPECT_TRUE(caller->SetLocalDescription(caller->CreateRollback()));
+  EXPECT_FALSE(caller->pc()
+                   ->GetTransceivers()[0]
+                   ->sender()
+                   ->GetParameters()
+                   .encodings[0]
+                   .active);
+  offer = caller->CreateOffer();
+  EXPECT_TRUE(offer.get()->ToString(&offer_string));
+  EXPECT_EQ(offer_string.substr(offer_string.find("a=simulcast")),
+            simulcast_line);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackRestoresMidAndRemovesTransceiver) {
+  auto callee = CreatePeerConnection();
+  callee->AddVideoTrack("a");
+  auto offer = callee->CreateOffer();
+  auto caller = CreatePeerConnection();
+  caller->AddAudioTrack("b");
+  caller->AddVideoTrack("c");
+  auto mid = callee->pc()->GetTransceivers()[0]->mid();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 2u);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->mid(), mid);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->media_type(),
+            cricket::MEDIA_TYPE_VIDEO);
+  EXPECT_TRUE(callee->SetLocalDescription(std::move(offer)));
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(),
+            callee->observer()->add_track_events_.size());
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackHasNoEffectOnStableTransceivers) {
+  auto callee = CreatePeerConnection();
+  callee->AddVideoTrack("a");
+  auto caller = CreatePeerConnection();
+  caller->AddAudioTrack("b");
+  caller->AddVideoTrack("c");
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_TRUE(
+      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
+  // In stable don't add or remove anything.
+  callee->observer()->clear_legacy_renegotiation_needed();
+  callee->observer()->clear_latest_negotiation_needed_event();
+  size_t transceiver_count = callee->pc()->GetTransceivers().size();
+  auto mid_0 = callee->pc()->GetTransceivers()[0]->mid();
+  auto mid_1 = callee->pc()->GetTransceivers()[1]->mid();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), transceiver_count);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->mid(), mid_0);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[1]->mid(), mid_1);
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 0u);
+  EXPECT_FALSE(callee->observer()->legacy_renegotiation_needed());
+  EXPECT_FALSE(callee->observer()->has_negotiation_needed_event());
+}
+
+TEST_F(PeerConnectionJsepTest, ImplicitlyRollbackTransceiversWithSameMids) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+  config.enable_implicit_rollback = true;
+  auto caller = CreatePeerConnection(config);
+  caller->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  auto callee = CreatePeerConnection(config);
+  callee->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  auto initial_mid = callee->pc()->GetTransceivers()[0]->mid();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 2u);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->mid(), absl::nullopt);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[1]->mid(),
+            caller->pc()->GetTransceivers()[0]->mid());
+  EXPECT_TRUE(callee->CreateAnswerAndSetAsLocal());  // Go to stable.
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  EXPECT_NE(callee->pc()->GetTransceivers()[0]->mid(), initial_mid);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackToNegotiatedStableState) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+  config.bundle_policy = PeerConnectionInterface::kBundlePolicyMaxBundle;
+  auto caller = CreatePeerConnection(config);
+  caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection(config);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_TRUE(callee->CreateAnswerAndSetAsLocal());
+  caller->AddVideoTrack("a");
+  callee->AddVideoTrack("b");
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 2u);
+  auto audio_transport =
+      callee->pc()->GetTransceivers()[0]->sender()->dtls_transport();
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->sender()->dtls_transport(),
+            callee->pc()->GetTransceivers()[1]->sender()->dtls_transport());
+  EXPECT_NE(callee->pc()->GetTransceivers()[1]->sender()->dtls_transport(),
+            nullptr);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->sender()->dtls_transport(),
+            audio_transport);  // Audio must remain working after rollback.
+  EXPECT_EQ(callee->pc()->GetTransceivers()[1]->sender()->dtls_transport(),
+            nullptr);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->sender()->dtls_transport(),
+            audio_transport);  // Audio transport is still the same.
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackHasToDestroyTransport) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+  config.bundle_policy = PeerConnectionInterface::kBundlePolicyMaxBundle;
+  auto pc = CreatePeerConnection(config);
+  pc->AddAudioTrack("a");
+  pc->AddVideoTrack("b");
+  EXPECT_TRUE(pc->CreateOfferAndSetAsLocal());
+  auto offer = pc->CreateOffer();
+  EXPECT_EQ(pc->pc()->GetTransceivers().size(), 2u);
+  auto audio_transport =
+      pc->pc()->GetTransceivers()[0]->sender()->dtls_transport();
+  EXPECT_EQ(pc->pc()->GetTransceivers()[0]->sender()->dtls_transport(),
+            pc->pc()->GetTransceivers()[1]->sender()->dtls_transport());
+  EXPECT_NE(pc->pc()->GetTransceivers()[1]->sender()->dtls_transport(),
+            nullptr);
+  EXPECT_TRUE(pc->SetRemoteDescription(pc->CreateRollback()));
+  EXPECT_TRUE(pc->SetLocalDescription(std::move(offer)));
+  EXPECT_NE(pc->pc()->GetTransceivers()[0]->sender()->dtls_transport(),
+            nullptr);
+  EXPECT_NE(pc->pc()->GetTransceivers()[0]->sender()->dtls_transport(),
+            audio_transport);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackLocalDirectionChange) {
+  auto caller = CreatePeerConnection();
+  caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_TRUE(
+      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
+  callee->AddAudioTrack("a");
+  callee->pc()->GetTransceivers()[0]->SetDirectionWithError(
+      RtpTransceiverDirection::kSendOnly);
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  auto audio_transport =
+      callee->pc()->GetTransceivers()[0]->receiver()->dtls_transport();
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->direction(),
+            RtpTransceiverDirection::kSendOnly);
+  // One way audio must remain working after rollback as local direction change
+  // comes in effect after completing full negotiation round.
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->receiver()->dtls_transport(),
+            audio_transport);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackRemoteDirectionChange) {
+  auto caller = CreatePeerConnection();
+  auto caller_transceiver = caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  callee->AddAudioTrack("a");
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_TRUE(
+      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
+  // In stable make remote audio receive only.
+  caller_transceiver->SetDirectionWithError(RtpTransceiverDirection::kRecvOnly);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  // The direction attribute is not modified by the offer.
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->direction(),
+            RtpTransceiverDirection::kSendRecv);
+  auto audio_transport =
+      callee->pc()->GetTransceivers()[0]->sender()->dtls_transport();
+  EXPECT_EQ(callee->observer()->add_track_events_.size(), 1u);
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 1u);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->direction(),
+            RtpTransceiverDirection::kSendRecv);
+  // One way audio must remain working after rollback.
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->sender()->dtls_transport(),
+            audio_transport);
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 1u);
+}
+
+TEST_F(PeerConnectionJsepTest,
+       RollbackRestoresFiredDirectionAndOnTrackCanFireAgain) {
+  auto caller = CreatePeerConnection();
+  auto caller_transceiver = caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  callee->AddAudioTrack("a");
+  ASSERT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+  auto callee_transceiver = callee->pc()->GetTransceivers()[0];
+  EXPECT_FALSE(callee_transceiver->fired_direction().has_value());
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_TRUE(callee_transceiver->fired_direction().has_value());
+  EXPECT_EQ(callee->observer()->add_track_events_.size(), 1u);
+  // The existing transceiver becomes associated. Because it already exists,
+  // rolling it back does not remove the transceiver, so if ontrack fires again
+  // later it will be because the transceiver's internal states were restored
+  // rather than due to the creation of a new transceiver.
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+
+  // Rollback: the transceiver is no longer receiving.
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_FALSE(callee_transceiver->fired_direction().has_value());
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+
+  // Set the remote offer again: ontrack should fire on the same transceiver.
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_TRUE(callee_transceiver->fired_direction().has_value());
+  EXPECT_EQ(callee->observer()->add_track_events_.size(), 2u);
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 1u);
+}
+
+TEST_F(PeerConnectionJsepTest,
+       RollbackFromInactiveToReceivingMakesOnTrackFire) {
+  auto caller = CreatePeerConnection();
+  auto caller_transceiver = caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  // Perform full O/A so that transceiver is associated. Ontrack fires.
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_EQ(callee->observer()->add_track_events_.size(), 1u);
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 0u);
+  ASSERT_TRUE(
+      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
+
+  // Start negotiating to make the transceiver inactive. Onremovetrack fires.
+  caller_transceiver->SetDirectionWithError(RtpTransceiverDirection::kInactive);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_EQ(callee->observer()->add_track_events_.size(), 1u);
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 1u);
+
+  // Rollback the inactivation. Ontrack should fire again.
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateRollback()));
+  EXPECT_EQ(callee->observer()->add_track_events_.size(), 2u);
+  EXPECT_EQ(callee->observer()->remove_track_events_.size(), 1u);
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackAfterMultipleSLD) {
+  auto callee = CreatePeerConnection();
+  callee->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  callee->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  callee->observer()->clear_legacy_renegotiation_needed();
+  callee->observer()->clear_latest_negotiation_needed_event();
+  EXPECT_TRUE(callee->SetRemoteDescription(callee->CreateRollback()));
+  EXPECT_TRUE(callee->observer()->legacy_renegotiation_needed());
+  EXPECT_TRUE(callee->observer()->has_negotiation_needed_event());
+  EXPECT_EQ(callee->pc()->GetTransceivers().size(), 2u);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->mid(), absl::nullopt);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[1]->mid(), absl::nullopt);
+}
+
+TEST_F(PeerConnectionJsepTest, NoRollbackNeeded) {
+  auto caller = CreatePeerConnection();
+  caller->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  auto callee = CreatePeerConnection();
+  callee->AddTransceiver(cricket::MEDIA_TYPE_AUDIO);
+  EXPECT_TRUE(caller->CreateOfferAndSetAsLocal());
+  EXPECT_TRUE(caller->CreateOfferAndSetAsLocal());
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackMultipleStreamChanges) {
+  auto callee = CreatePeerConnection();
+  auto caller = CreatePeerConnection();
+  caller->AddAudioTrack("a_1", {"id_1"});
+  caller->AddVideoTrack("v_0", {"id_0"});  // Provide an extra stream id.
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_TRUE(
+      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
+  caller->pc()->GetTransceivers()[0]->sender()->SetStreams({"id_2"});
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  caller->pc()->GetTransceivers()[0]->sender()->SetStreams({"id_3"});
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->receiver()->stream_ids()[0],
+            "id_3");
+  EXPECT_TRUE(callee->SetRemoteDescription(callee->CreateRollback()));
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->receiver()->stream_ids().size(),
+            1u);
+  EXPECT_EQ(callee->pc()->GetTransceivers()[0]->receiver()->stream_ids()[0],
+            "id_1");
+}
+
+TEST_F(PeerConnectionJsepTest, DataChannelImplicitRollback) {
+  RTCConfiguration config;
+  config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+  config.enable_implicit_rollback = true;
+  auto caller = CreatePeerConnection(config);
+  caller->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  auto callee = CreatePeerConnection(config);
+  callee->CreateDataChannel("dummy");
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->CreateAnswerAndSetAsLocal());
+  EXPECT_TRUE(callee->observer()->legacy_renegotiation_needed());
+  EXPECT_TRUE(callee->observer()->has_negotiation_needed_event());
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackRemoteDataChannelThenAddTransceiver) {
+  auto caller = CreatePeerConnection();
+  auto callee = CreatePeerConnection();
+  caller->CreateDataChannel("dummy");
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->SetRemoteDescription(callee->CreateRollback()));
+  callee->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+}
+
+TEST_F(PeerConnectionJsepTest,
+       RollbackRemoteDataChannelThenAddTransceiverAndDataChannel) {
+  auto caller = CreatePeerConnection();
+  auto callee = CreatePeerConnection();
+  caller->CreateDataChannel("dummy");
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->SetRemoteDescription(callee->CreateRollback()));
+  callee->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  callee->CreateDataChannel("dummy");
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackRemoteDataChannelThenAddDataChannel) {
+  auto caller = CreatePeerConnection();
+  auto callee = CreatePeerConnection();
+  caller->CreateDataChannel("dummy");
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->SetRemoteDescription(callee->CreateRollback()));
+  callee->CreateDataChannel("dummy");
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+}
+
+TEST_F(PeerConnectionJsepTest, RollbackRemoteTransceiverThenAddDataChannel) {
+  auto caller = CreatePeerConnection();
+  auto callee = CreatePeerConnection();
+  caller->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->SetRemoteDescription(callee->CreateRollback()));
+  callee->CreateDataChannel("dummy");
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
+}
+
+TEST_F(PeerConnectionJsepTest,
+       RollbackRemoteTransceiverThenAddDataChannelAndTransceiver) {
+  auto caller = CreatePeerConnection();
+  auto callee = CreatePeerConnection();
+  caller->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  EXPECT_TRUE(callee->SetRemoteDescription(caller->CreateOffer()));
+  EXPECT_TRUE(callee->SetRemoteDescription(callee->CreateRollback()));
+  callee->CreateDataChannel("dummy");
+  callee->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  EXPECT_TRUE(callee->CreateOfferAndSetAsLocal());
 }
 
 }  // namespace webrtc

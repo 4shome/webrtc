@@ -10,10 +10,13 @@
 #ifndef TEST_LOGGING_LOG_WRITER_H_
 #define TEST_LOGGING_LOG_WRITER_H_
 
+#include <stdarg.h>
+
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "absl/strings/string_view.h"
 #include "api/rtc_event_log_output.h"
 #include "rtc_base/strings/string_builder.h"
 
@@ -40,15 +43,17 @@ inline void LogWriteFormat(RtcEventLogOutput* out_, const char* fmt, ...) {
 
 class LogWriterFactoryInterface {
  public:
-  virtual std::unique_ptr<RtcEventLogOutput> Create(std::string filename) = 0;
+  virtual std::unique_ptr<RtcEventLogOutput> Create(
+      absl::string_view filename) = 0;
   virtual ~LogWriterFactoryInterface() = default;
 };
 
 class LogWriterFactoryAddPrefix : public LogWriterFactoryInterface {
  public:
   LogWriterFactoryAddPrefix(LogWriterFactoryInterface* base,
-                            std::string prefix);
-  std::unique_ptr<RtcEventLogOutput> Create(std::string filename) override;
+                            absl::string_view prefix);
+  std::unique_ptr<RtcEventLogOutput> Create(
+      absl::string_view filename) override;
 
  private:
   LogWriterFactoryInterface* const base_factory_;

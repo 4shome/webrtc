@@ -9,16 +9,18 @@
  */
 
 #include <bitset>
+#include <vector>
 
 #include "absl/types/optional.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor_extension.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
+#include "modules/rtp_rtcp/source/rtp_video_layers_allocation_extension.h"
 
 namespace webrtc {
 // We decide which header extensions to register by reading four bytes
-// from the beginning of |data| and interpreting it as a bitmask over
+// from the beginning of `data` and interpreting it as a bitmask over
 // the RTPExtensionType enum. This assert ensures four bytes are enough.
 static_assert(kRtpExtensionNumberOfExtensions <= 32,
               "Insufficient bits read to configure all header extensions. Add "
@@ -75,10 +77,20 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
         uint8_t audio_level;
         packet.GetExtension<AudioLevel>(&voice_activity, &audio_level);
         break;
+      case kRtpExtensionCsrcAudioLevel: {
+        std::vector<uint8_t> audio_levels;
+        packet.GetExtension<CsrcAudioLevel>(&audio_levels);
+        break;
+      }
       case kRtpExtensionAbsoluteSendTime:
         uint32_t sendtime;
         packet.GetExtension<AbsoluteSendTime>(&sendtime);
         break;
+      case kRtpExtensionAbsoluteCaptureTime: {
+        AbsoluteCaptureTime extension;
+        packet.GetExtension<AbsoluteCaptureTimeExtension>(&extension);
+        break;
+      }
       case kRtpExtensionVideoRotation:
         uint8_t rotation;
         packet.GetExtension<VideoOrientation>(&rotation);
@@ -94,22 +106,20 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
                                                        &feedback_request);
         break;
       }
-      case kRtpExtensionPlayoutDelay:
-        PlayoutDelay playout;
+      case kRtpExtensionPlayoutDelay: {
+        VideoPlayoutDelay playout;
         packet.GetExtension<PlayoutDelayLimits>(&playout);
         break;
+      }
       case kRtpExtensionVideoContentType:
         VideoContentType content_type;
         packet.GetExtension<VideoContentTypeExtension>(&content_type);
         break;
-      case kRtpExtensionVideoTiming:
+      case kRtpExtensionVideoTiming: {
         VideoSendTiming timing;
         packet.GetExtension<VideoTimingExtension>(&timing);
         break;
-      case kRtpExtensionFrameMarking:
-        FrameMarking frame_marking;
-        packet.GetExtension<FrameMarkingExtension>(&frame_marking);
-        break;
+      }
       case kRtpExtensionRtpStreamId: {
         std::string rsid;
         packet.GetExtension<RtpStreamId>(&rsid);
@@ -130,17 +140,34 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
         packet.GetExtension<RtpGenericFrameDescriptorExtension00>(&descriptor);
         break;
       }
-      case kRtpExtensionGenericFrameDescriptor01: {
-        RtpGenericFrameDescriptor descriptor;
-        packet.GetExtension<RtpGenericFrameDescriptorExtension01>(&descriptor);
-        break;
-      }
       case kRtpExtensionColorSpace: {
         ColorSpace color_space;
         packet.GetExtension<ColorSpaceExtension>(&color_space);
         break;
       }
+      case kRtpExtensionInbandComfortNoise: {
+        absl::optional<uint8_t> noise_level;
+        packet.GetExtension<InbandComfortNoiseExtension>(&noise_level);
+        break;
+      }
+      case kRtpExtensionVideoLayersAllocation: {
+        VideoLayersAllocation allocation;
+        packet.GetExtension<RtpVideoLayersAllocationExtension>(&allocation);
+        break;
+      }
+      case kRtpExtensionVideoFrameTrackingId: {
+        uint16_t tracking_id;
+        packet.GetExtension<VideoFrameTrackingIdExtension>(&tracking_id);
+        break;
+      }
+      case kRtpExtensionGenericFrameDescriptor02:
+        // This extension requires state to read and so complicated that
+        // deserves own fuzzer.
+        break;
     }
   }
+
+  // Check that zero-ing mutable extensions wouldn't cause any problems.
+  packet.ZeroMutableExtensions();
 }
 }  // namespace webrtc

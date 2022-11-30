@@ -13,11 +13,13 @@
 #include <algorithm>
 #include <memory>
 
+#include "api/field_trials_view.h"
+#include "api/sequence_checker.h"
+#include "api/transport/field_trial_based_config.h"
 #include "api/video/encoded_image.h"
 #include "modules/video_coding/include/video_codec_interface.h"
-#include "modules/video_coding/timing.h"
-#include "rtc_base/critical_section.h"
-#include "rtc_base/thread_checker.h"
+#include "modules/video_coding/timing/timing.h"
+#include "rtc_base/memory/always_valid_pointer.h"
 #include "system_wrappers/include/clock.h"
 
 namespace webrtc {
@@ -42,26 +44,21 @@ namespace {
 
 class VideoCodingModuleImpl : public VideoCodingModule {
  public:
-  explicit VideoCodingModuleImpl(Clock* clock)
+  explicit VideoCodingModuleImpl(Clock* clock,
+                                 const FieldTrialsView* field_trials)
       : VideoCodingModule(),
-        timing_(new VCMTiming(clock)),
-        receiver_(clock, timing_.get()) {}
+        field_trials_(field_trials),
+        timing_(new VCMTiming(clock, *field_trials_)),
+        receiver_(clock, timing_.get(), *field_trials_) {}
 
-  ~VideoCodingModuleImpl() override {}
-
-  int64_t TimeUntilNextProcess() override {
-    int64_t receiver_time = receiver_.TimeUntilNextProcess();
-    RTC_DCHECK_GE(receiver_time, 0);
-    return receiver_time;
-  }
+  ~VideoCodingModuleImpl() override = default;
 
   void Process() override { receiver_.Process(); }
 
-  int32_t RegisterReceiveCodec(const VideoCodec* receiveCodec,
-                               int32_t numberOfCores,
-                               bool requireKeyFrame) override {
-    return receiver_.RegisterReceiveCodec(receiveCodec, numberOfCores,
-                                          requireKeyFrame);
+  void RegisterReceiveCodec(
+      uint8_t payload_type,
+      const VideoDecoder::Settings& decoder_settings) override {
+    receiver_.RegisterReceiveCodec(payload_type, decoder_settings);
   }
 
   void RegisterExternalDecoder(VideoDecoder* externalDecoder,
@@ -92,13 +89,10 @@ class VideoCodingModuleImpl : public VideoCodingModule {
 
   int32_t IncomingPacket(const uint8_t* incomingPayload,
                          size_t payloadLength,
-                         const WebRtcRTPHeader& rtpInfo) override {
-    return receiver_.IncomingPacket(incomingPayload, payloadLength, rtpInfo);
-  }
-
-  int SetReceiverRobustnessMode(ReceiverRobustness robustnessMode) override {
-    RTC_CHECK_EQ(robustnessMode, kHardNack);
-    return VCM_OK;
+                         const RTPHeader& rtp_header,
+                         const RTPVideoHeader& video_header) override {
+    return receiver_.IncomingPacket(incomingPayload, payloadLength, rtp_header,
+                                    video_header);
   }
 
   void SetNackSettings(size_t max_nack_list_size,
@@ -109,7 +103,9 @@ class VideoCodingModuleImpl : public VideoCodingModule {
   }
 
  private:
-  rtc::ThreadChecker construction_thread_;
+  AlwaysValidPointer<const FieldTrialsView, FieldTrialBasedConfig>
+      field_trials_;
+  SequenceChecker construction_thread_;
   const std::unique_ptr<VCMTiming> timing_;
   vcm::VideoReceiver receiver_;
 };
@@ -117,9 +113,11 @@ class VideoCodingModuleImpl : public VideoCodingModule {
 
 // DEPRECATED.  Create method for current interface, will be removed when the
 // new jitter buffer is in place.
-VideoCodingModule* VideoCodingModule::Create(Clock* clock) {
+VideoCodingModule* VideoCodingModule::Create(
+    Clock* clock,
+    const FieldTrialsView* field_trials) {
   RTC_DCHECK(clock);
-  return new VideoCodingModuleImpl(clock);
+  return new VideoCodingModuleImpl(clock, field_trials);
 }
 
 }  // namespace webrtc

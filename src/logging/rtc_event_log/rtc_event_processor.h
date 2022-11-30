@@ -12,12 +12,12 @@
 #define LOGGING_RTC_EVENT_LOG_RTC_EVENT_PROCESSOR_H_
 
 #include <stdint.h>
+
 #include <algorithm>
 #include <memory>
 #include <utility>
 #include <vector>
 
-#include "absl/memory/memory.h"
 #include "api/function_view.h"
 #include "rtc_base/checks.h"
 
@@ -98,7 +98,7 @@ class RtcEventProcessor {
   // The elements of each list is processed in the index order. To process all
   // elements in all lists in timestamp order, each list needs to be sorted in
   // timestamp order prior to insertion.
-  // N.B. |iterable| is not owned by RtcEventProcessor. The caller must ensure
+  // N.B. `iterable` is not owned by RtcEventProcessor. The caller must ensure
   // that the iterable outlives RtcEventProcessor and it must not be modified
   // until processing has finished.
   template <typename Iterable>
@@ -108,7 +108,7 @@ class RtcEventProcessor {
     if (iterable.begin() == iterable.end())
       return;
     event_lists_.push_back(
-        absl::make_unique<event_processor_impl::ProcessableEventList<
+        std::make_unique<event_processor_impl::ProcessableEventList<
             typename Iterable::const_iterator, typename Iterable::value_type>>(
             iterable.begin(), iterable.end(), handler,
             insertion_order_index_++));
@@ -122,7 +122,7 @@ class RtcEventProcessor {
       std::unique_ptr<event_processor_impl::ProcessableEventListInterface>;
   int insertion_order_index_ = 0;
   std::vector<ListPtrType> event_lists_;
-  // Comparison function to make |event_lists_| into a min heap.
+  // Comparison function to make `event_lists_` into a min heap.
   static bool Cmp(const ListPtrType& a, const ListPtrType& b);
 };
 

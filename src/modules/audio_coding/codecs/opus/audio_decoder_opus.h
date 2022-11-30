@@ -13,19 +13,23 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <vector>
 
 #include "api/audio_codecs/audio_decoder.h"
 #include "modules/audio_coding/codecs/opus/opus_interface.h"
 #include "rtc_base/buffer.h"
-#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
 class AudioDecoderOpusImpl final : public AudioDecoder {
  public:
-  explicit AudioDecoderOpusImpl(size_t num_channels);
+  explicit AudioDecoderOpusImpl(size_t num_channels,
+                                int sample_rate_hz = 48000);
   ~AudioDecoderOpusImpl() override;
+
+  AudioDecoderOpusImpl(const AudioDecoderOpusImpl&) = delete;
+  AudioDecoderOpusImpl& operator=(const AudioDecoderOpusImpl&) = delete;
 
   std::vector<ParseResult> ParsePayload(rtc::Buffer&& payload,
                                         uint32_t timestamp) override;
@@ -52,7 +56,7 @@ class AudioDecoderOpusImpl final : public AudioDecoder {
  private:
   OpusDecInst* dec_state_;
   const size_t channels_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(AudioDecoderOpusImpl);
+  const int sample_rate_hz_;
 };
 
 }  // namespace webrtc

@@ -10,7 +10,8 @@
 
 #include "api/audio_codecs/isac/audio_decoder_isac_float.h"
 
-#include "absl/memory/memory.h"
+#include <memory>
+
 #include "absl/strings/match.h"
 #include "modules/audio_coding/codecs/isac/main/include/audio_decoder_isac.h"
 
@@ -23,6 +24,10 @@ AudioDecoderIsacFloat::SdpToConfig(const SdpAudioFormat& format) {
       format.num_channels == 1) {
     Config config;
     config.sample_rate_hz = format.clockrate_hz;
+    if (!config.IsOk()) {
+      RTC_DCHECK_NOTREACHED();
+      return absl::nullopt;
+    }
     return config;
   } else {
     return absl::nullopt;
@@ -37,9 +42,15 @@ void AudioDecoderIsacFloat::AppendSupportedDecoders(
 
 std::unique_ptr<AudioDecoder> AudioDecoderIsacFloat::MakeAudioDecoder(
     Config config,
-    absl::optional<AudioCodecPairId> /*codec_pair_id*/) {
-  RTC_DCHECK(config.IsOk());
-  return absl::make_unique<AudioDecoderIsacFloatImpl>(config.sample_rate_hz);
+    absl::optional<AudioCodecPairId> /*codec_pair_id*/,
+    const FieldTrialsView* field_trials) {
+  AudioDecoderIsacFloatImpl::Config c;
+  c.sample_rate_hz = config.sample_rate_hz;
+  if (!config.IsOk()) {
+    RTC_DCHECK_NOTREACHED();
+    return nullptr;
+  }
+  return std::make_unique<AudioDecoderIsacFloatImpl>(c);
 }
 
 }  // namespace webrtc

@@ -11,16 +11,15 @@
 #ifndef MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_GDI_H_
 #define MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_GDI_H_
 
-#include <memory>
-
 #include <windows.h>
+
+#include <memory>
 
 #include "modules/desktop_capture/desktop_capturer.h"
 #include "modules/desktop_capture/screen_capture_frame_queue.h"
 #include "modules/desktop_capture/shared_desktop_frame.h"
 #include "modules/desktop_capture/win/display_configuration_monitor.h"
 #include "modules/desktop_capture/win/scoped_thread_desktop.h"
-#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -34,6 +33,9 @@ class ScreenCapturerWinGdi : public DesktopCapturer {
  public:
   explicit ScreenCapturerWinGdi(const DesktopCaptureOptions& options);
   ~ScreenCapturerWinGdi() override;
+
+  ScreenCapturerWinGdi(const ScreenCapturerWinGdi&) = delete;
+  ScreenCapturerWinGdi& operator=(const ScreenCapturerWinGdi&) = delete;
 
   // Overridden from ScreenCapturer:
   void Start(Callback* callback) override;
@@ -74,8 +76,6 @@ class ScreenCapturerWinGdi : public DesktopCapturer {
 
   HMODULE dwmapi_library_ = NULL;
   DwmEnableCompositionFunc composition_func_ = nullptr;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(ScreenCapturerWinGdi);
 };
 
 }  // namespace webrtc

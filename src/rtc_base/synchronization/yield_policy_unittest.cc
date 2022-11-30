@@ -8,10 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "rtc_base/synchronization/yield_policy.h"
+
 #include <thread>  // Not allowed in production per Chromium style guide.
 
 #include "rtc_base/event.h"
-#include "rtc_base/synchronization/yield_policy.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -19,7 +20,7 @@ namespace rtc {
 namespace {
 class MockYieldHandler : public YieldInterface {
  public:
-  MOCK_METHOD0(YieldExecution, void());
+  MOCK_METHOD(void, YieldExecution, (), (override));
 };
 }  // namespace
 TEST(YieldPolicyTest, HandlerReceivesYieldSignalWhenSet) {

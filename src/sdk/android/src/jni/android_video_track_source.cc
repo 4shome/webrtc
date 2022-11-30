@@ -10,11 +10,11 @@
 
 #include "sdk/android/src/jni/android_video_track_source.h"
 
-#include "sdk/android/generated_video_jni/jni/NativeAndroidVideoTrackSource_jni.h"
-
 #include <utility>
 
 #include "rtc_base/logging.h"
+#include "sdk/android/generated_video_jni/NativeAndroidVideoTrackSource_jni.h"
+#include "sdk/android/src/jni/video_frame.h"
 
 namespace webrtc {
 namespace jni {
@@ -51,7 +51,7 @@ AndroidVideoTrackSource::AndroidVideoTrackSource(rtc::Thread* signaling_thread,
 AndroidVideoTrackSource::~AndroidVideoTrackSource() = default;
 
 bool AndroidVideoTrackSource::is_screencast() const {
-  return is_screencast_;
+  return is_screencast_.load();
 }
 
 absl::optional<bool> AndroidVideoTrackSource::needs_denoising() const {
@@ -59,36 +59,34 @@ absl::optional<bool> AndroidVideoTrackSource::needs_denoising() const {
 }
 
 void AndroidVideoTrackSource::SetState(JNIEnv* env,
-                                       const JavaRef<jobject>& j_caller,
                                        jboolean j_is_live) {
-  InternalSetState(j_is_live ? kLive : kEnded);
-}
-
-void AndroidVideoTrackSource::InternalSetState(SourceState state) {
-  if (rtc::Thread::Current() != signaling_thread_) {
-    invoker_.AsyncInvoke<void>(
-        RTC_FROM_HERE, signaling_thread_,
-        rtc::Bind(&AndroidVideoTrackSource::InternalSetState, this, state));
-    return;
-  }
-
-  if (state_ != state) {
-    state_ = state;
-    FireOnChanged();
+  const SourceState state = j_is_live ? kLive : kEnded;
+  if (state_.exchange(state) != state) {
+    if (rtc::Thread::Current() == signaling_thread_) {
+      FireOnChanged();
+    } else {
+      // TODO(sakal): Is this even necessary, does FireOnChanged have to be
+      // called from signaling thread?
+      signaling_thread_->PostTask([this] { FireOnChanged(); });
+    }
   }
 }
 
 AndroidVideoTrackSource::SourceState AndroidVideoTrackSource::state() const {
-  return state_;
+  return state_.load();
 }
 
 bool AndroidVideoTrackSource::remote() const {
   return false;
 }
 
+void AndroidVideoTrackSource::SetIsScreencast(JNIEnv* env,
+                                              jboolean j_is_screencast) {
+  is_screencast_.store(j_is_screencast);
+}
+
 ScopedJavaLocalRef<jobject> AndroidVideoTrackSource::AdaptFrame(
     JNIEnv* env,
-    const JavaRef<jobject>& j_caller,
     jint j_width,
     jint j_height,
     jint j_rotation,
@@ -130,12 +128,11 @@ ScopedJavaLocalRef<jobject> AndroidVideoTrackSource::AdaptFrame(
 
 void AndroidVideoTrackSource::OnFrameCaptured(
     JNIEnv* env,
-    const JavaRef<jobject>& j_caller,
     jint j_rotation,
     jlong j_timestamp_ns,
     const JavaRef<jobject>& j_video_frame_buffer) {
   rtc::scoped_refptr<VideoFrameBuffer> buffer =
-      AndroidVideoBuffer::Create(env, j_video_frame_buffer);
+      JavaToNativeFrameBuffer(env, j_video_frame_buffer);
   const VideoRotation rotation = jintToVideoRotation(j_rotation);
 
   // AdaptedVideoTrackSource handles applying rotation for I420 frames.
@@ -151,7 +148,6 @@ void AndroidVideoTrackSource::OnFrameCaptured(
 
 void AndroidVideoTrackSource::AdaptOutputFormat(
     JNIEnv* env,
-    const JavaRef<jobject>& j_caller,
     jint j_landscape_width,
     jint j_landscape_height,
     const JavaRef<jobject>& j_max_landscape_pixel_count,

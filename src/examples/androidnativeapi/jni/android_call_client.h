@@ -18,8 +18,8 @@
 
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
-#include "rtc_base/critical_section.h"
-#include "rtc_base/thread_checker.h"
+#include "api/sequence_checker.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/native_api/video/video_source.h"
 
@@ -31,16 +31,13 @@ class AndroidCallClient {
   ~AndroidCallClient();
 
   void Call(JNIEnv* env,
-            const webrtc::JavaRef<jobject>& cls,
             const webrtc::JavaRef<jobject>& local_sink,
             const webrtc::JavaRef<jobject>& remote_sink);
-  void Hangup(JNIEnv* env, const webrtc::JavaRef<jobject>& cls);
+  void Hangup(JNIEnv* env);
   // A helper method for Java code to delete this object. Calls delete this.
-  void Delete(JNIEnv* env, const webrtc::JavaRef<jobject>& cls);
+  void Delete(JNIEnv* env);
 
-  webrtc::ScopedJavaLocalRef<jobject> GetJavaVideoCapturerObserver(
-      JNIEnv* env,
-      const webrtc::JavaRef<jobject>& cls);
+  webrtc::ScopedJavaLocalRef<jobject> GetJavaVideoCapturerObserver(JNIEnv* env);
 
  private:
   class PCObserver;
@@ -49,7 +46,7 @@ class AndroidCallClient {
   void CreatePeerConnection() RTC_RUN_ON(thread_checker_);
   void Connect() RTC_RUN_ON(thread_checker_);
 
-  rtc::ThreadChecker thread_checker_;
+  webrtc::SequenceChecker thread_checker_;
 
   bool call_started_ RTC_GUARDED_BY(thread_checker_);
 
@@ -69,7 +66,7 @@ class AndroidCallClient {
   rtc::scoped_refptr<webrtc::JavaVideoTrackSourceInterface> video_source_
       RTC_GUARDED_BY(thread_checker_);
 
-  rtc::CriticalSection pc_mutex_;
+  webrtc::Mutex pc_mutex_;
   rtc::scoped_refptr<webrtc::PeerConnectionInterface> pc_
       RTC_GUARDED_BY(pc_mutex_);
 };

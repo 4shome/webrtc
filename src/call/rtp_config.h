@@ -13,9 +13,11 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <string>
 #include <vector>
 
+#include "absl/types/optional.h"
 #include "api/rtp_headers.h"
 #include "api/rtp_parameters.h"
 
@@ -26,6 +28,14 @@ struct RtpPayloadState {
   uint8_t tl0_pic_idx = 0;
   int64_t shared_frame_id = 0;
 };
+
+// Settings for LNTF (LossNotification). Still highly experimental.
+struct LntfConfig {
+  std::string ToString() const;
+
+  bool enabled{false};
+};
+
 // Settings for NACK, see RFC 4585 for details.
 struct NackConfig {
   NackConfig() : rtp_history_ms(0) {}
@@ -68,10 +78,10 @@ struct RtpConfig {
 
   // The Rtp Stream Ids (aka RIDs) to send in the RID RTP header extension
   // if the extension is included in the list of extensions.
-  // If rids are specified, they should correspond to the |ssrcs| vector.
+  // If rids are specified, they should correspond to the `ssrcs` vector.
   // This means that:
   // 1. rids.size() == 0 || rids.size() == ssrcs.size().
-  // 2. If rids is not empty, then |rids[i]| should use |ssrcs[i]|.
+  // 2. If rids is not empty, then `rids[i]` should use `ssrcs[i]`.
   std::vector<std::string> rids;
 
   // The value to send in the MID RTP header extension if the extension is
@@ -94,11 +104,18 @@ struct RtpConfig {
   // changing codec without recreating the VideoSendStream. Then these
   // fields must be removed, and association between payload type and codec
   // must move above the per-stream level. Ownership could be with
-  // RtpTransportControllerSend, with a reference from PayloadRouter, where
+  // RtpTransportControllerSend, with a reference from RtpVideoSender, where
   // the latter would be responsible for mapping the codec type of encoded
   // images to the right payload type.
   std::string payload_name;
   int payload_type = -1;
+  // Payload should be packetized using raw packetizer (payload header will
+  // not be added, additional meta data is expected to be present in generic
+  // frame descriptor RTP header extension).
+  bool raw_payload = false;
+
+  // See LntfConfig for description.
+  LntfConfig lntf;
 
   // See NackConfig for description.
   NackConfig nack;
@@ -141,6 +158,15 @@ struct RtpConfig {
 
   // RTCP CNAME, see RFC 3550.
   std::string c_name;
+
+  bool IsMediaSsrc(uint32_t ssrc) const;
+  bool IsRtxSsrc(uint32_t ssrc) const;
+  bool IsFlexfecSsrc(uint32_t ssrc) const;
+  absl::optional<uint32_t> GetRtxSsrcAssociatedWithMediaSsrc(
+      uint32_t media_ssrc) const;
+  uint32_t GetMediaSsrcAssociatedWithRtxSsrc(uint32_t rtx_ssrc) const;
+  uint32_t GetMediaSsrcAssociatedWithFlexfecSsrc(uint32_t flexfec_ssrc) const;
+  absl::optional<std::string> GetRidForSsrc(uint32_t ssrc) const;
 };
 }  // namespace webrtc
 #endif  // CALL_RTP_CONFIG_H_

@@ -12,12 +12,12 @@
 #define MODULES_AUDIO_CODING_ACM2_ACM_RECEIVE_TEST_H_
 
 #include <stddef.h>  // for size_t
+
 #include <memory>
 #include <string>
 
 #include "api/audio_codecs/audio_decoder_factory.h"
 #include "api/scoped_refptr.h"
-#include "rtc_base/constructor_magic.h"
 #include "system_wrappers/include/clock.h"
 
 namespace webrtc {
@@ -44,6 +44,9 @@ class AcmReceiveTestOldApi {
                        rtc::scoped_refptr<AudioDecoderFactory> decoder_factory);
   virtual ~AcmReceiveTestOldApi();
 
+  AcmReceiveTestOldApi(const AcmReceiveTestOldApi&) = delete;
+  AcmReceiveTestOldApi& operator=(const AcmReceiveTestOldApi&) = delete;
+
   // Registers the codecs with default parameters from ACM.
   void RegisterDefaultCodecs();
 
@@ -66,12 +69,10 @@ class AcmReceiveTestOldApi {
   AudioSink* audio_sink_;
   int output_freq_hz_;
   NumOutputChannels exptected_output_channels_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(AcmReceiveTestOldApi);
 };
 
-// This test toggles the output frequency every |toggle_period_ms|. The test
-// starts with |output_freq_hz_1|. Except for the toggling, it does the same
+// This test toggles the output frequency every `toggle_period_ms`. The test
+// starts with `output_freq_hz_1`. Except for the toggling, it does the same
 // thing as AcmReceiveTestOldApi.
 class AcmReceiveTestToggleOutputFreqOldApi : public AcmReceiveTestOldApi {
  public:

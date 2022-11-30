@@ -17,29 +17,31 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
+
 #include <list>
 #include <memory>
 #include <type_traits>
 #include <utility>
 
-#include "absl/memory/memory.h"
+#include "absl/container/inlined_vector.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "api/task_queue/queued_task.h"
 #include "api/task_queue/task_queue_base.h"
-#include "base/third_party/libevent/event.h"
+#include "api/units/time_delta.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/critical_section.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/platform_thread.h"
 #include "rtc_base/platform_thread_types.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/time_utils.h"
+#include "third_party/libevent/event.h"
 
 namespace webrtc {
 namespace {
 constexpr char kQuit = 1;
-constexpr char kRunTask = 2;
+constexpr char kRunTasks = 2;
 
 using Priority = TaskQueueFactory::Priority;
 
@@ -92,16 +94,12 @@ void EventAssign(struct event* ev,
 rtc::ThreadPriority TaskQueuePriorityToThreadPriority(Priority priority) {
   switch (priority) {
     case Priority::HIGH:
-      return rtc::kRealtimePriority;
+      return rtc::ThreadPriority::kRealtime;
     case Priority::LOW:
-      return rtc::kLowPriority;
+      return rtc::ThreadPriority::kLow;
     case Priority::NORMAL:
-      return rtc::kNormalPriority;
-    default:
-      RTC_NOTREACHED();
-      break;
+      return rtc::ThreadPriority::kNormal;
   }
-  return rtc::kNormalPriority;
 }
 
 class TaskQueueLibevent final : public TaskQueueBase {
@@ -109,19 +107,21 @@ class TaskQueueLibevent final : public TaskQueueBase {
   TaskQueueLibevent(absl::string_view queue_name, rtc::ThreadPriority priority);
 
   void Delete() override;
-  void PostTask(std::unique_ptr<QueuedTask> task) override;
-  void PostDelayedTask(std::unique_ptr<QueuedTask> task,
-                       uint32_t milliseconds) override;
+  void PostTask(absl::AnyInvocable<void() &&> task) override;
+  void PostDelayedTask(absl::AnyInvocable<void() &&> task,
+                       TimeDelta delay) override;
+  void PostDelayedHighPrecisionTask(absl::AnyInvocable<void() &&> task,
+                                    TimeDelta delay) override;
 
  private:
-  class SetTimerTask;
   struct TimerEvent;
+
+  void PostDelayedTaskOnTaskQueue(absl::AnyInvocable<void() &&> task,
+                                  TimeDelta delay);
 
   ~TaskQueueLibevent() override = default;
 
-  static void ThreadMain(void* context);
   static void OnWakeup(int socket, short flags, void* context);  // NOLINT
-  static void RunTask(int fd, short flags, void* context);       // NOLINT
   static void RunTimer(int fd, short flags, void* context);      // NOLINT
 
   bool is_active_ = true;
@@ -130,49 +130,26 @@ class TaskQueueLibevent final : public TaskQueueBase {
   event_base* event_base_;
   event wakeup_event_;
   rtc::PlatformThread thread_;
-  rtc::CriticalSection pending_lock_;
-  std::list<std::unique_ptr<QueuedTask>> pending_ RTC_GUARDED_BY(pending_lock_);
+  Mutex pending_lock_;
+  absl::InlinedVector<absl::AnyInvocable<void() &&>, 4> pending_
+      RTC_GUARDED_BY(pending_lock_);
   // Holds a list of events pending timers for cleanup when the loop exits.
   std::list<TimerEvent*> pending_timers_;
 };
 
 struct TaskQueueLibevent::TimerEvent {
-  TimerEvent(TaskQueueLibevent* task_queue, std::unique_ptr<QueuedTask> task)
+  TimerEvent(TaskQueueLibevent* task_queue, absl::AnyInvocable<void() &&> task)
       : task_queue(task_queue), task(std::move(task)) {}
   ~TimerEvent() { event_del(&ev); }
 
   event ev;
   TaskQueueLibevent* task_queue;
-  std::unique_ptr<QueuedTask> task;
-};
-
-class TaskQueueLibevent::SetTimerTask : public QueuedTask {
- public:
-  SetTimerTask(std::unique_ptr<QueuedTask> task, uint32_t milliseconds)
-      : task_(std::move(task)),
-        milliseconds_(milliseconds),
-        posted_(rtc::Time32()) {}
-
- private:
-  bool Run() override {
-    // Compensate for the time that has passed since construction
-    // and until we got here.
-    uint32_t post_time = rtc::Time32() - posted_;
-    TaskQueueLibevent::Current()->PostDelayedTask(
-        std::move(task_),
-        post_time > milliseconds_ ? 0 : milliseconds_ - post_time);
-    return true;
-  }
-
-  std::unique_ptr<QueuedTask> task_;
-  const uint32_t milliseconds_;
-  const uint32_t posted_;
+  absl::AnyInvocable<void() &&> task;
 };
 
 TaskQueueLibevent::TaskQueueLibevent(absl::string_view queue_name,
                                      rtc::ThreadPriority priority)
-    : event_base_(event_base_new()),
-      thread_(&TaskQueueLibevent::ThreadMain, this, queue_name, priority) {
+    : event_base_(event_base_new()) {
   int fds[2];
   RTC_CHECK(pipe(fds) == 0);
   SetNonBlocking(fds[0]);
@@ -183,7 +160,18 @@ TaskQueueLibevent::TaskQueueLibevent(absl::string_view queue_name,
   EventAssign(&wakeup_event_, event_base_, wakeup_pipe_out_,
               EV_READ | EV_PERSIST, OnWakeup, this);
   event_add(&wakeup_event_, 0);
-  thread_.Start();
+  thread_ = rtc::PlatformThread::SpawnJoinable(
+      [this] {
+        {
+          CurrentTaskQueueSetter set_current(this);
+          while (is_active_)
+            event_base_loop(event_base_, 0);
+        }
+
+        for (TimerEvent* timer : pending_timers_)
+          delete timer;
+      },
+      queue_name, rtc::ThreadAttributes().SetPriority(priority));
 }
 
 void TaskQueueLibevent::Delete() {
@@ -198,7 +186,7 @@ void TaskQueueLibevent::Delete() {
     nanosleep(&ts, nullptr);
   }
 
-  thread_.Stop();
+  thread_.Finalize();
 
   event_del(&wakeup_event_);
 
@@ -213,61 +201,64 @@ void TaskQueueLibevent::Delete() {
   delete this;
 }
 
-void TaskQueueLibevent::PostTask(std::unique_ptr<QueuedTask> task) {
-  RTC_DCHECK(task.get());
-  // libevent isn't thread safe.  This means that we can't use methods such
-  // as event_base_once to post tasks to the worker thread from a different
-  // thread.  However, we can use it when posting from the worker thread itself.
-  if (IsCurrent()) {
-    if (event_base_once(event_base_, -1, EV_TIMEOUT,
-                        &TaskQueueLibevent::RunTask, task.get(),
-                        nullptr) == 0) {
-      task.release();
-    }
-  } else {
-    QueuedTask* task_id = task.get();  // Only used for comparison.
-    {
-      rtc::CritScope lock(&pending_lock_);
-      pending_.push_back(std::move(task));
-    }
-    char message = kRunTask;
-    if (write(wakeup_pipe_in_, &message, sizeof(message)) != sizeof(message)) {
-      RTC_LOG(WARNING) << "Failed to queue task.";
-      rtc::CritScope lock(&pending_lock_);
-      pending_.remove_if([task_id](std::unique_ptr<QueuedTask>& t) {
-        return t.get() == task_id;
-      });
-    }
-  }
-}
-
-void TaskQueueLibevent::PostDelayedTask(std::unique_ptr<QueuedTask> task,
-                                        uint32_t milliseconds) {
-  if (IsCurrent()) {
-    TimerEvent* timer = new TimerEvent(this, std::move(task));
-    EventAssign(&timer->ev, event_base_, -1, 0, &TaskQueueLibevent::RunTimer,
-                timer);
-    pending_timers_.push_back(timer);
-    timeval tv = {rtc::dchecked_cast<int>(milliseconds / 1000),
-                  rtc::dchecked_cast<int>(milliseconds % 1000) * 1000};
-    event_add(&timer->ev, &tv);
-  } else {
-    PostTask(absl::make_unique<SetTimerTask>(std::move(task), milliseconds));
-  }
-}
-
-// static
-void TaskQueueLibevent::ThreadMain(void* context) {
-  TaskQueueLibevent* me = static_cast<TaskQueueLibevent*>(context);
-
+void TaskQueueLibevent::PostTask(absl::AnyInvocable<void() &&> task) {
   {
-    CurrentTaskQueueSetter set_current(me);
-    while (me->is_active_)
-      event_base_loop(me->event_base_, 0);
+    MutexLock lock(&pending_lock_);
+    bool had_pending_tasks = !pending_.empty();
+    pending_.push_back(std::move(task));
+
+    // Only write to the pipe if there were no pending tasks before this one
+    // since the thread could be sleeping. If there were already pending tasks
+    // then we know there's either a pending write in the pipe or the thread has
+    // not yet processed the pending tasks. In either case, the thread will
+    // eventually wake up and process all pending tasks including this one.
+    if (had_pending_tasks) {
+      return;
+    }
   }
 
-  for (TimerEvent* timer : me->pending_timers_)
-    delete timer;
+  // Note: This behvior outlined above ensures we never fill up the pipe write
+  // buffer since there will only ever be 1 byte pending.
+  char message = kRunTasks;
+  RTC_CHECK_EQ(write(wakeup_pipe_in_, &message, sizeof(message)),
+               sizeof(message));
+}
+
+void TaskQueueLibevent::PostDelayedTaskOnTaskQueue(
+    absl::AnyInvocable<void() &&> task,
+    TimeDelta delay) {
+  // libevent api is not thread safe by default, thus event_add need to be
+  // called on the `thread_`.
+  RTC_DCHECK(IsCurrent());
+
+  TimerEvent* timer = new TimerEvent(this, std::move(task));
+  EventAssign(&timer->ev, event_base_, -1, 0, &TaskQueueLibevent::RunTimer,
+              timer);
+  pending_timers_.push_back(timer);
+  timeval tv = {.tv_sec = rtc::dchecked_cast<int>(delay.us() / 1'000'000),
+                .tv_usec = rtc::dchecked_cast<int>(delay.us() % 1'000'000)};
+  event_add(&timer->ev, &tv);
+}
+
+void TaskQueueLibevent::PostDelayedTask(absl::AnyInvocable<void() &&> task,
+                                        TimeDelta delay) {
+  if (IsCurrent()) {
+    PostDelayedTaskOnTaskQueue(std::move(task), delay);
+  } else {
+    int64_t posted_us = rtc::TimeMicros();
+    PostTask([posted_us, delay, task = std::move(task), this]() mutable {
+      // Compensate for the time that has passed since the posting.
+      TimeDelta post_time = TimeDelta::Micros(rtc::TimeMicros() - posted_us);
+      PostDelayedTaskOnTaskQueue(
+          std::move(task), std::max(delay - post_time, TimeDelta::Zero()));
+    });
+  }
+}
+
+void TaskQueueLibevent::PostDelayedHighPrecisionTask(
+    absl::AnyInvocable<void() &&> task,
+    TimeDelta delay) {
+  PostDelayedTask(std::move(task), delay);
 }
 
 // static
@@ -283,30 +274,24 @@ void TaskQueueLibevent::OnWakeup(int socket,
       me->is_active_ = false;
       event_base_loopbreak(me->event_base_);
       break;
-    case kRunTask: {
-      std::unique_ptr<QueuedTask> task;
+    case kRunTasks: {
+      absl::InlinedVector<absl::AnyInvocable<void() &&>, 4> tasks;
       {
-        rtc::CritScope lock(&me->pending_lock_);
-        RTC_DCHECK(!me->pending_.empty());
-        task = std::move(me->pending_.front());
-        me->pending_.pop_front();
-        RTC_DCHECK(task.get());
+        MutexLock lock(&me->pending_lock_);
+        tasks.swap(me->pending_);
       }
-      if (!task->Run())
-        task.release();
+      RTC_DCHECK(!tasks.empty());
+      for (auto& task : tasks) {
+        std::move(task)();
+        // Prefer to delete the `task` before running the next one.
+        task = nullptr;
+      }
       break;
     }
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       break;
   }
-}
-
-// static
-void TaskQueueLibevent::RunTask(int fd, short flags, void* context) {  // NOLINT
-  auto* task = static_cast<QueuedTask*>(context);
-  if (task->Run())
-    delete task;
 }
 
 // static
@@ -314,8 +299,7 @@ void TaskQueueLibevent::RunTimer(int fd,
                                  short flags,  // NOLINT
                                  void* context) {
   TimerEvent* timer = static_cast<TimerEvent*>(context);
-  if (!timer->task->Run())
-    timer->task.release();
+  std::move(timer->task)();
   timer->task_queue->pending_timers_.remove(timer);
   delete timer;
 }
@@ -334,7 +318,7 @@ class TaskQueueLibeventFactory final : public TaskQueueFactory {
 }  // namespace
 
 std::unique_ptr<TaskQueueFactory> CreateTaskQueueLibeventFactory() {
-  return absl::make_unique<TaskQueueLibeventFactory>();
+  return std::make_unique<TaskQueueLibeventFactory>();
 }
 
 }  // namespace webrtc

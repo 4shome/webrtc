@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "api/units/data_rate.h"
+#include "modules/pacing/pacing_controller.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/numerics/safe_minmax.h"
@@ -38,6 +39,7 @@ CongestionControlHandler::~CongestionControlHandler() {}
 void CongestionControlHandler::SetTargetRate(
     TargetTransferRate new_target_rate) {
   RTC_DCHECK_RUN_ON(&sequenced_checker_);
+  RTC_CHECK(new_target_rate.at_time.IsFinite());
   last_incoming_ = new_target_rate;
 }
 
@@ -61,7 +63,8 @@ absl::optional<TargetTransferRate> CongestionControlHandler::GetUpdate() {
   if (!network_available_) {
     pause_encoding = true;
   } else if (!disable_pacer_emergency_stop_ &&
-             pacer_expected_queue_ms_ > PacedSender::kMaxQueueLengthMs) {
+             pacer_expected_queue_ms_ >
+                 PacingController::kMaxExpectedQueueLength.ms()) {
     pause_encoding = true;
   }
   if (pause_encoding)

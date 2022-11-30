@@ -10,7 +10,6 @@
 
 #include "TwoWayCommunication.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -59,7 +58,6 @@ void TwoWayCommunication::SetUpAutotest(
     const int payload_type1,
     const SdpAudioFormat& format2,
     const int payload_type2) {
-
   //--- Set A codecs
   _acmA->SetEncoder(
       encoder_factory->MakeAudioEncoder(payload_type1, format1, absl::nullopt));

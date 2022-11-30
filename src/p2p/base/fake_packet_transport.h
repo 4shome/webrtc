@@ -11,11 +11,10 @@
 #ifndef P2P_BASE_FAKE_PACKET_TRANSPORT_H_
 #define P2P_BASE_FAKE_PACKET_TRANSPORT_H_
 
+#include <map>
 #include <string>
 
-#include "api/ortc/packet_transport_interface.h"
 #include "p2p/base/packet_transport_internal.h"
-#include "rtc_base/async_invoker.h"
 #include "rtc_base/copy_on_write_buffer.h"
 
 namespace rtc {
@@ -31,19 +30,14 @@ class FakePacketTransport : public PacketTransportInternal {
     }
   }
 
-  // If async, will send packets by "Post"-ing to message queue instead of
-  // synchronously "Send"-ing.
-  void SetAsync(bool async) { async_ = async; }
-  void SetAsyncDelay(int delay_ms) { async_delay_ms_ = delay_ms; }
-
   // SetWritable, SetReceiving and SetDestination are the main methods that can
   // be used for testing, to simulate connectivity or lack thereof.
   void SetWritable(bool writable) { set_writable(writable); }
   void SetReceiving(bool receiving) { set_receiving(receiving); }
 
   // Simulates the two transports connecting to each other.
-  // If |asymmetric| is true this method only affects this FakePacketTransport.
-  // If false, it affects |dest| as well.
+  // If `asymmetric` is true this method only affects this FakePacketTransport.
+  // If false, it affects `dest` as well.
   void SetDestination(FakePacketTransport* dest, bool asymmetric) {
     if (dest) {
       dest_ = dest;
@@ -70,21 +64,29 @@ class FakePacketTransport : public PacketTransportInternal {
       return -1;
     }
     CopyOnWriteBuffer packet(data, len);
-    if (async_) {
-      invoker_.AsyncInvokeDelayed<void>(
-          RTC_FROM_HERE, Thread::Current(),
-          Bind(&FakePacketTransport::SendPacketInternal, this, packet),
-          async_delay_ms_);
-    } else {
-      SendPacketInternal(packet);
-    }
+    SendPacketInternal(packet);
+
     SentPacket sent_packet(options.packet_id, TimeMillis());
     SignalSentPacket(this, sent_packet);
     return static_cast<int>(len);
   }
-  int SetOption(Socket::Option opt, int value) override { return true; }
-  bool GetOption(Socket::Option opt, int* value) override { return true; }
-  int GetError() override { return 0; }
+
+  int SetOption(Socket::Option opt, int value) override {
+    options_[opt] = value;
+    return 0;
+  }
+
+  bool GetOption(Socket::Option opt, int* value) override {
+    auto it = options_.find(opt);
+    if (it == options_.end()) {
+      return false;
+    }
+    *value = it->second;
+    return true;
+  }
+
+  int GetError() override { return error_; }
+  void SetError(int error) { error_ = error; }
 
   const CopyOnWriteBuffer* last_sent_packet() { return &last_sent_packet_; }
 
@@ -93,6 +95,7 @@ class FakePacketTransport : public PacketTransportInternal {
   }
   void SetNetworkRoute(absl::optional<NetworkRoute> network_route) {
     network_route_ = network_route;
+    SignalNetworkRouteChanged(network_route);
   }
 
  private:
@@ -124,13 +127,13 @@ class FakePacketTransport : public PacketTransportInternal {
   }
 
   CopyOnWriteBuffer last_sent_packet_;
-  AsyncInvoker invoker_;
   std::string transport_name_;
   FakePacketTransport* dest_ = nullptr;
-  bool async_ = false;
-  int async_delay_ms_ = 0;
   bool writable_ = false;
   bool receiving_ = false;
+
+  std::map<Socket::Option, int> options_;
+  int error_ = 0;
 
   absl::optional<NetworkRoute> network_route_;
 };

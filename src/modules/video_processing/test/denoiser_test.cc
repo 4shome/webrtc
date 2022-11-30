@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
 #include <memory>
 #include <string>
 
@@ -25,26 +26,6 @@
 #include "test/testsupport/file_utils.h"
 
 namespace webrtc {
-
-TEST(VideoDenoiserTest, CopyMem) {
-  std::unique_ptr<DenoiserFilter> df_c(DenoiserFilter::Create(false, nullptr));
-  std::unique_ptr<DenoiserFilter> df_sse_neon(
-      DenoiserFilter::Create(true, nullptr));
-  uint8_t src[16 * 16], dst[16 * 16];
-  for (int i = 0; i < 16; ++i) {
-    for (int j = 0; j < 16; ++j) {
-      src[i * 16 + j] = i * 16 + j;
-    }
-  }
-
-  memset(dst, 0, 16 * 16);
-  df_c->CopyMem16x16(src, 16, dst, 16);
-  EXPECT_EQ(0, memcmp(src, dst, 16 * 16));
-
-  memset(dst, 0, 16 * 16);
-  df_sse_neon->CopyMem16x16(src, 16, dst, 16);
-  EXPECT_EQ(0, memcmp(src, dst, 16 * 16));
-}
 
 TEST(VideoDenoiserTest, Variance) {
   std::unique_ptr<DenoiserFilter> df_c(DenoiserFilter::Create(false, nullptr));
@@ -77,7 +58,7 @@ TEST(VideoDenoiserTest, MbDenoise) {
   uint8_t running_src[16 * 16], src[16 * 16];
   uint8_t dst[16 * 16], dst_sse_neon[16 * 16];
 
-  // Test case: |diff| <= |3 + shift_inc1|
+  // Test case: `diff` <= |3 + shift_inc1|
   for (int i = 0; i < 16; ++i) {
     for (int j = 0; j < 16; ++j) {
       running_src[i * 16 + j] = i * 11 + j;
@@ -90,7 +71,7 @@ TEST(VideoDenoiserTest, MbDenoise) {
   df_sse_neon->MbDenoise(running_src, 16, dst_sse_neon, 16, src, 16, 0, 1);
   EXPECT_EQ(0, memcmp(dst, dst_sse_neon, 16 * 16));
 
-  // Test case: |diff| >= |4 + shift_inc1|
+  // Test case: `diff` >= |4 + shift_inc1|
   for (int i = 0; i < 16; ++i) {
     for (int j = 0; j < 16; ++j) {
       running_src[i * 16 + j] = i * 11 + j;
@@ -103,7 +84,7 @@ TEST(VideoDenoiserTest, MbDenoise) {
   df_sse_neon->MbDenoise(running_src, 16, dst_sse_neon, 16, src, 16, 0, 1);
   EXPECT_EQ(0, memcmp(dst, dst_sse_neon, 16 * 16));
 
-  // Test case: |diff| >= 8
+  // Test case: `diff` >= 8
   for (int i = 0; i < 16; ++i) {
     for (int j = 0; j < 16; ++j) {
       running_src[i * 16 + j] = i * 11 + j;
@@ -116,7 +97,7 @@ TEST(VideoDenoiserTest, MbDenoise) {
   df_sse_neon->MbDenoise(running_src, 16, dst_sse_neon, 16, src, 16, 0, 1);
   EXPECT_EQ(0, memcmp(dst, dst_sse_neon, 16 * 16));
 
-  // Test case: |diff| > 15
+  // Test case: `diff` > 15
   for (int i = 0; i < 16; ++i) {
     for (int j = 0; j < 16; ++j) {
       running_src[i * 16 + j] = i * 11 + j;

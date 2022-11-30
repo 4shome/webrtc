@@ -8,6 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "modules/video_capture/video_capture_impl.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,9 +17,7 @@
 #include "api/video/video_frame_buffer.h"
 #include "common_video/libyuv/include/webrtc_libyuv.h"
 #include "modules/video_capture/video_capture_config.h"
-#include "modules/video_capture/video_capture_impl.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/time_utils.h"
 #include "rtc_base/trace_event.h"
 #include "third_party/libyuv/include/libyuv.h"
@@ -95,12 +95,12 @@ VideoCaptureImpl::~VideoCaptureImpl() {
 
 void VideoCaptureImpl::RegisterCaptureDataCallback(
     rtc::VideoSinkInterface<VideoFrame>* dataCallBack) {
-  rtc::CritScope cs(&_apiCs);
+  MutexLock lock(&api_lock_);
   _dataCallBack = dataCallBack;
 }
 
 void VideoCaptureImpl::DeRegisterCaptureDataCallback() {
-  rtc::CritScope cs(&_apiCs);
+  MutexLock lock(&api_lock_);
   _dataCallBack = NULL;
 }
 int32_t VideoCaptureImpl::DeliverCapturedFrame(VideoFrame& captureFrame) {
@@ -117,7 +117,7 @@ int32_t VideoCaptureImpl::IncomingFrame(uint8_t* videoFrame,
                                         size_t videoFrameLength,
                                         const VideoCaptureCapability& frameInfo,
                                         int64_t captureTime /*=0*/) {
-  rtc::CritScope cs(&_apiCs);
+  MutexLock lock(&api_lock_);
 
   const int32_t width = frameInfo.width;
   const int32_t height = frameInfo.height;
@@ -152,8 +152,6 @@ int32_t VideoCaptureImpl::IncomingFrame(uint8_t* videoFrame,
   // Setting absolute height (in case it was negative).
   // In Windows, the image starts bottom left, instead of top left.
   // Setting a negative source height, inverts the image (within LibYuv).
-
-  // TODO(nisse): Use a pool?
   rtc::scoped_refptr<I420Buffer> buffer = I420Buffer::Create(
       target_width, target_height, stride_y, stride_uv, stride_uv);
 
@@ -222,7 +220,7 @@ int32_t VideoCaptureImpl::CaptureSettings(
 }
 
 int32_t VideoCaptureImpl::SetCaptureRotation(VideoRotation rotation) {
-  rtc::CritScope cs(&_apiCs);
+  MutexLock lock(&api_lock_);
   _rotateFrame = rotation;
   return 0;
 }

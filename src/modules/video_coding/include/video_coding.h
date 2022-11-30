@@ -11,13 +11,11 @@
 #ifndef MODULES_VIDEO_CODING_INCLUDE_VIDEO_CODING_H_
 #define MODULES_VIDEO_CODING_INCLUDE_VIDEO_CODING_H_
 
-#include "api/fec_controller.h"
+#include "api/field_trials_view.h"
 #include "api/video/video_frame.h"
-#include "api/video_codecs/video_codec.h"
-#include "modules/include/module.h"
-#include "modules/include/module_common_types.h"
+#include "api/video_codecs/video_decoder.h"
+#include "modules/rtp_rtcp/source/rtp_video_header.h"
 #include "modules/video_coding/include/video_coding_defines.h"
-#include "rtc_base/deprecation.h"
 
 namespace webrtc {
 
@@ -27,10 +25,14 @@ class VideoDecoder;
 class VideoEncoder;
 struct CodecSpecificInfo;
 
-class VideoCodingModule : public Module {
+class VideoCodingModule {
  public:
   // DEPRECATED.
-  static VideoCodingModule* Create(Clock* clock);
+  static VideoCodingModule* Create(
+      Clock* clock,
+      const FieldTrialsView* field_trials = nullptr);
+
+  virtual ~VideoCodingModule() = default;
 
   /*
    *   Receiver
@@ -44,19 +46,11 @@ class VideoCodingModule : public Module {
   // needed.
   //
   // Input:
-  //      - receiveCodec      : Settings for the codec to be registered.
-  //      - numberOfCores     : Number of CPU cores that the decoder is allowed
-  //      to use.
-  //      - requireKeyFrame   : Set this to true if you don't want any delta
-  //      frames
-  //                            to be decoded until the first key frame has been
-  //                            decoded.
+  //      - payload_type      : RTP payload type
+  //      - settings          : Settings for the decoder to be registered.
   //
-  // Return value      : VCM_OK, on success.
-  //                     < 0,    on error.
-  virtual int32_t RegisterReceiveCodec(const VideoCodec* receiveCodec,
-                                       int32_t numberOfCores,
-                                       bool requireKeyFrame = false) = 0;
+  virtual void RegisterReceiveCodec(uint8_t payload_type,
+                                    const VideoDecoder::Settings& settings) = 0;
 
   // Register an external decoder object.
   //
@@ -127,41 +121,28 @@ class VideoCodingModule : public Module {
   // Input:
   //      - incomingPayload      : Payload of the packet.
   //      - payloadLength        : Length of the payload.
-  //      - rtpInfo              : The parsed header.
+  //      - rtp_header           : The parsed RTP header.
+  //      - video_header         : The relevant extensions and payload header.
   //
   // Return value      : VCM_OK, on success.
   //                     < 0,    on error.
   virtual int32_t IncomingPacket(const uint8_t* incomingPayload,
                                  size_t payloadLength,
-                                 const WebRtcRTPHeader& rtpInfo) = 0;
-
-  // Robustness APIs
-
-  // DEPRECATED.
-  // Set the receiver robustness mode. The mode decides how the receiver
-  // responds to losses in the stream. The type of counter-measure is selected
-  // through the robustnessMode parameter. The errorMode parameter decides if it
-  // is allowed to display frames corrupted by losses. Note that not all
-  // combinations of the two parameters are feasible. An error will be
-  // returned for invalid combinations.
-  // Input:
-  //      - robustnessMode : selected robustness mode.
-  //      - errorMode      : selected error mode.
-  //
-  // Return value      : VCM_OK, on success;
-  //                     < 0, on error.
-  enum ReceiverRobustness { kNone, kHardNack };
-  virtual int SetReceiverRobustnessMode(ReceiverRobustness robustnessMode) = 0;
+                                 const RTPHeader& rtp_header,
+                                 const RTPVideoHeader& video_header) = 0;
 
   // Sets the maximum number of sequence numbers that we are allowed to NACK
   // and the oldest sequence number that we will consider to NACK. If a
-  // sequence number older than |max_packet_age_to_nack| is missing
+  // sequence number older than `max_packet_age_to_nack` is missing
   // a key frame will be requested. A key frame will also be requested if the
   // time of incomplete or non-continuous frames in the jitter buffer is above
-  // |max_incomplete_time_ms|.
+  // `max_incomplete_time_ms`.
   virtual void SetNackSettings(size_t max_nack_list_size,
                                int max_packet_age_to_nack,
                                int max_incomplete_time_ms) = 0;
+
+  // Runs delayed tasks. Expected to be called periodically.
+  virtual void Process() = 0;
 };
 
 }  // namespace webrtc

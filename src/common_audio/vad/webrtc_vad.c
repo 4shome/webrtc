@@ -21,10 +21,9 @@ static const int kValidRates[] = { 8000, 16000, 32000, 48000 };
 static const size_t kRatesSize = sizeof(kValidRates) / sizeof(*kValidRates);
 static const int kMaxFrameLengthMs = 30;
 
-VadInst* WebRtcVad_Create() {
+VadInst* WebRtcVad_Create(void) {
   VadInstT* self = (VadInstT*)malloc(sizeof(VadInstT));
 
-  WebRtcSpl_Init();
   self->init_flag = 0;
 
   return (VadInst*)self;

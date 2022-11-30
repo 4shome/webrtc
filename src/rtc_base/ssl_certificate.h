@@ -17,16 +17,18 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "rtc_base/buffer.h"
-#include "rtc_base/constructor_magic.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace rtc {
 
-struct SSLCertificateStats {
+struct RTC_EXPORT SSLCertificateStats {
   SSLCertificateStats(std::string&& fingerprint,
                       std::string&& fingerprint_algorithm,
                       std::string&& base64_certificate,
@@ -46,7 +48,7 @@ struct SSLCertificateStats {
 // The SSLCertificate object is pretty much immutable once created.
 // (The OpenSSL implementation only does reference counting and
 // possibly caching of intermediate results.)
-class SSLCertificate {
+class RTC_EXPORT SSLCertificate {
  public:
   // Parses and builds a certificate from a PEM encoded string.
   // Returns null on failure.
@@ -54,7 +56,7 @@ class SSLCertificate {
   // stored in *pem_length if it is non-null, and only if
   // parsing was successful.
   static std::unique_ptr<SSLCertificate> FromPEMString(
-      const std::string& pem_string);
+      absl::string_view pem_string);
   virtual ~SSLCertificate() = default;
 
   // Returns a new SSLCertificate object instance wrapping the same
@@ -72,7 +74,7 @@ class SSLCertificate {
   virtual bool GetSignatureDigestAlgorithm(std::string* algorithm) const = 0;
 
   // Compute the digest of the certificate given algorithm
-  virtual bool ComputeDigest(const std::string& algorithm,
+  virtual bool ComputeDigest(absl::string_view algorithm,
                              unsigned char* digest,
                              size_t size,
                              size_t* length) const = 0;
@@ -90,7 +92,7 @@ class SSLCertificate {
 // SSLCertChain is a simple wrapper for a vector of SSLCertificates. It serves
 // primarily to ensure proper memory management (especially deletion) of the
 // SSLCertificate pointers.
-class SSLCertChain final {
+class RTC_EXPORT SSLCertChain final {
  public:
   explicit SSLCertChain(std::unique_ptr<SSLCertificate> single_cert);
   explicit SSLCertChain(std::vector<std::unique_ptr<SSLCertificate>> certs);
@@ -99,6 +101,9 @@ class SSLCertChain final {
   SSLCertChain& operator=(SSLCertChain&&);
 
   ~SSLCertChain();
+
+  SSLCertChain(const SSLCertChain&) = delete;
+  SSLCertChain& operator=(const SSLCertChain&) = delete;
 
   // Vector access methods.
   size_t GetSize() const { return certs_.size(); }
@@ -117,8 +122,6 @@ class SSLCertChain final {
 
  private:
   std::vector<std::unique_ptr<SSLCertificate>> certs_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(SSLCertChain);
 };
 
 // SSLCertificateVerifier provides a simple interface to allow third parties to

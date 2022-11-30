@@ -15,24 +15,6 @@
 
 namespace webrtc {
 
-absl::InlinedVector<GenericFrameInfo::DecodeTargetIndication, 10>
-GenericFrameInfo::DecodeTargetInfo(absl::string_view indication_symbols) {
-  absl::InlinedVector<DecodeTargetIndication, 10> decode_targets;
-  for (char symbol : indication_symbols) {
-    DecodeTargetIndication indication;
-    switch (symbol) {
-      case '-': indication = DecodeTargetIndication::kNotPresent; break;
-      case 'D': indication = DecodeTargetIndication::kDiscardable; break;
-      case 'R': indication = DecodeTargetIndication::kRequired; break;
-      case 'S': indication = DecodeTargetIndication::kSwitch; break;
-      default: RTC_NOTREACHED();
-    }
-    decode_targets.push_back(indication);
-  }
-
-  return decode_targets;
-}
-
 GenericFrameInfo::GenericFrameInfo() = default;
 GenericFrameInfo::GenericFrameInfo(const GenericFrameInfo&) = default;
 GenericFrameInfo::~GenericFrameInfo() = default;
@@ -56,21 +38,9 @@ GenericFrameInfo::Builder& GenericFrameInfo::Builder::S(int spatial_id) {
 
 GenericFrameInfo::Builder& GenericFrameInfo::Builder::Dtis(
     absl::string_view indication_symbols) {
-  info_.decode_target_indications = DecodeTargetInfo(indication_symbols);
+  info_.decode_target_indications =
+      webrtc_impl::StringToDecodeTargetIndications(indication_symbols);
   return *this;
 }
 
-GenericFrameInfo::Builder& GenericFrameInfo::Builder::Fdiffs(
-    std::initializer_list<int> frame_diffs) {
-  info_.frame_diffs.insert(info_.frame_diffs.end(), frame_diffs.begin(),
-                           frame_diffs.end());
-  return *this;
-}
-
-TemplateStructure::TemplateStructure() = default;
-TemplateStructure::TemplateStructure(const TemplateStructure&) = default;
-TemplateStructure::TemplateStructure(TemplateStructure&&) = default;
-TemplateStructure& TemplateStructure::operator=(const TemplateStructure&) =
-    default;
-TemplateStructure::~TemplateStructure() = default;
 }  // namespace webrtc

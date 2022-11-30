@@ -10,6 +10,7 @@
 
 #include "examples/objcnativeapi/objc/objc_call_client.h"
 
+#include <memory>
 #include <utility>
 
 #import "sdk/objc/base/RTCVideoRenderer.h"
@@ -17,12 +18,11 @@
 #import "sdk/objc/components/video_codec/RTCDefaultVideoEncoderFactory.h"
 #import "sdk/objc/helpers/RTCCameraPreviewView.h"
 
-#include "absl/memory/memory.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/peer_connection_interface.h"
-#include "api/video/builtin_video_bitrate_allocator_factory.h"
-#include "logging/rtc_event_log/rtc_event_log_factory.h"
+#include "api/rtc_event_log/rtc_event_log_factory.h"
+#include "api/task_queue/default_task_queue_factory.h"
 #include "media/engine/webrtc_media_engine.h"
 #include "modules/audio_processing/include/audio_processing.h"
 #include "sdk/objc/native/api/video_capturer.h"
@@ -50,24 +50,24 @@ class SetRemoteSessionDescriptionObserver : public webrtc::SetRemoteDescriptionO
   void OnSetRemoteDescriptionComplete(webrtc::RTCError error) override;
 };
 
-class SetLocalSessionDescriptionObserver : public webrtc::SetSessionDescriptionObserver {
+class SetLocalSessionDescriptionObserver : public webrtc::SetLocalDescriptionObserverInterface {
  public:
-  void OnSuccess() override;
-  void OnFailure(webrtc::RTCError error) override;
+  void OnSetLocalDescriptionComplete(webrtc::RTCError error) override;
 };
 
 }  // namespace
 
 ObjCCallClient::ObjCCallClient()
-    : call_started_(false), pc_observer_(absl::make_unique<PCObserver>(this)) {
+    : call_started_(false), pc_observer_(std::make_unique<PCObserver>(this)) {
   thread_checker_.Detach();
   CreatePeerConnectionFactory();
 }
 
-void ObjCCallClient::Call(RTCVideoCapturer* capturer, id<RTCVideoRenderer> remote_renderer) {
+void ObjCCallClient::Call(RTC_OBJC_TYPE(RTCVideoCapturer) * capturer,
+                          id<RTC_OBJC_TYPE(RTCVideoRenderer)> remote_renderer) {
   RTC_DCHECK_RUN_ON(&thread_checker_);
 
-  rtc::CritScope lock(&pc_mutex_);
+  webrtc::MutexLock lock(&pc_mutex_);
   if (call_started_) {
     RTC_LOG(LS_WARNING) << "Call already started.";
     return;
@@ -89,7 +89,7 @@ void ObjCCallClient::Hangup() {
   call_started_ = false;
 
   {
-    rtc::CritScope lock(&pc_mutex_);
+    webrtc::MutexLock lock(&pc_mutex_);
     if (pc_ != nullptr) {
       pc_->Close();
       pc_ = nullptr;
@@ -113,48 +113,45 @@ void ObjCCallClient::CreatePeerConnectionFactory() {
   signaling_thread_->SetName("signaling_thread", nullptr);
   RTC_CHECK(signaling_thread_->Start()) << "Failed to start thread";
 
-  std::unique_ptr<webrtc::VideoDecoderFactory> videoDecoderFactory =
-      webrtc::ObjCToNativeVideoDecoderFactory([[RTCDefaultVideoDecoderFactory alloc] init]);
-  std::unique_ptr<webrtc::VideoEncoderFactory> videoEncoderFactory =
-      webrtc::ObjCToNativeVideoEncoderFactory([[RTCDefaultVideoEncoderFactory alloc] init]);
-
-  std::unique_ptr<webrtc::VideoBitrateAllocatorFactory> videoBitrateAllocatorFactory =
-      webrtc::CreateBuiltinVideoBitrateAllocatorFactory();
-
-  std::unique_ptr<cricket::MediaEngineInterface> media_engine =
-      cricket::WebRtcMediaEngineFactory::Create(nullptr /* adm */,
-                                                webrtc::CreateBuiltinAudioEncoderFactory(),
-                                                webrtc::CreateBuiltinAudioDecoderFactory(),
-                                                std::move(videoEncoderFactory),
-                                                std::move(videoDecoderFactory),
-                                                std::move(videoBitrateAllocatorFactory),
-                                                nullptr /* audio_mixer */,
-                                                webrtc::AudioProcessingBuilder().Create());
-  RTC_LOG(LS_INFO) << "Media engine created: " << media_engine.get();
-
-  pcf_ = webrtc::CreateModularPeerConnectionFactory(network_thread_.get(),
-                                                    worker_thread_.get(),
-                                                    signaling_thread_.get(),
-                                                    std::move(media_engine),
-                                                    webrtc::CreateCallFactory(),
-                                                    webrtc::CreateRtcEventLogFactory());
-  RTC_LOG(LS_INFO) << "PeerConnectionFactory created: " << pcf_;
+  webrtc::PeerConnectionFactoryDependencies dependencies;
+  dependencies.network_thread = network_thread_.get();
+  dependencies.worker_thread = worker_thread_.get();
+  dependencies.signaling_thread = signaling_thread_.get();
+  dependencies.task_queue_factory = webrtc::CreateDefaultTaskQueueFactory();
+  cricket::MediaEngineDependencies media_deps;
+  media_deps.task_queue_factory = dependencies.task_queue_factory.get();
+  media_deps.audio_encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();
+  media_deps.audio_decoder_factory = webrtc::CreateBuiltinAudioDecoderFactory();
+  media_deps.video_encoder_factory = webrtc::ObjCToNativeVideoEncoderFactory(
+      [[RTC_OBJC_TYPE(RTCDefaultVideoEncoderFactory) alloc] init]);
+  media_deps.video_decoder_factory = webrtc::ObjCToNativeVideoDecoderFactory(
+      [[RTC_OBJC_TYPE(RTCDefaultVideoDecoderFactory) alloc] init]);
+  media_deps.audio_processing = webrtc::AudioProcessingBuilder().Create();
+  dependencies.media_engine = cricket::CreateMediaEngine(std::move(media_deps));
+  RTC_LOG(LS_INFO) << "Media engine created: " << dependencies.media_engine.get();
+  dependencies.call_factory = webrtc::CreateCallFactory();
+  dependencies.event_log_factory =
+      std::make_unique<webrtc::RtcEventLogFactory>(dependencies.task_queue_factory.get());
+  pcf_ = webrtc::CreateModularPeerConnectionFactory(std::move(dependencies));
+  RTC_LOG(LS_INFO) << "PeerConnectionFactory created: " << pcf_.get();
 }
 
 void ObjCCallClient::CreatePeerConnection() {
-  rtc::CritScope lock(&pc_mutex_);
+  webrtc::MutexLock lock(&pc_mutex_);
   webrtc::PeerConnectionInterface::RTCConfiguration config;
   config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
-  // DTLS SRTP has to be disabled for loopback to work.
-  config.enable_dtls_srtp = false;
-  pc_ = pcf_->CreatePeerConnection(
-      config, nullptr /* port_allocator */, nullptr /* cert_generator */, pc_observer_.get());
-  RTC_LOG(LS_INFO) << "PeerConnection created: " << pc_;
+  // Encryption has to be disabled for loopback to work.
+  webrtc::PeerConnectionFactoryInterface::Options options;
+  options.disable_encryption = true;
+  pcf_->SetOptions(options);
+  webrtc::PeerConnectionDependencies pc_dependencies(pc_observer_.get());
+  pc_ = pcf_->CreatePeerConnectionOrError(config, std::move(pc_dependencies)).MoveValue();
+  RTC_LOG(LS_INFO) << "PeerConnection created: " << pc_.get();
 
   rtc::scoped_refptr<webrtc::VideoTrackInterface> local_video_track =
-      pcf_->CreateVideoTrack("video", video_source_);
+      pcf_->CreateVideoTrack("video", video_source_.get());
   pc_->AddTransceiver(local_video_track);
-  RTC_LOG(LS_INFO) << "Local video sink set up: " << local_video_track;
+  RTC_LOG(LS_INFO) << "Local video sink set up: " << local_video_track.get();
 
   for (const rtc::scoped_refptr<webrtc::RtpTransceiverInterface>& tranceiver :
        pc_->GetTransceivers()) {
@@ -162,15 +159,15 @@ void ObjCCallClient::CreatePeerConnection() {
     if (track && track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind) {
       static_cast<webrtc::VideoTrackInterface*>(track.get())
           ->AddOrUpdateSink(remote_sink_.get(), rtc::VideoSinkWants());
-      RTC_LOG(LS_INFO) << "Remote video sink set up: " << track;
+      RTC_LOG(LS_INFO) << "Remote video sink set up: " << track.get();
       break;
     }
   }
 }
 
 void ObjCCallClient::Connect() {
-  rtc::CritScope lock(&pc_mutex_);
-  pc_->CreateOffer(new rtc::RefCountedObject<CreateOfferObserver>(pc_),
+  webrtc::MutexLock lock(&pc_mutex_);
+  pc_->CreateOffer(rtc::make_ref_counted<CreateOfferObserver>(pc_).get(),
                    webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
 }
 
@@ -202,7 +199,7 @@ void ObjCCallClient::PCObserver::OnIceGatheringChange(
 
 void ObjCCallClient::PCObserver::OnIceCandidate(const webrtc::IceCandidateInterface* candidate) {
   RTC_LOG(LS_INFO) << "OnIceCandidate: " << candidate->server_url();
-  rtc::CritScope lock(&client_->pc_mutex_);
+  webrtc::MutexLock lock(&client_->pc_mutex_);
   RTC_DCHECK(client_->pc_ != nullptr);
   client_->pc_->AddIceCandidate(candidate);
 }
@@ -216,13 +213,14 @@ void CreateOfferObserver::OnSuccess(webrtc::SessionDescriptionInterface* desc) {
   RTC_LOG(LS_INFO) << "Created offer: " << sdp;
 
   // Ownership of desc was transferred to us, now we transfer it forward.
-  pc_->SetLocalDescription(new rtc::RefCountedObject<SetLocalSessionDescriptionObserver>(), desc);
+  pc_->SetLocalDescription(absl::WrapUnique(desc),
+                           rtc::make_ref_counted<SetLocalSessionDescriptionObserver>());
 
   // Generate a fake answer.
   std::unique_ptr<webrtc::SessionDescriptionInterface> answer(
       webrtc::CreateSessionDescription(webrtc::SdpType::kAnswer, sdp));
   pc_->SetRemoteDescription(std::move(answer),
-                            new rtc::RefCountedObject<SetRemoteSessionDescriptionObserver>());
+                            rtc::make_ref_counted<SetRemoteSessionDescriptionObserver>());
 }
 
 void CreateOfferObserver::OnFailure(webrtc::RTCError error) {
@@ -233,12 +231,8 @@ void SetRemoteSessionDescriptionObserver::OnSetRemoteDescriptionComplete(webrtc:
   RTC_LOG(LS_INFO) << "Set remote description: " << error.message();
 }
 
-void SetLocalSessionDescriptionObserver::OnSuccess() {
-  RTC_LOG(LS_INFO) << "Set local description success!";
-}
-
-void SetLocalSessionDescriptionObserver::OnFailure(webrtc::RTCError error) {
-  RTC_LOG(LS_INFO) << "Set local description failure: " << error.message();
+void SetLocalSessionDescriptionObserver::OnSetLocalDescriptionComplete(webrtc::RTCError error) {
+  RTC_LOG(LS_INFO) << "Set local description: " << error.message();
 }
 
 }  // namespace webrtc_examples

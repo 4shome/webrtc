@@ -15,9 +15,8 @@
 #define MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_GLOBALS_H_
 
 #include <string>
+
 #include "modules/video_coding/codecs/interface/common_constants.h"
-
-
 #include "rtc_base/checks.h"
 
 namespace webrtc {
@@ -53,7 +52,7 @@ inline std::string ToString(H264PacketizationMode mode) {
   } else if (mode == H264PacketizationMode::SingleNalUnit) {
     return "SingleNalUnit";
   }
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return "";
 }
 

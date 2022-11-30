@@ -15,12 +15,13 @@
 #define API_JSEP_ICE_CANDIDATE_H_
 
 #include <stddef.h>
+
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "api/candidate.h"
 #include "api/jsep.h"
-#include "rtc_base/constructor_magic.h"
 #include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
@@ -32,8 +33,10 @@ class RTC_EXPORT JsepIceCandidate : public IceCandidateInterface {
   JsepIceCandidate(const std::string& sdp_mid,
                    int sdp_mline_index,
                    const cricket::Candidate& candidate);
+  JsepIceCandidate(const JsepIceCandidate&) = delete;
+  JsepIceCandidate& operator=(const JsepIceCandidate&) = delete;
   ~JsepIceCandidate() override;
-  // |err| may be null.
+  // `err` may be null.
   bool Initialize(const std::string& sdp, SdpParseError* err);
   void SetCandidate(const cricket::Candidate& candidate) {
     candidate_ = candidate;
@@ -51,8 +54,6 @@ class RTC_EXPORT JsepIceCandidate : public IceCandidateInterface {
   std::string sdp_mid_;
   int sdp_mline_index_;
   cricket::Candidate candidate_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(JsepIceCandidate);
 };
 
 // Implementation of IceCandidateCollection which stores JsepIceCandidates.
@@ -62,7 +63,12 @@ class JsepCandidateCollection : public IceCandidateCollection {
   // Move constructor is defined so that a vector of JsepCandidateCollections
   // can be resized.
   JsepCandidateCollection(JsepCandidateCollection&& o);
-  ~JsepCandidateCollection() override;
+
+  JsepCandidateCollection(const JsepCandidateCollection&) = delete;
+  JsepCandidateCollection& operator=(const JsepCandidateCollection&) = delete;
+
+  // Returns a copy of the candidate collection.
+  JsepCandidateCollection Clone() const;
   size_t count() const override;
   bool HasCandidate(const IceCandidateInterface* candidate) const override;
   // Adds and takes ownership of the JsepIceCandidate.
@@ -76,9 +82,7 @@ class JsepCandidateCollection : public IceCandidateCollection {
   size_t remove(const cricket::Candidate& candidate);
 
  private:
-  std::vector<JsepIceCandidate*> candidates_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(JsepCandidateCollection);
+  std::vector<std::unique_ptr<JsepIceCandidate>> candidates_;
 };
 
 }  // namespace webrtc

@@ -8,12 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "modules/audio_device/linux/audio_device_pulse_linux.h"
+
 #include <string.h>
 
-#include "modules/audio_device/linux/audio_device_pulse_linux.h"
 #include "modules/audio_device/linux/latebindingsymboltable_linux.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/platform_thread.h"
 
 WebRTCPulseSymbolTable* GetPulseSymbolTable() {
   static WebRTCPulseSymbolTable* pulse_symbol_table =
@@ -45,12 +47,10 @@ AudioDeviceLinuxPulse::AudioDeviceLinuxPulse()
       _recIsInitialized(false),
       _playIsInitialized(false),
       _startRec(false),
-      _stopRec(false),
       _startPlay(false),
-      _stopPlay(false),
       update_speaker_volume_at_startup_(false),
+      quit_(false),
       _sndCardPlayDelay(0),
-      _sndCardRecDelay(0),
       _writeErrors(0),
       _deviceIndex(-1),
       _numPlayDevices(0),
@@ -79,7 +79,7 @@ AudioDeviceLinuxPulse::AudioDeviceLinuxPulse()
       _playStream(NULL),
       _recStreamFlags(0),
       _playStreamFlags(0) {
-  RTC_LOG(LS_INFO) << __FUNCTION__ << " created";
+  RTC_DLOG(LS_INFO) << __FUNCTION__ << " created";
 
   memset(_paServerVersion, 0, sizeof(_paServerVersion));
   memset(&_playBufferAttr, 0, sizeof(_playBufferAttr));
@@ -88,7 +88,7 @@ AudioDeviceLinuxPulse::AudioDeviceLinuxPulse()
 }
 
 AudioDeviceLinuxPulse::~AudioDeviceLinuxPulse() {
-  RTC_LOG(LS_INFO) << __FUNCTION__ << " destroyed";
+  RTC_DLOG(LS_INFO) << __FUNCTION__ << " destroyed";
   RTC_DCHECK(thread_checker_.IsCurrent());
   Terminate();
 
@@ -159,18 +159,22 @@ AudioDeviceGeneric::InitStatus AudioDeviceLinuxPulse::Init() {
 #endif
 
   // RECORDING
-  _ptrThreadRec.reset(new rtc::PlatformThread(
-      RecThreadFunc, this, "webrtc_audio_module_rec_thread"));
-
-  _ptrThreadRec->Start();
-  _ptrThreadRec->SetPriority(rtc::kRealtimePriority);
+  const auto attributes =
+      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime);
+  _ptrThreadRec = rtc::PlatformThread::SpawnJoinable(
+      [this] {
+        while (RecThreadProcess()) {
+        }
+      },
+      "webrtc_audio_module_rec_thread", attributes);
 
   // PLAYOUT
-  _ptrThreadPlay.reset(new rtc::PlatformThread(
-      PlayThreadFunc, this, "webrtc_audio_module_play_thread"));
-  _ptrThreadPlay->Start();
-  _ptrThreadPlay->SetPriority(rtc::kRealtimePriority);
-
+  _ptrThreadPlay = rtc::PlatformThread::SpawnJoinable(
+      [this] {
+        while (PlayThreadProcess()) {
+        }
+      },
+      "webrtc_audio_module_play_thread", attributes);
   _initialized = true;
 
   return InitStatus::OK;
@@ -181,26 +185,19 @@ int32_t AudioDeviceLinuxPulse::Terminate() {
   if (!_initialized) {
     return 0;
   }
-
+  {
+    MutexLock lock(&mutex_);
+    quit_ = true;
+  }
   _mixerManager.Close();
 
   // RECORDING
-  if (_ptrThreadRec) {
-    rtc::PlatformThread* tmpThread = _ptrThreadRec.release();
-
-    _timeEventRec.Set();
-    tmpThread->Stop();
-    delete tmpThread;
-  }
+  _timeEventRec.Set();
+  _ptrThreadRec.Finalize();
 
   // PLAYOUT
-  if (_ptrThreadPlay) {
-    rtc::PlatformThread* tmpThread = _ptrThreadPlay.release();
-
-    _timeEventPlay.Set();
-    tmpThread->Stop();
-    delete tmpThread;
-  }
+  _timeEventPlay.Set();
+  _ptrThreadPlay.Finalize();
 
   // Terminate PulseAudio
   if (TerminatePulseAudio() < 0) {
@@ -869,8 +866,11 @@ int32_t AudioDeviceLinuxPulse::InitPlayout() {
   playSampleSpec.rate = sample_rate_hz_;
 
   // Create a new play stream
-  _playStream =
-      LATE(pa_stream_new)(_paContext, "playStream", &playSampleSpec, NULL);
+  {
+    MutexLock lock(&mutex_);
+    _playStream =
+        LATE(pa_stream_new)(_paContext, "playStream", &playSampleSpec, NULL);
+  }
 
   if (!_playStream) {
     RTC_LOG(LS_ERROR) << "failed to create play stream, err="
@@ -939,9 +939,11 @@ int32_t AudioDeviceLinuxPulse::InitPlayout() {
   LATE(pa_stream_set_state_callback)(_playStream, PaStreamStateCallback, this);
 
   // Mark playout side as initialized
-  _playIsInitialized = true;
-  _sndCardPlayDelay = 0;
-  _sndCardRecDelay = 0;
+  {
+    MutexLock lock(&mutex_);
+    _playIsInitialized = true;
+    _sndCardPlayDelay = 0;
+  }
 
   return 0;
 }
@@ -1057,9 +1059,9 @@ int32_t AudioDeviceLinuxPulse::StartRecording() {
 
   // The audio thread will signal when recording has started.
   _timeEventRec.Set();
-  if (!_recStartEvent.Wait(10000)) {
+  if (!_recStartEvent.Wait(TimeDelta::Seconds(10))) {
     {
-      rtc::CritScope lock(&_critSect);
+      MutexLock lock(&mutex_);
       _startRec = false;
     }
     StopRecording();
@@ -1068,7 +1070,7 @@ int32_t AudioDeviceLinuxPulse::StartRecording() {
   }
 
   {
-    rtc::CritScope lock(&_critSect);
+    MutexLock lock(&mutex_);
     if (_recording) {
       // The recording state is set by the audio thread after recording
       // has started.
@@ -1083,7 +1085,7 @@ int32_t AudioDeviceLinuxPulse::StartRecording() {
 
 int32_t AudioDeviceLinuxPulse::StopRecording() {
   RTC_DCHECK(thread_checker_.IsCurrent());
-  rtc::CritScope lock(&_critSect);
+  MutexLock lock(&mutex_);
 
   if (!_recIsInitialized) {
     return 0;
@@ -1163,18 +1165,18 @@ int32_t AudioDeviceLinuxPulse::StartPlayout() {
 
   // Set state to ensure that playout starts from the audio thread.
   {
-    rtc::CritScope lock(&_critSect);
+    MutexLock lock(&mutex_);
     _startPlay = true;
   }
 
-  // Both |_startPlay| and |_playing| needs protction since they are also
+  // Both `_startPlay` and `_playing` needs protction since they are also
   // accessed on the playout thread.
 
   // The audio thread will signal when playout has started.
   _timeEventPlay.Set();
-  if (!_playStartEvent.Wait(10000)) {
+  if (!_playStartEvent.Wait(TimeDelta::Seconds(10))) {
     {
-      rtc::CritScope lock(&_critSect);
+      MutexLock lock(&mutex_);
       _startPlay = false;
     }
     StopPlayout();
@@ -1183,7 +1185,7 @@ int32_t AudioDeviceLinuxPulse::StartPlayout() {
   }
 
   {
-    rtc::CritScope lock(&_critSect);
+    MutexLock lock(&mutex_);
     if (_playing) {
       // The playing state is set by the audio thread after playout
       // has started.
@@ -1198,7 +1200,7 @@ int32_t AudioDeviceLinuxPulse::StartPlayout() {
 
 int32_t AudioDeviceLinuxPulse::StopPlayout() {
   RTC_DCHECK(thread_checker_.IsCurrent());
-  rtc::CritScope lock(&_critSect);
+  MutexLock lock(&mutex_);
 
   if (!_playIsInitialized) {
     return 0;
@@ -1211,7 +1213,6 @@ int32_t AudioDeviceLinuxPulse::StopPlayout() {
   _playIsInitialized = false;
   _playing = false;
   _sndCardPlayDelay = 0;
-  _sndCardRecDelay = 0;
 
   RTC_LOG(LS_VERBOSE) << "stopping playback";
 
@@ -1253,7 +1254,7 @@ int32_t AudioDeviceLinuxPulse::StopPlayout() {
 }
 
 int32_t AudioDeviceLinuxPulse::PlayoutDelay(uint16_t& delayMS) const {
-  rtc::CritScope lock(&_critSect);
+  MutexLock lock(&mutex_);
   delayMS = (uint16_t)_sndCardPlayDelay;
   return 0;
 }
@@ -1879,7 +1880,7 @@ int32_t AudioDeviceLinuxPulse::LatencyUsecs(pa_stream* stream) {
 
 int32_t AudioDeviceLinuxPulse::ReadRecordedData(const void* bufferData,
                                                 size_t bufferSize)
-    RTC_EXCLUSIVE_LOCKS_REQUIRED(_critSect) {
+    RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
   size_t size = bufferSize;
   uint32_t numRecSamples = _recordBufferSize / (2 * _recChannels);
 
@@ -1887,8 +1888,6 @@ int32_t AudioDeviceLinuxPulse::ReadRecordedData(const void* bufferData,
   uint32_t recDelay =
       (uint32_t)((LatencyUsecs(_recStream) / 1000) +
                  10 * ((size + _recordBufferUsed) / _recordBufferSize));
-
-  _sndCardRecDelay = recDelay;
 
   if (_playStream) {
     // Get the playout delay.
@@ -1949,7 +1948,7 @@ int32_t AudioDeviceLinuxPulse::ReadRecordedData(const void* bufferData,
 int32_t AudioDeviceLinuxPulse::ProcessRecordedData(int8_t* bufferData,
                                                    uint32_t bufferSizeInSamples,
                                                    uint32_t recDelay)
-    RTC_EXCLUSIVE_LOCKS_REQUIRED(_critSect) {
+    RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
   _ptrAudioBuffer->SetRecordedBuffer(bufferData, bufferSizeInSamples);
 
   // TODO(andrew): this is a temporary hack, to avoid non-causal far- and
@@ -1977,20 +1976,16 @@ int32_t AudioDeviceLinuxPulse::ProcessRecordedData(int8_t* bufferData,
   return 0;
 }
 
-bool AudioDeviceLinuxPulse::PlayThreadFunc(void* pThis) {
-  return (static_cast<AudioDeviceLinuxPulse*>(pThis)->PlayThreadProcess());
-}
-
-bool AudioDeviceLinuxPulse::RecThreadFunc(void* pThis) {
-  return (static_cast<AudioDeviceLinuxPulse*>(pThis)->RecThreadProcess());
-}
-
 bool AudioDeviceLinuxPulse::PlayThreadProcess() {
-  if (!_timeEventPlay.Wait(1000)) {
+  if (!_timeEventPlay.Wait(TimeDelta::Seconds(1))) {
     return true;
   }
 
-  rtc::CritScope lock(&_critSect);
+  MutexLock lock(&mutex_);
+
+  if (quit_) {
+    return false;
+  }
 
   if (_startPlay) {
     RTC_LOG(LS_VERBOSE) << "_startPlay true, performing initial actions";
@@ -2154,12 +2149,14 @@ bool AudioDeviceLinuxPulse::PlayThreadProcess() {
 }
 
 bool AudioDeviceLinuxPulse::RecThreadProcess() {
-  if (!_timeEventRec.Wait(1000)) {
+  if (!_timeEventRec.Wait(TimeDelta::Seconds(1))) {
     return true;
   }
 
-  rtc::CritScope lock(&_critSect);
-
+  MutexLock lock(&mutex_);
+  if (quit_) {
+    return false;
+  }
   if (_startRec) {
     RTC_LOG(LS_VERBOSE) << "_startRec true, performing initial actions";
 
@@ -2243,8 +2240,6 @@ bool AudioDeviceLinuxPulse::RecThreadProcess() {
                           << LATE(pa_context_errno)(_paContext);
         break;
       }
-
-      _sndCardRecDelay = (uint32_t)(LatencyUsecs(_recStream) / 1000);
 
       // Drop lock for sigslot dispatch, which could take a while.
       PaUnLock();

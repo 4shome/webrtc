@@ -11,18 +11,19 @@
 #include "p2p/base/transport_description_factory.h"
 
 #include <stddef.h>
+
 #include <memory>
 #include <string>
 
-#include "absl/memory/memory.h"
 #include "p2p/base/transport_description.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/ssl_fingerprint.h"
 
 namespace cricket {
 
-TransportDescriptionFactory::TransportDescriptionFactory()
-    : secure_(SEC_DISABLED) {}
+TransportDescriptionFactory::TransportDescriptionFactory(
+    const webrtc::FieldTrialsView& field_trials)
+    : secure_(SEC_DISABLED), field_trials_(field_trials) {}
 
 TransportDescriptionFactory::~TransportDescriptionFactory() = default;
 
@@ -30,7 +31,7 @@ std::unique_ptr<TransportDescription> TransportDescriptionFactory::CreateOffer(
     const TransportOptions& options,
     const TransportDescription* current_description,
     IceCredentialsIterator* ice_credentials) const {
-  auto desc = absl::make_unique<TransportDescription>();
+  auto desc = std::make_unique<TransportDescription>();
 
   // Generate the ICE credentials if we don't already have them.
   if (!current_description || options.ice_restart) {
@@ -71,7 +72,7 @@ std::unique_ptr<TransportDescription> TransportDescriptionFactory::CreateAnswer(
     return NULL;
   }
 
-  auto desc = absl::make_unique<TransportDescription>();
+  auto desc = std::make_unique<TransportDescription>();
   // Generate the ICE credentials if we don't already have them or ice is
   // being restarted.
   if (!current_description || options.ice_restart) {
@@ -91,11 +92,26 @@ std::unique_ptr<TransportDescription> TransportDescriptionFactory::CreateAnswer(
   if (offer && offer->identity_fingerprint.get()) {
     // The offer supports DTLS, so answer with DTLS, as long as we support it.
     if (secure_ == SEC_ENABLED || secure_ == SEC_REQUIRED) {
-      // Fail if we can't create the fingerprint.
-      // Setting DTLS role to active.
-      ConnectionRole role = (options.prefer_passive_role)
-                                ? CONNECTIONROLE_PASSIVE
-                                : CONNECTIONROLE_ACTIVE;
+      ConnectionRole role = CONNECTIONROLE_NONE;
+      // If the offer does not constrain the role, go with preference.
+      if (offer->connection_role == CONNECTIONROLE_ACTPASS) {
+        role = (options.prefer_passive_role) ? CONNECTIONROLE_PASSIVE
+                                             : CONNECTIONROLE_ACTIVE;
+      } else if (offer->connection_role == CONNECTIONROLE_ACTIVE) {
+        role = CONNECTIONROLE_PASSIVE;
+      } else if (offer->connection_role == CONNECTIONROLE_PASSIVE) {
+        role = CONNECTIONROLE_ACTIVE;
+      } else if (offer->connection_role == CONNECTIONROLE_NONE) {
+        // This case may be reached if a=setup is not present in the SDP.
+        RTC_LOG(LS_WARNING) << "Remote offer connection role is NONE, which is "
+                               "a protocol violation";
+        role = (options.prefer_passive_role) ? CONNECTIONROLE_PASSIVE
+                                             : CONNECTIONROLE_ACTIVE;
+      } else {
+        RTC_LOG(LS_ERROR) << "Remote offer connection role is " << role
+                          << " which is a protocol violation";
+        RTC_DCHECK_NOTREACHED();
+      }
 
       if (!SetSecurityInfo(desc.get(), role)) {
         return NULL;

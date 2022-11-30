@@ -10,13 +10,18 @@
 #ifndef CALL_CALL_CONFIG_H_
 #define CALL_CALL_CONFIG_H_
 
-#include "api/bitrate_constraints.h"
 #include "api/fec_controller.h"
+#include "api/field_trials_view.h"
+#include "api/metronome/metronome.h"
+#include "api/neteq/neteq_factory.h"
 #include "api/network_state_predictor.h"
 #include "api/rtc_error.h"
 #include "api/task_queue/task_queue_factory.h"
+#include "api/transport/bitrate_settings.h"
 #include "api/transport/network_control.h"
 #include "call/audio_state.h"
+#include "call/rtp_transport_config.h"
+#include "call/rtp_transport_controller_send_factory_interface.h"
 
 namespace webrtc {
 
@@ -24,11 +29,14 @@ class AudioProcessing;
 class RtcEventLog;
 
 struct CallConfig {
-  explicit CallConfig(RtcEventLog* event_log);
+  // If `network_task_queue` is set to nullptr, Call will assume that network
+  // related callbacks will be made on the same TQ as the Call instance was
+  // constructed on.
+  explicit CallConfig(RtcEventLog* event_log,
+                      TaskQueueBase* network_task_queue = nullptr);
   CallConfig(const CallConfig&);
+  RtpTransportConfig ExtractTransportConfig() const;
   ~CallConfig();
-
-  RTC_DEPRECATED static constexpr int kDefaultStartBitrateBps = 300000;
 
   // Bitrate config used until valid bitrate estimates are calculated. Also
   // used to cap total bitrate used. This comes from the remote connection.
@@ -42,12 +50,12 @@ struct CallConfig {
 
   // RtcEventLog to use for this call. Required.
   // Use webrtc::RtcEventLog::CreateNull() for a null implementation.
-  RtcEventLog* event_log = nullptr;
+  RtcEventLog* const event_log = nullptr;
 
   // FecController to use for this call.
   FecControllerFactoryInterface* fec_controller_factory = nullptr;
 
-  // Task Queue Factory to be used in this call.
+  // Task Queue Factory to be used in this call. Required.
   TaskQueueFactory* task_queue_factory = nullptr;
 
   // NetworkStatePredictor to use for this call.
@@ -56,6 +64,20 @@ struct CallConfig {
 
   // Network controller factory to use for this call.
   NetworkControllerFactoryInterface* network_controller_factory = nullptr;
+
+  // NetEq factory to use for this call.
+  NetEqFactory* neteq_factory = nullptr;
+
+  // Key-value mapping of internal configurations to apply,
+  // e.g. field trials.
+  const FieldTrialsView* trials = nullptr;
+
+  TaskQueueBase* const network_task_queue_ = nullptr;
+  // RtpTransportControllerSend to use for this call.
+  RtpTransportControllerSendFactoryInterface*
+      rtp_transport_controller_send_factory = nullptr;
+
+  Metronome* metronome = nullptr;
 };
 
 }  // namespace webrtc

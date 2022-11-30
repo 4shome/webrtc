@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "modules/desktop_capture/cropped_desktop_frame.h"
+
 #include <memory>
 #include <utility>
 
-#include "modules/desktop_capture/cropped_desktop_frame.h"
 #include "modules/desktop_capture/desktop_region.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -24,10 +24,11 @@ class CroppedDesktopFrame : public DesktopFrame {
   CroppedDesktopFrame(std::unique_ptr<DesktopFrame> frame,
                       const DesktopRect& rect);
 
+  CroppedDesktopFrame(const CroppedDesktopFrame&) = delete;
+  CroppedDesktopFrame& operator=(const CroppedDesktopFrame&) = delete;
+
  private:
   const std::unique_ptr<DesktopFrame> frame_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(CroppedDesktopFrame);
 };
 
 std::unique_ptr<DesktopFrame> CreateCroppedDesktopFrame(
@@ -35,7 +36,9 @@ std::unique_ptr<DesktopFrame> CreateCroppedDesktopFrame(
     const DesktopRect& rect) {
   RTC_DCHECK(frame);
 
-  if (!DesktopRect::MakeSize(frame->size()).ContainsRect(rect)) {
+  DesktopRect intersection = DesktopRect::MakeSize(frame->size());
+  intersection.IntersectWith(rect);
+  if (intersection.is_empty()) {
     return nullptr;
   }
 
@@ -44,7 +47,7 @@ std::unique_ptr<DesktopFrame> CreateCroppedDesktopFrame(
   }
 
   return std::unique_ptr<DesktopFrame>(
-      new CroppedDesktopFrame(std::move(frame), rect));
+      new CroppedDesktopFrame(std::move(frame), intersection));
 }
 
 CroppedDesktopFrame::CroppedDesktopFrame(std::unique_ptr<DesktopFrame> frame,

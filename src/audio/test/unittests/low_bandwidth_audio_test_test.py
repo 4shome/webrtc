@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright (c) 2017 The WebRTC project authors. All Rights Reserved.
 #
 # Use of this source code is governed by a BSD-style license
@@ -7,10 +7,10 @@
 # in the file PATENTS.  All contributing project authors may
 # be found in the AUTHORS file in the root of the source tree.
 
+from __future__ import absolute_import
 import os
 import unittest
 import sys
-
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.join(SCRIPT_DIR, os.pardir)
@@ -25,22 +25,42 @@ class TestExtractTestRuns(unittest.TestCase):
         expected)
 
   def testLinux(self):
-    self._TestLog(LINUX_LOG,
+    self._TestLog(
+        LINUX_LOG,
         (None, 'GoodNetworkHighBitrate',
          '/webrtc/src/resources/voice_engine/audio_tiny16.wav',
-         '/webrtc/src/out/LowBandwidth_GoodNetworkHighBitrate.wav'),
+         '/webrtc/src/out/LowBandwidth_GoodNetworkHighBitrate.wav', None),
         (None, 'Mobile2GNetwork',
          '/webrtc/src/resources/voice_engine/audio_tiny16.wav',
-         '/webrtc/src/out/LowBandwidth_Mobile2GNetwork.wav'))
+         '/webrtc/src/out/LowBandwidth_Mobile2GNetwork.wav', None),
+        (None, 'PCGoodNetworkHighBitrate',
+         '/webrtc/src/resources/voice_engine/audio_tiny16.wav',
+         '/webrtc/src/out/PCLowBandwidth_PCGoodNetworkHighBitrate.wav',
+         '/webrtc/src/out/PCLowBandwidth_perf_48.json'),
+        (None, 'PCMobile2GNetwork',
+         '/webrtc/src/resources/voice_engine/audio_tiny16.wav',
+         '/webrtc/src/out/PCLowBandwidth_PCMobile2GNetwork.wav',
+         '/webrtc/src/out/PCLowBandwidth_perf_48.json'))
 
   def testAndroid(self):
-    self._TestLog(ANDROID_LOG,
+    self._TestLog(
+        ANDROID_LOG,
         ('ddfa6149', 'Mobile2GNetwork',
          '/sdcard/chromium_tests_root/resources/voice_engine/audio_tiny16.wav',
-         '/sdcard/chromium_tests_root/LowBandwidth_Mobile2GNetwork.wav'),
+         '/sdcard/chromium_tests_root/LowBandwidth_Mobile2GNetwork.wav', None),
         ('TA99205CNO', 'GoodNetworkHighBitrate',
          '/sdcard/chromium_tests_root/resources/voice_engine/audio_tiny16.wav',
-         '/sdcard/chromium_tests_root/LowBandwidth_GoodNetworkHighBitrate.wav'))
+         '/sdcard/chromium_tests_root/LowBandwidth_GoodNetworkHighBitrate.wav',
+         None),
+        ('ddfa6149', 'PCMobile2GNetwork',
+         '/sdcard/chromium_tests_root/resources/voice_engine/audio_tiny16.wav',
+         '/sdcard/chromium_tests_root/PCLowBandwidth_PCMobile2GNetwork.wav',
+         '/sdcard/chromium_tests_root/PCLowBandwidth_perf_48.json'),
+        ('TA99205CNO', 'PCGoodNetworkHighBitrate',
+         '/sdcard/chromium_tests_root/resources/voice_engine/audio_tiny16.wav',
+         ('/sdcard/chromium_tests_root/'
+          'PCLowBandwidth_PCGoodNetworkHighBitrate.wav'),
+         '/sdcard/chromium_tests_root/PCLowBandwidth_perf_48.json'))
 
 
 LINUX_LOG = r'''\
@@ -54,6 +74,14 @@ TEST GoodNetworkHighBitrate /webrtc/src/resources/voice_engine/audio_tiny16.wav 
 TEST Mobile2GNetwork /webrtc/src/resources/voice_engine/audio_tiny16.wav /webrtc/src/out/LowBandwidth_Mobile2GNetwork.wav
 [       OK ] LowBandwidthAudioTest.Mobile2GNetwork (6333 ms)
 [----------] 2 tests from LowBandwidthAudioTest (12265 ms total)
+[----------] 2 tests from PCLowBandwidthAudioTest
+[ RUN      ] PCLowBandwidthAudioTest.PCGoodNetworkHighBitrate
+TEST PCGoodNetworkHighBitrate /webrtc/src/resources/voice_engine/audio_tiny16.wav /webrtc/src/out/PCLowBandwidth_PCGoodNetworkHighBitrate.wav /webrtc/src/out/PCLowBandwidth_perf_48.json
+[       OK ] PCLowBandwidthAudioTest.PCGoodNetworkHighBitrate (5932 ms)
+[ RUN      ] PCLowBandwidthAudioTest.PCMobile2GNetwork
+TEST PCMobile2GNetwork /webrtc/src/resources/voice_engine/audio_tiny16.wav /webrtc/src/out/PCLowBandwidth_PCMobile2GNetwork.wav /webrtc/src/out/PCLowBandwidth_perf_48.json
+[       OK ] PCLowBandwidthAudioTest.PCMobile2GNetwork (6333 ms)
+[----------] 2 tests from PCLowBandwidthAudioTest (12265 ms total)
 
 [----------] Global test environment tear-down
 [==========] 2 tests from 1 test case ran. (12266 ms total)
@@ -165,6 +193,34 @@ I   16.576s run_tests_on_device(TA99205CNO)  [----------] Global test environmen
 I   16.576s run_tests_on_device(TA99205CNO)  [==========] 1 test from 1 test case ran. (5968 ms total)
 I   16.577s run_tests_on_device(TA99205CNO)  [  PASSED  ] 1 test.
 I   16.577s run_tests_on_device(TA99205CNO)  <<ScopedMainEntryLogger
+I   14.078s run_tests_on_device(ddfa6149)  >>ScopedMainEntryLogger
+I   14.078s run_tests_on_device(ddfa6149)  Note: Google Test filter = PCLowBandwidthAudioTest.PCMobile2GNetwork
+I   14.078s run_tests_on_device(ddfa6149)  [==========] Running 1 test from 1 test case.
+I   14.078s run_tests_on_device(ddfa6149)  [----------] Global test environment set-up.
+I   14.078s run_tests_on_device(ddfa6149)  [----------] 1 test from PCLowBandwidthAudioTest
+I   14.078s run_tests_on_device(ddfa6149)  [ RUN      ] PCLowBandwidthAudioTest.PCMobile2GNetwork
+I   14.078s run_tests_on_device(ddfa6149)  TEST PCMobile2GNetwork /sdcard/chromium_tests_root/resources/voice_engine/audio_tiny16.wav /sdcard/chromium_tests_root/PCLowBandwidth_PCMobile2GNetwork.wav /sdcard/chromium_tests_root/PCLowBandwidth_perf_48.json
+I   14.078s run_tests_on_device(ddfa6149)  [       OK ] PCLowBandwidthAudioTest.PCMobile2GNetwork (6438 ms)
+I   14.078s run_tests_on_device(ddfa6149)  [----------] 1 test from PCLowBandwidthAudioTest (6438 ms total)
+I   14.078s run_tests_on_device(ddfa6149)
+I   14.078s run_tests_on_device(ddfa6149)  [----------] Global test environment tear-down
+I   14.079s run_tests_on_device(ddfa6149)  [==========] 1 test from 1 test case ran. (6438 ms total)
+I   14.079s run_tests_on_device(ddfa6149)  [  PASSED  ] 1 test.
+I   14.079s run_tests_on_device(ddfa6149)  <<ScopedMainEntryLogger
+I   16.576s run_tests_on_device(TA99205CNO)  >>ScopedMainEntryLogger
+I   16.576s run_tests_on_device(TA99205CNO)  Note: Google Test filter = PCLowBandwidthAudioTest.PCGoodNetworkHighBitrate
+I   16.576s run_tests_on_device(TA99205CNO)  [==========] Running 1 test from 1 test case.
+I   16.576s run_tests_on_device(TA99205CNO)  [----------] Global test environment set-up.
+I   16.576s run_tests_on_device(TA99205CNO)  [----------] 1 test from PCLowBandwidthAudioTest
+I   16.576s run_tests_on_device(TA99205CNO)  [ RUN      ] PCLowBandwidthAudioTest.PCGoodNetworkHighBitrate
+I   16.576s run_tests_on_device(TA99205CNO)  TEST PCGoodNetworkHighBitrate /sdcard/chromium_tests_root/resources/voice_engine/audio_tiny16.wav /sdcard/chromium_tests_root/PCLowBandwidth_PCGoodNetworkHighBitrate.wav /sdcard/chromium_tests_root/PCLowBandwidth_perf_48.json
+I   16.576s run_tests_on_device(TA99205CNO)  [       OK ] PCLowBandwidthAudioTest.PCGoodNetworkHighBitrate (5968 ms)
+I   16.576s run_tests_on_device(TA99205CNO)  [----------] 1 test from PCLowBandwidthAudioTest (5968 ms total)
+I   16.576s run_tests_on_device(TA99205CNO)
+I   16.576s run_tests_on_device(TA99205CNO)  [----------] Global test environment tear-down
+I   16.576s run_tests_on_device(TA99205CNO)  [==========] 1 test from 1 test case ran. (5968 ms total)
+I   16.577s run_tests_on_device(TA99205CNO)  [  PASSED  ] 1 test.
+I   16.577s run_tests_on_device(TA99205CNO)  <<ScopedMainEntryLogger
 I   16.577s run_tests_on_device(TA99205CNO)  Finished running tests on this device.
 I   16.577s run_tests_on_device(ddfa6149)  Finished running tests on this device.
 I   16.604s Main  FINISHED TRY #1/3
@@ -178,7 +234,6 @@ C   16.605s Main  **************************************************************
 I   16.608s tear_down_device(ddfa6149)  Wrote device cache: /webrtc/src/out/debug-android/device_cache_ddea6549.json
 I   16.608s tear_down_device(TA99205CNO)  Wrote device cache: /webrtc/src/out/debug-android/device_cache_TA99305CMO.json
 '''
-
 
 if __name__ == "__main__":
   unittest.main()

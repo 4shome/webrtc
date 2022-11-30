@@ -12,6 +12,7 @@
 #define MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_AUDIO_NETWORK_ADAPTOR_IMPL_H_
 
 #include <stdio.h>
+
 #include <memory>
 
 #include "absl/types/optional.h"
@@ -20,7 +21,6 @@
 #include "modules/audio_coding/audio_network_adaptor/debug_dump_writer.h"
 #include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor.h"
 #include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
-#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -43,12 +43,12 @@ class AudioNetworkAdaptorImpl final : public AudioNetworkAdaptor {
 
   ~AudioNetworkAdaptorImpl() override;
 
+  AudioNetworkAdaptorImpl(const AudioNetworkAdaptorImpl&) = delete;
+  AudioNetworkAdaptorImpl& operator=(const AudioNetworkAdaptorImpl&) = delete;
+
   void SetUplinkBandwidth(int uplink_bandwidth_bps) override;
 
   void SetUplinkPacketLossFraction(float uplink_packet_loss_fraction) override;
-
-  void SetUplinkRecoverablePacketLossFraction(
-      float uplink_recoverable_packet_loss_fraction) override;
 
   void SetRtt(int rtt_ms) override;
 
@@ -82,8 +82,6 @@ class AudioNetworkAdaptorImpl final : public AudioNetworkAdaptor {
   absl::optional<AudioEncoderRuntimeConfig> prev_config_;
 
   ANAStats stats_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(AudioNetworkAdaptorImpl);
 };
 
 }  // namespace webrtc

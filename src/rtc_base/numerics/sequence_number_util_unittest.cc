@@ -8,11 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "rtc_base/numerics/sequence_number_util.h"
+
 #include <cstdint>
 #include <iterator>
 #include <set>
 
-#include "rtc_base/numerics/sequence_number_util.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -300,6 +301,34 @@ TEST(SeqNumUnwrapper, ManyBackwardWraps) {
     expected -= kMaxStep;
     next_unwrap = (next_unwrap + kMaxStep + 1) % kLargeNumber;
   }
+}
+
+TEST(SeqNumUnwrapper, UnwrapForward) {
+  SeqNumUnwrapper<uint8_t> unwrapper;
+  EXPECT_EQ(255, unwrapper.Unwrap(255));
+  EXPECT_EQ(256, unwrapper.UnwrapForward(0));
+  EXPECT_EQ(511, unwrapper.UnwrapForward(255));
+}
+
+TEST(SeqNumUnwrapper, UnwrapForwardWithDivisor) {
+  SeqNumUnwrapper<uint8_t, 33> unwrapper;
+  EXPECT_EQ(30, unwrapper.UnwrapForward(30));
+  EXPECT_EQ(36, unwrapper.UnwrapForward(3));
+  EXPECT_EQ(63, unwrapper.UnwrapForward(30));
+}
+
+TEST(SeqNumUnwrapper, UnwrapBackwards) {
+  SeqNumUnwrapper<uint8_t> unwrapper;
+  EXPECT_EQ(0, unwrapper.UnwrapBackwards(0));
+  EXPECT_EQ(-2, unwrapper.UnwrapBackwards(254));
+  EXPECT_EQ(-256, unwrapper.UnwrapBackwards(0));
+}
+
+TEST(SeqNumUnwrapper, UnwrapBackwardsWithDivisor) {
+  SeqNumUnwrapper<uint8_t, 33> unwrapper;
+  EXPECT_EQ(0, unwrapper.Unwrap(0));
+  EXPECT_EQ(-2, unwrapper.UnwrapBackwards(31));
+  EXPECT_EQ(-33, unwrapper.UnwrapBackwards(0));
 }
 
 }  // namespace webrtc

@@ -14,6 +14,7 @@
 #include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "api/audio/echo_canceller3_config.h"
+#include "modules/audio_processing/aec3/block.h"
 #include "modules/audio_processing/aec3/delay_estimate.h"
 #include "modules/audio_processing/aec3/downsampled_render_buffer.h"
 #include "modules/audio_processing/aec3/render_delay_buffer.h"
@@ -25,7 +26,8 @@ namespace webrtc {
 class RenderDelayController {
  public:
   static RenderDelayController* Create(const EchoCanceller3Config& config,
-                                       int sample_rate_hz);
+                                       int sample_rate_hz,
+                                       size_t num_capture_channels);
   virtual ~RenderDelayController() = default;
 
   // Resets the delay controller. If the delay confidence is reset, the reset
@@ -39,7 +41,7 @@ class RenderDelayController {
   virtual absl::optional<DelayEstimate> GetDelay(
       const DownsampledRenderBuffer& render_buffer,
       size_t render_delay_buffer_delay,
-      rtc::ArrayView<const float> capture) = 0;
+      const Block& capture) = 0;
 
   // Returns true if clockdrift has been detected.
   virtual bool HasClockdrift() const = 0;

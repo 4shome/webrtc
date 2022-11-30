@@ -11,10 +11,10 @@
 #define MODULES_VIDEO_CODING_TEST_STREAM_GENERATOR_H_
 
 #include <stdint.h>
+
 #include <list>
 
 #include "modules/video_coding/packet.h"
-#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -28,10 +28,14 @@ const int kDefaultFramePeriodMs = 1000 / kDefaultFrameRate;
 class StreamGenerator {
  public:
   StreamGenerator(uint16_t start_seq_num, int64_t current_time);
+
+  StreamGenerator(const StreamGenerator&) = delete;
+  StreamGenerator& operator=(const StreamGenerator&) = delete;
+
   void Init(uint16_t start_seq_num, int64_t current_time);
 
-  // |time_ms| denotes the timestamp you want to put on the frame, and the unit
-  // is millisecond. GenerateFrame will translate |time_ms| into a 90kHz
+  // `time_ms` denotes the timestamp you want to put on the frame, and the unit
+  // is millisecond. GenerateFrame will translate `time_ms` into a 90kHz
   // timestamp and put it on the frame.
   void GenerateFrame(VideoFrameType type,
                      int num_media_packets,
@@ -63,8 +67,6 @@ class StreamGenerator {
   uint16_t sequence_number_;
   int64_t start_time_;
   uint8_t packet_buffer_[kMaxPacketSize];
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(StreamGenerator);
 };
 
 }  // namespace webrtc

@@ -16,8 +16,9 @@
 #include <utility>
 #include <vector>
 
-#include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
 #include "api/crypto/crypto_options.h"
+#include "api/dtls_transport_interface.h"
 #include "p2p/base/dtls_transport_internal.h"
 #include "p2p/base/fake_ice_transport.h"
 #include "rtc_base/fake_ssl_identity.h"
@@ -56,9 +57,15 @@ class FakeDtlsTransport : public DtlsTransportInternal {
 
   // If this constructor is called, a new fake ICE transport will be created,
   // and this FakeDtlsTransport will take the ownership.
-  explicit FakeDtlsTransport(const std::string& name, int component)
-      : FakeDtlsTransport(
-            absl::make_unique<FakeIceTransport>(name, component)) {}
+  FakeDtlsTransport(const std::string& name, int component)
+      : FakeDtlsTransport(std::make_unique<FakeIceTransport>(name, component)) {
+  }
+  FakeDtlsTransport(const std::string& name,
+                    int component,
+                    rtc::Thread* network_thread)
+      : FakeDtlsTransport(std::make_unique<FakeIceTransport>(name,
+                                                             component,
+                                                             network_thread)) {}
 
   ~FakeDtlsTransport() override {
     if (dest_ && dest_->dest_ == this) {
@@ -84,11 +91,14 @@ class FakeDtlsTransport : public DtlsTransportInternal {
     ice_transport_->SetReceiving(receiving);
     set_receiving(receiving);
   }
-  void SetDtlsState(DtlsTransportState state) { dtls_state_ = state; }
+  void SetDtlsState(webrtc::DtlsTransportState state) {
+    dtls_state_ = state;
+    SendDtlsState(this, dtls_state_);
+  }
 
   // Simulates the two DTLS transports connecting to each other.
-  // If |asymmetric| is true this method only affects this FakeDtlsTransport.
-  // If false, it affects |dest| as well.
+  // If `asymmetric` is true this method only affects this FakeDtlsTransport.
+  // If false, it affects `dest` as well.
   void SetDestination(FakeDtlsTransport* dest, bool asymmetric = false) {
     if (dest == dest_) {
       return;
@@ -109,12 +119,11 @@ class FakeDtlsTransport : public DtlsTransportInternal {
       if (!asymmetric) {
         dest->SetDestination(this, true);
       }
-      dtls_state_ = DTLS_TRANSPORT_CONNECTED;
-      // If the |dtls_role_| is unset, set it to SSL_CLIENT by default.
+      // If the `dtls_role_` is unset, set it to SSL_CLIENT by default.
       if (!dtls_role_) {
         dtls_role_ = std::move(rtc::SSL_CLIENT);
       }
-      SignalDtlsState(this, dtls_state_);
+      SetDtlsState(webrtc::DtlsTransportState::kConnected);
       ice_transport_->SetDestination(
           static_cast<FakeIceTransport*>(dest->ice_transport()), asymmetric);
     } else {
@@ -126,20 +135,27 @@ class FakeDtlsTransport : public DtlsTransportInternal {
   }
 
   // Fake DtlsTransportInternal implementation.
-  DtlsTransportState dtls_state() const override { return dtls_state_; }
+  webrtc::DtlsTransportState dtls_state() const override { return dtls_state_; }
   const std::string& transport_name() const override { return transport_name_; }
   int component() const override { return component_; }
   const rtc::SSLFingerprint& dtls_fingerprint() const {
     return dtls_fingerprint_;
   }
-  bool SetRemoteFingerprint(const std::string& alg,
+  webrtc::RTCError SetRemoteParameters(absl::string_view alg,
+                                       const uint8_t* digest,
+                                       size_t digest_len,
+                                       absl::optional<rtc::SSLRole> role) {
+    if (role) {
+      SetDtlsRole(*role);
+    }
+    SetRemoteFingerprint(alg, digest, digest_len);
+    return webrtc::RTCError::OK();
+  }
+  bool SetRemoteFingerprint(absl::string_view alg,
                             const uint8_t* digest,
-                            size_t digest_len) override {
+                            size_t digest_len) {
     dtls_fingerprint_ =
         rtc::SSLFingerprint(alg, rtc::MakeArrayView(digest, digest_len));
-    return true;
-  }
-  bool SetSslMaxProtocolVersion(rtc::SSLProtocolVersion version) override {
     return true;
   }
   bool SetDtlsRole(rtc::SSLRole role) override {
@@ -153,12 +169,6 @@ class FakeDtlsTransport : public DtlsTransportInternal {
     *role = *dtls_role_;
     return true;
   }
-  const webrtc::CryptoOptions& crypto_options() const override {
-    return crypto_options_;
-  }
-  void SetCryptoOptions(const webrtc::CryptoOptions& crypto_options) {
-    crypto_options_ = crypto_options;
-  }
   bool SetLocalCertificate(
       const rtc::scoped_refptr<rtc::RTCCertificate>& certificate) override {
     do_dtls_ = true;
@@ -169,6 +179,13 @@ class FakeDtlsTransport : public DtlsTransportInternal {
     remote_cert_ = cert;
   }
   bool IsDtlsActive() const override { return do_dtls_; }
+  bool GetSslVersionBytes(int* version) const override {
+    if (!do_dtls_) {
+      return false;
+    }
+    *version = 0x0102;
+    return true;
+  }
   bool GetSrtpCryptoSuite(int* crypto_suite) override {
     if (!do_dtls_) {
       return false;
@@ -195,9 +212,9 @@ class FakeDtlsTransport : public DtlsTransportInternal {
     if (!remote_cert_) {
       return nullptr;
     }
-    return absl::make_unique<rtc::SSLCertChain>(remote_cert_->Clone());
+    return std::make_unique<rtc::SSLCertChain>(remote_cert_->Clone());
   }
-  bool ExportKeyingMaterial(const std::string& label,
+  bool ExportKeyingMaterial(absl::string_view label,
                             const uint8_t* context,
                             size_t context_len,
                             bool use_context,
@@ -287,11 +304,10 @@ class FakeDtlsTransport : public DtlsTransportInternal {
   rtc::SSLProtocolVersion ssl_max_version_ = rtc::SSL_PROTOCOL_DTLS_12;
   rtc::SSLFingerprint dtls_fingerprint_;
   absl::optional<rtc::SSLRole> dtls_role_;
-  int crypto_suite_ = rtc::SRTP_AES128_CM_SHA1_80;
+  int crypto_suite_ = rtc::kSrtpAes128CmSha1_80;
   absl::optional<int> ssl_cipher_suite_;
-  webrtc::CryptoOptions crypto_options_;
 
-  DtlsTransportState dtls_state_ = DTLS_TRANSPORT_NEW;
+  webrtc::DtlsTransportState dtls_state_ = webrtc::DtlsTransportState::kNew;
 
   bool receiving_ = false;
   bool writable_ = false;

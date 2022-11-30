@@ -12,6 +12,7 @@
 #define MODULES_AUDIO_DEVICE_ANDROID_BUILD_INFO_H_
 
 #include <jni.h>
+
 #include <memory>
 #include <string>
 
@@ -63,7 +64,7 @@ class BuildInfo {
   SdkCode GetSdkVersion();
 
  private:
-  // Helper method which calls a static getter method with |name| and returns
+  // Helper method which calls a static getter method with `name` and returns
   // a string from Java.
   std::string GetStringFromJava(const char* name);
 

@@ -8,11 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "media/base/fake_rtp.h"
+
 #include <stdint.h>
 #include <string.h>
 
 #include "absl/algorithm/container.h"
-#include "media/base/fake_rtp.h"
 #include "rtc_base/checks.h"
 #include "test/gtest.h"
 
@@ -20,7 +21,7 @@ void CompareHeaderExtensions(const char* packet1,
                              size_t packet1_size,
                              const char* packet2,
                              size_t packet2_size,
-                             const std::vector<int> encrypted_headers,
+                             const std::vector<int>& encrypted_headers,
                              bool expect_equal) {
   // Sanity check: packets must be large enough to contain the RTP header and
   // extensions header.

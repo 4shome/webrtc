@@ -14,6 +14,9 @@
 #include <string>
 
 #include "api/data_channel_interface.h"
+#include "api/transport/data_channel_transport_interface.h"
+#include "media/base/media_channel.h"
+#include "rtc_base/copy_on_write_buffer.h"
 
 namespace rtc {
 class CopyOnWriteBuffer;
@@ -36,6 +39,7 @@ bool WriteDataChannelOpenMessage(const std::string& label,
                                  rtc::CopyOnWriteBuffer* payload);
 
 void WriteDataChannelOpenAckMessage(rtc::CopyOnWriteBuffer* payload);
+
 }  // namespace webrtc
 
 #endif  // PC_SCTP_UTILS_H_

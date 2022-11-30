@@ -10,8 +10,7 @@
 
 #include "rtc_base/net_helper.h"
 
-#include "rtc_base/checks.h"
-#include "rtc_base/ip_address.h"
+#include "absl/strings/string_view.h"
 
 namespace cricket {
 
@@ -20,23 +19,15 @@ const char TCP_PROTOCOL_NAME[] = "tcp";
 const char SSLTCP_PROTOCOL_NAME[] = "ssltcp";
 const char TLS_PROTOCOL_NAME[] = "tls";
 
-int GetIpOverhead(int addr_family) {
-  switch (addr_family) {
-    case AF_INET:  // IPv4
-      return 20;
-    case AF_INET6:  // IPv6
-      return 40;
-    default:
-      RTC_NOTREACHED() << "Invaild address family.";
-      return 0;
-  }
-}
-
-int GetProtocolOverhead(const std::string& protocol) {
+int GetProtocolOverhead(absl::string_view protocol) {
   if (protocol == TCP_PROTOCOL_NAME || protocol == SSLTCP_PROTOCOL_NAME) {
-    return 20;
+    return kTcpHeaderSize;
+  } else if (protocol == UDP_PROTOCOL_NAME) {
+    return kUdpHeaderSize;
+  } else {
+    // TODO(srte): We should crash on unexpected input and handle TLS correctly.
+    return 8;
   }
-  return 8;
 }
 
 }  // namespace cricket

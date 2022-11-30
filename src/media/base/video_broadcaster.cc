@@ -15,6 +15,7 @@
 #include "absl/types/optional.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_rotation.h"
+#include "media/base/video_common.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 
@@ -27,10 +28,17 @@ void VideoBroadcaster::AddOrUpdateSink(
     VideoSinkInterface<webrtc::VideoFrame>* sink,
     const VideoSinkWants& wants) {
   RTC_DCHECK(sink != nullptr);
-  rtc::CritScope cs(&sinks_and_wants_lock_);
+  webrtc::MutexLock lock(&sinks_and_wants_lock_);
   if (!FindSinkPair(sink)) {
-    // |Sink| is a new sink, which didn't receive previous frame.
+    // `Sink` is a new sink, which didn't receive previous frame.
     previous_frame_sent_to_all_sinks_ = false;
+
+    if (last_constraints_.has_value()) {
+      RTC_LOG(LS_INFO) << __func__ << " forwarding stored constraints min_fps "
+                       << last_constraints_->min_fps.value_or(-1) << " max_fps "
+                       << last_constraints_->max_fps.value_or(-1);
+      sink->OnConstraintsChanged(*last_constraints_);
+    }
   }
   VideoSourceBase::AddOrUpdateSink(sink, wants);
   UpdateWants();
@@ -39,23 +47,23 @@ void VideoBroadcaster::AddOrUpdateSink(
 void VideoBroadcaster::RemoveSink(
     VideoSinkInterface<webrtc::VideoFrame>* sink) {
   RTC_DCHECK(sink != nullptr);
-  rtc::CritScope cs(&sinks_and_wants_lock_);
+  webrtc::MutexLock lock(&sinks_and_wants_lock_);
   VideoSourceBase::RemoveSink(sink);
   UpdateWants();
 }
 
 bool VideoBroadcaster::frame_wanted() const {
-  rtc::CritScope cs(&sinks_and_wants_lock_);
+  webrtc::MutexLock lock(&sinks_and_wants_lock_);
   return !sink_pairs().empty();
 }
 
 VideoSinkWants VideoBroadcaster::wants() const {
-  rtc::CritScope cs(&sinks_and_wants_lock_);
+  webrtc::MutexLock lock(&sinks_and_wants_lock_);
   return current_wants_;
 }
 
 void VideoBroadcaster::OnFrame(const webrtc::VideoFrame& frame) {
-  rtc::CritScope cs(&sinks_and_wants_lock_);
+  webrtc::MutexLock lock(&sinks_and_wants_lock_);
   bool current_frame_was_discarded = false;
   for (auto& sink_pair : sink_pairs()) {
     if (sink_pair.wants.rotation_applied &&
@@ -79,11 +87,11 @@ void VideoBroadcaster::OnFrame(const webrtc::VideoFrame& frame) {
               .set_id(frame.id())
               .build();
       sink_pair.sink->OnFrame(black_frame);
-    } else if (!previous_frame_sent_to_all_sinks_) {
-      // Since last frame was not sent to some sinks, full update is needed.
+    } else if (!previous_frame_sent_to_all_sinks_ && frame.has_update_rect()) {
+      // Since last frame was not sent to some sinks, no reliable update
+      // information is available, so we need to clear the update rect.
       webrtc::VideoFrame copy = frame;
-      copy.set_update_rect(
-          webrtc::VideoFrame::UpdateRect{0, 0, frame.width(), frame.height()});
+      copy.clear_update_rect();
       sink_pair.sink->OnFrame(copy);
     } else {
       sink_pair.sink->OnFrame(frame);
@@ -93,14 +101,28 @@ void VideoBroadcaster::OnFrame(const webrtc::VideoFrame& frame) {
 }
 
 void VideoBroadcaster::OnDiscardedFrame() {
+  webrtc::MutexLock lock(&sinks_and_wants_lock_);
   for (auto& sink_pair : sink_pairs()) {
     sink_pair.sink->OnDiscardedFrame();
   }
 }
 
+void VideoBroadcaster::ProcessConstraints(
+    const webrtc::VideoTrackSourceConstraints& constraints) {
+  webrtc::MutexLock lock(&sinks_and_wants_lock_);
+  RTC_LOG(LS_INFO) << __func__ << " min_fps "
+                   << constraints.min_fps.value_or(-1) << " max_fps "
+                   << constraints.max_fps.value_or(-1) << " broadcasting to "
+                   << sink_pairs().size() << " sinks.";
+  last_constraints_ = constraints;
+  for (auto& sink_pair : sink_pairs())
+    sink_pair.sink->OnConstraintsChanged(constraints);
+}
+
 void VideoBroadcaster::UpdateWants() {
   VideoSinkWants wants;
   wants.rotation_applied = false;
+  wants.resolution_alignment = 1;
   for (auto& sink : sink_pairs()) {
     // wants.rotation_applied == ANY(sink.wants.rotation_applied)
     if (sink.wants.rotation_applied) {
@@ -123,6 +145,8 @@ void VideoBroadcaster::UpdateWants() {
     if (sink.wants.max_framerate_fps < wants.max_framerate_fps) {
       wants.max_framerate_fps = sink.wants.max_framerate_fps;
     }
+    wants.resolution_alignment = cricket::LeastCommonMultiple(
+        wants.resolution_alignment, sink.wants.resolution_alignment);
   }
 
   if (wants.target_pixel_count &&

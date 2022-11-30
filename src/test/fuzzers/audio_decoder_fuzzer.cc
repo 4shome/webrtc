@@ -35,12 +35,12 @@ bool ParseInt(const uint8_t** data, size_t* remaining_size, T* value) {
 }
 }  // namespace
 
-// This function reads two bytes from the beginning of |data|, interprets them
+// This function reads two bytes from the beginning of `data`, interprets them
 // as the first packet length, and reads this many bytes if available. The
 // payload is inserted into the decoder, and the process continues until no more
 // data is available. Either AudioDecoder::Decode or
 // AudioDecoder::DecodeRedundant is used, depending on the value of
-// |decode_type|.
+// `decode_type`.
 void FuzzAudioDecoder(DecoderFunctionType decode_type,
                       const uint8_t* data,
                       size_t size,
@@ -74,31 +74,4 @@ void FuzzAudioDecoder(DecoderFunctionType decode_type,
   }
 }
 
-// This function is similar to FuzzAudioDecoder, but also reads fuzzed data into
-// RTP header values. The fuzzed data and values are sent to the decoder's
-// IncomingPacket method.
-void FuzzAudioDecoderIncomingPacket(const uint8_t* data,
-                                    size_t size,
-                                    AudioDecoder* decoder) {
-  const uint8_t* data_ptr = data;
-  size_t remaining_size = size;
-  size_t packet_len;
-  while (ParseInt<size_t, 2>(&data_ptr, &remaining_size, &packet_len)) {
-    uint16_t rtp_sequence_number;
-    if (!ParseInt(&data_ptr, &remaining_size, &rtp_sequence_number))
-      break;
-    uint32_t rtp_timestamp;
-    if (!ParseInt(&data_ptr, &remaining_size, &rtp_timestamp))
-      break;
-    uint32_t arrival_timestamp;
-    if (!ParseInt(&data_ptr, &remaining_size, &arrival_timestamp))
-      break;
-    if (remaining_size < packet_len)
-      break;
-    decoder->IncomingPacket(data_ptr, packet_len, rtp_sequence_number,
-                            rtp_timestamp, arrival_timestamp);
-    data_ptr += packet_len;
-    remaining_size -= packet_len;
-  }
-}
 }  // namespace webrtc

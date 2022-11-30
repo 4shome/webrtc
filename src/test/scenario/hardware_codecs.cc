@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 #include "test/scenario/hardware_codecs.h"
+
 #include "rtc_base/checks.h"
 
 #ifdef WEBRTC_ANDROID
@@ -27,7 +28,8 @@ std::unique_ptr<VideoEncoderFactory> CreateHardwareEncoderFactory() {
 #ifdef WEBRTC_MAC
   return CreateObjCEncoderFactory();
 #else
-  RTC_NOTREACHED() << "Hardware encoder not implemented on this platform.";
+  RTC_DCHECK_NOTREACHED()
+      << "Hardware encoder not implemented on this platform.";
   return nullptr;
 #endif
 #endif
@@ -40,7 +42,8 @@ std::unique_ptr<VideoDecoderFactory> CreateHardwareDecoderFactory() {
 #ifdef WEBRTC_MAC
   return CreateObjCDecoderFactory();
 #else
-  RTC_NOTREACHED() << "Hardware decoder not implemented on this platform.";
+  RTC_DCHECK_NOTREACHED()
+      << "Hardware decoder not implemented on this platform.";
   return nullptr;
 #endif
 #endif

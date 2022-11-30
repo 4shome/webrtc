@@ -13,7 +13,6 @@
 #include <memory>
 #include <utility>
 
-#include "absl/memory/memory.h"
 #include "modules/audio_device/include/test_audio_device.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
@@ -28,8 +27,8 @@ class CopyToFileAudioCapturerTest : public ::testing::Test {
         webrtc::test::OutputPath(), "copy_to_file_audio_capturer_unittest");
     std::unique_ptr<TestAudioDeviceModule::Capturer> delegate =
         TestAudioDeviceModule::CreatePulsedNoiseCapturer(32000, 48000);
-    capturer_ = absl::make_unique<CopyToFileAudioCapturer>(std::move(delegate),
-                                                           temp_filename_);
+    capturer_ = std::make_unique<CopyToFileAudioCapturer>(std::move(delegate),
+                                                          temp_filename_);
   }
 
   void TearDown() override { ASSERT_EQ(remove(temp_filename_.c_str()), 0); }
@@ -45,7 +44,7 @@ TEST_F(CopyToFileAudioCapturerTest, Capture) {
   // Destruct capturer to close wav file.
   capturer_.reset(nullptr);
 
-  // Read resulted file content with |wav_file_capture| and compare with
+  // Read resulted file content with `wav_file_capture` and compare with
   // what was captured.
   std::unique_ptr<TestAudioDeviceModule::Capturer> wav_file_capturer =
       TestAudioDeviceModule::CreateWavFileReader(temp_filename_, 48000);

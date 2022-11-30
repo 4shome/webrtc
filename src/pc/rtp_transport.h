@@ -11,12 +11,23 @@
 #ifndef PC_RTP_TRANSPORT_H_
 #define PC_RTP_TRANSPORT_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <string>
 
+#include "absl/types/optional.h"
 #include "call/rtp_demuxer.h"
+#include "call/video_receive_stream.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
+#include "p2p/base/packet_transport_internal.h"
 #include "pc/rtp_transport_internal.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
+#include "pc/session_description.h"
+#include "rtc_base/async_packet_socket.h"
+#include "rtc_base/copy_on_write_buffer.h"
+#include "rtc_base/network/sent_packet.h"
+#include "rtc_base/network_route.h"
+#include "rtc_base/socket.h"
 
 namespace rtc {
 
@@ -39,26 +50,20 @@ class RtpTransport : public RtpTransportInternal {
   bool rtcp_mux_enabled() const override { return rtcp_mux_enabled_; }
   void SetRtcpMuxEnabled(bool enable) override;
 
-  rtc::PacketTransportInternal* rtp_packet_transport() const override {
+  const std::string& transport_name() const override;
+
+  int SetRtpOption(rtc::Socket::Option opt, int value) override;
+  int SetRtcpOption(rtc::Socket::Option opt, int value) override;
+
+  rtc::PacketTransportInternal* rtp_packet_transport() const {
     return rtp_packet_transport_;
   }
-  void SetRtpPacketTransport(rtc::PacketTransportInternal* rtp) override;
+  void SetRtpPacketTransport(rtc::PacketTransportInternal* rtp);
 
-  rtc::PacketTransportInternal* rtcp_packet_transport() const override {
+  rtc::PacketTransportInternal* rtcp_packet_transport() const {
     return rtcp_packet_transport_;
   }
-  void SetRtcpPacketTransport(rtc::PacketTransportInternal* rtcp) override;
-
-  PacketTransportInterface* GetRtpPacketTransport() const override {
-    return rtp_packet_transport_;
-  }
-  PacketTransportInterface* GetRtcpPacketTransport() const override {
-    return rtcp_packet_transport_;
-  }
-
-  // TODO(zstein): Use these RtcpParameters for configuration elsewhere.
-  RTCError SetParameters(const RtpTransportParameters& parameters) override;
-  RtpTransportParameters GetParameters() const override;
+  void SetRtcpPacketTransport(rtc::PacketTransportInternal* rtcp);
 
   bool IsReadyToSend() const override { return ready_to_send_; }
 
@@ -119,18 +124,6 @@ class RtpTransport : public RtpTransportInternal {
 
   bool IsTransportWritable();
 
-  // SRTP specific methods.
-  // TODO(zhihuang): Improve the inheritance model so that the RtpTransport
-  // doesn't need to implement SRTP specfic methods.
-  RTCError SetSrtpSendKey(const cricket::CryptoParams& params) override {
-    RTC_NOTREACHED();
-    return RTCError::OK();
-  }
-  RTCError SetSrtpReceiveKey(const cricket::CryptoParams& params) override {
-    RTC_NOTREACHED();
-    return RTCError::OK();
-  }
-
   bool rtcp_mux_enabled_;
 
   rtc::PacketTransportInternal* rtp_packet_transport_ = nullptr;
@@ -140,7 +133,6 @@ class RtpTransport : public RtpTransportInternal {
   bool rtp_ready_to_send_ = false;
   bool rtcp_ready_to_send_ = false;
 
-  RtpTransportParameters parameters_;
   RtpDemuxer rtp_demuxer_;
 
   // Used for identifying the MID for RtpDemuxer.

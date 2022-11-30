@@ -11,8 +11,8 @@
 #include "media/engine/fake_webrtc_video_engine.h"
 
 #include <algorithm>
+#include <memory>
 
-#include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "media/base/codec.h"
 #include "media/base/media_constants.h"
@@ -24,19 +24,8 @@ namespace cricket {
 
 namespace {
 
-static const int kEventTimeoutMs = 10000;
-
-bool IsFormatSupported(
-    const std::vector<webrtc::SdpVideoFormat>& supported_formats,
-    const webrtc::SdpVideoFormat& format) {
-  for (const webrtc::SdpVideoFormat& supported_format : supported_formats) {
-    if (IsSameCodec(format.name, format.parameters, supported_format.name,
-                    supported_format.parameters)) {
-      return true;
-    }
-  }
-  return false;
-}
+static constexpr webrtc::TimeDelta kEventTimeout =
+    webrtc::TimeDelta::Seconds(10);
 
 }  // namespace
 
@@ -51,8 +40,8 @@ FakeWebRtcVideoDecoder::~FakeWebRtcVideoDecoder() {
   }
 }
 
-int32_t FakeWebRtcVideoDecoder::InitDecode(const webrtc::VideoCodec*, int32_t) {
-  return WEBRTC_VIDEO_CODEC_OK;
+bool FakeWebRtcVideoDecoder::Configure(const Settings& settings) {
+  return true;
 }
 
 int32_t FakeWebRtcVideoDecoder::Decode(const webrtc::EncodedImage&,
@@ -85,7 +74,7 @@ FakeWebRtcVideoDecoderFactory::GetSupportedFormats() const {
 
   for (const webrtc::SdpVideoFormat& format : supported_codec_formats_) {
     // Don't add same codec twice.
-    if (!IsFormatSupported(formats, format))
+    if (!format.IsCodecInList(formats))
       formats.push_back(format);
   }
 
@@ -95,10 +84,10 @@ FakeWebRtcVideoDecoderFactory::GetSupportedFormats() const {
 std::unique_ptr<webrtc::VideoDecoder>
 FakeWebRtcVideoDecoderFactory::CreateVideoDecoder(
     const webrtc::SdpVideoFormat& format) {
-  if (IsFormatSupported(supported_codec_formats_, format)) {
+  if (format.IsCodecInList(supported_codec_formats_)) {
     num_created_decoders_++;
     std::unique_ptr<FakeWebRtcVideoDecoder> decoder =
-        absl::make_unique<FakeWebRtcVideoDecoder>(this);
+        std::make_unique<FakeWebRtcVideoDecoder>(this);
     decoders_.push_back(decoder.get());
     return decoder;
   }
@@ -113,8 +102,11 @@ void FakeWebRtcVideoDecoderFactory::DecoderDestroyed(
 }
 
 void FakeWebRtcVideoDecoderFactory::AddSupportedVideoCodecType(
-    const webrtc::SdpVideoFormat& format) {
-  supported_codec_formats_.push_back(format);
+    const std::string& name) {
+  // This is to match the default H264 params of cricket::VideoCodec.
+  cricket::VideoCodec video_codec(name);
+  supported_codec_formats_.push_back(
+      webrtc::SdpVideoFormat(video_codec.name, video_codec.params));
 }
 
 int FakeWebRtcVideoDecoderFactory::GetNumCreatedDecoders() {
@@ -137,11 +129,15 @@ FakeWebRtcVideoEncoder::~FakeWebRtcVideoEncoder() {
   }
 }
 
+void FakeWebRtcVideoEncoder::SetFecControllerOverride(
+    webrtc::FecControllerOverride* fec_controller_override) {
+  // Ignored.
+}
+
 int32_t FakeWebRtcVideoEncoder::InitEncode(
     const webrtc::VideoCodec* codecSettings,
-    int32_t numberOfCores,
-    size_t maxPayloadSize) {
-  rtc::CritScope lock(&crit_);
+    const VideoEncoder::Settings& settings) {
+  webrtc::MutexLock lock(&mutex_);
   codec_settings_ = *codecSettings;
   init_encode_event_.Set();
   return WEBRTC_VIDEO_CODEC_OK;
@@ -150,7 +146,7 @@ int32_t FakeWebRtcVideoEncoder::InitEncode(
 int32_t FakeWebRtcVideoEncoder::Encode(
     const webrtc::VideoFrame& inputImage,
     const std::vector<webrtc::VideoFrameType>* frame_types) {
-  rtc::CritScope lock(&crit_);
+  webrtc::MutexLock lock(&mutex_);
   ++num_frames_encoded_;
   init_encode_event_.Set();
   return WEBRTC_VIDEO_CODEC_OK;
@@ -172,28 +168,26 @@ webrtc::VideoEncoder::EncoderInfo FakeWebRtcVideoEncoder::GetEncoderInfo()
     const {
   EncoderInfo info;
   info.is_hardware_accelerated = true;
-  info.has_internal_source = false;
   return info;
 }
 
 bool FakeWebRtcVideoEncoder::WaitForInitEncode() {
-  return init_encode_event_.Wait(kEventTimeoutMs);
+  return init_encode_event_.Wait(kEventTimeout);
 }
 
 webrtc::VideoCodec FakeWebRtcVideoEncoder::GetCodecSettings() {
-  rtc::CritScope lock(&crit_);
+  webrtc::MutexLock lock(&mutex_);
   return codec_settings_;
 }
 
 int FakeWebRtcVideoEncoder::GetNumEncodedFrames() {
-  rtc::CritScope lock(&crit_);
+  webrtc::MutexLock lock(&mutex_);
   return num_frames_encoded_;
 }
 
 // Video encoder factory.
 FakeWebRtcVideoEncoderFactory::FakeWebRtcVideoEncoderFactory()
     : num_created_encoders_(0),
-      encoders_have_internal_sources_(false),
       vp8_factory_mode_(false) {}
 
 std::vector<webrtc::SdpVideoFormat>
@@ -202,7 +196,7 @@ FakeWebRtcVideoEncoderFactory::GetSupportedFormats() const {
 
   for (const webrtc::SdpVideoFormat& format : formats_) {
     // Don't add same codec twice.
-    if (!IsFormatSupported(formats, format))
+    if (!format.IsCodecInList(formats))
       formats.push_back(format);
   }
 
@@ -212,58 +206,44 @@ FakeWebRtcVideoEncoderFactory::GetSupportedFormats() const {
 std::unique_ptr<webrtc::VideoEncoder>
 FakeWebRtcVideoEncoderFactory::CreateVideoEncoder(
     const webrtc::SdpVideoFormat& format) {
-  rtc::CritScope lock(&crit_);
+  webrtc::MutexLock lock(&mutex_);
   std::unique_ptr<webrtc::VideoEncoder> encoder;
-  if (IsFormatSupported(formats_, format)) {
+  if (format.IsCodecInList(formats_)) {
     if (absl::EqualsIgnoreCase(format.name, kVp8CodecName) &&
         !vp8_factory_mode_) {
       // The simulcast adapter will ask this factory for multiple VP8
       // encoders. Enter vp8_factory_mode so that we now create these encoders
       // instead of more adapters.
       vp8_factory_mode_ = true;
-      encoder =
-          absl::make_unique<webrtc::SimulcastEncoderAdapter>(this, format);
+      encoder = std::make_unique<webrtc::SimulcastEncoderAdapter>(this, format);
     } else {
       num_created_encoders_++;
       created_video_encoder_event_.Set();
-      encoder = absl::make_unique<FakeWebRtcVideoEncoder>(this);
+      encoder = std::make_unique<FakeWebRtcVideoEncoder>(this);
       encoders_.push_back(static_cast<FakeWebRtcVideoEncoder*>(encoder.get()));
     }
   }
   return encoder;
 }
 
-webrtc::VideoEncoderFactory::CodecInfo
-FakeWebRtcVideoEncoderFactory::QueryVideoEncoder(
-    const webrtc::SdpVideoFormat& format) const {
-  webrtc::VideoEncoderFactory::CodecInfo info;
-  info.has_internal_source = encoders_have_internal_sources_;
-  info.is_hardware_accelerated = true;
-  return info;
-}
-
 bool FakeWebRtcVideoEncoderFactory::WaitForCreatedVideoEncoders(
     int num_encoders) {
   int64_t start_offset_ms = rtc::TimeMillis();
-  int64_t wait_time = kEventTimeoutMs;
+  int64_t wait_time = kEventTimeout.ms();
   do {
     if (GetNumCreatedEncoders() >= num_encoders)
       return true;
-    wait_time = kEventTimeoutMs - (rtc::TimeMillis() - start_offset_ms);
-  } while (wait_time > 0 && created_video_encoder_event_.Wait(wait_time));
+    wait_time = kEventTimeout.ms() - (rtc::TimeMillis() - start_offset_ms);
+  } while (wait_time > 0 && created_video_encoder_event_.Wait(
+                                webrtc::TimeDelta::Millis(wait_time)));
   return false;
 }
 
 void FakeWebRtcVideoEncoderFactory::EncoderDestroyed(
     FakeWebRtcVideoEncoder* encoder) {
-  rtc::CritScope lock(&crit_);
+  webrtc::MutexLock lock(&mutex_);
   encoders_.erase(std::remove(encoders_.begin(), encoders_.end(), encoder),
                   encoders_.end());
-}
-
-void FakeWebRtcVideoEncoderFactory::set_encoders_have_internal_sources(
-    bool internal_source) {
-  encoders_have_internal_sources_ = internal_source;
 }
 
 void FakeWebRtcVideoEncoderFactory::AddSupportedVideoCodec(
@@ -280,13 +260,13 @@ void FakeWebRtcVideoEncoderFactory::AddSupportedVideoCodecType(
 }
 
 int FakeWebRtcVideoEncoderFactory::GetNumCreatedEncoders() {
-  rtc::CritScope lock(&crit_);
+  webrtc::MutexLock lock(&mutex_);
   return num_created_encoders_;
 }
 
 const std::vector<FakeWebRtcVideoEncoder*>
 FakeWebRtcVideoEncoderFactory::encoders() {
-  rtc::CritScope lock(&crit_);
+  webrtc::MutexLock lock(&mutex_);
   return encoders_;
 }
 

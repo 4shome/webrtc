@@ -12,11 +12,10 @@
                        // that DEFINE_GUID() entries will be defined in this
                        // object file.
 
-#include "modules/video_capture/windows/help_functions_ds.h"
-
-#include "rtc_base/logging.h"
-
 #include <cguid.h>
+
+#include "modules/video_capture/windows/help_functions_ds.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 namespace videocapturemodule {
@@ -31,7 +30,6 @@ LONGLONG GetMaxOfFrameArray(LONGLONG* maxFps, long size) {
 }
 
 IPin* GetInputPin(IBaseFilter* filter) {
-  HRESULT hr;
   IPin* pin = NULL;
   IEnumPins* pPinEnum = NULL;
   filter->EnumPins(&pPinEnum);
@@ -40,7 +38,7 @@ IPin* GetInputPin(IBaseFilter* filter) {
   }
 
   // get first unconnected pin
-  hr = pPinEnum->Reset();  // set to first pin
+  pPinEnum->Reset();  // set to first pin
 
   while (S_OK == pPinEnum->Next(1, &pin, NULL)) {
     PIN_DIRECTION pPinDir;
@@ -61,7 +59,6 @@ IPin* GetInputPin(IBaseFilter* filter) {
 }
 
 IPin* GetOutputPin(IBaseFilter* filter, REFGUID Category) {
-  HRESULT hr;
   IPin* pin = NULL;
   IEnumPins* pPinEnum = NULL;
   filter->EnumPins(&pPinEnum);
@@ -69,7 +66,7 @@ IPin* GetOutputPin(IBaseFilter* filter, REFGUID Category) {
     return NULL;
   }
   // get first unconnected pin
-  hr = pPinEnum->Reset();  // set to first pin
+  pPinEnum->Reset();  // set to first pin
   while (S_OK == pPinEnum->Next(1, &pin, NULL)) {
     PIN_DIRECTION pPinDir;
     pin->QueryDirection(&pPinDir);

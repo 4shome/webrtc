@@ -8,15 +8,19 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "p2p/base/async_stun_tcp_socket.h"
+
 #include <stdint.h>
 #include <string.h>
+
 #include <list>
 #include <memory>
 #include <string>
+#include <utility>
 
-#include "p2p/base/async_stun_tcp_socket.h"
-#include "rtc_base/async_socket.h"
+#include "absl/memory/memory.h"
 #include "rtc_base/network/sent_packet.h"
+#include "rtc_base/socket.h"
 #include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/virtual_socket_server.h"
@@ -56,6 +60,15 @@ static unsigned char kTurnChannelDataMessageWithOddLength[] = {
 static const rtc::SocketAddress kClientAddr("11.11.11.11", 0);
 static const rtc::SocketAddress kServerAddr("22.22.22.22", 0);
 
+class AsyncStunServerTCPSocket : public rtc::AsyncTcpListenSocket {
+ public:
+  explicit AsyncStunServerTCPSocket(std::unique_ptr<rtc::Socket> socket)
+      : AsyncTcpListenSocket(std::move(socket)) {}
+  void HandleIncomingConnection(rtc::Socket* socket) override {
+    SignalNewConnection(this, new AsyncStunTCPSocket(socket));
+  }
+};
+
 class AsyncStunTCPSocketTest : public ::testing::Test,
                                public sigslot::has_slots<> {
  protected:
@@ -65,17 +78,17 @@ class AsyncStunTCPSocketTest : public ::testing::Test,
   virtual void SetUp() { CreateSockets(); }
 
   void CreateSockets() {
-    rtc::AsyncSocket* server =
-        vss_->CreateAsyncSocket(kServerAddr.family(), SOCK_STREAM);
+    std::unique_ptr<rtc::Socket> server =
+        absl::WrapUnique(vss_->CreateSocket(kServerAddr.family(), SOCK_STREAM));
     server->Bind(kServerAddr);
-    recv_socket_.reset(new AsyncStunTCPSocket(server, true));
-    recv_socket_->SignalNewConnection.connect(
+    listen_socket_ =
+        std::make_unique<AsyncStunServerTCPSocket>(std::move(server));
+    listen_socket_->SignalNewConnection.connect(
         this, &AsyncStunTCPSocketTest::OnNewConnection);
 
-    rtc::AsyncSocket* client =
-        vss_->CreateAsyncSocket(kClientAddr.family(), SOCK_STREAM);
+    rtc::Socket* client = vss_->CreateSocket(kClientAddr.family(), SOCK_STREAM);
     send_socket_.reset(AsyncStunTCPSocket::Create(
-        client, kClientAddr, recv_socket_->GetLocalAddress()));
+        client, kClientAddr, listen_socket_->GetLocalAddress()));
     send_socket_->SignalSentPacket.connect(
         this, &AsyncStunTCPSocketTest::OnSentPacket);
     ASSERT_TRUE(send_socket_.get() != NULL);
@@ -95,19 +108,19 @@ class AsyncStunTCPSocketTest : public ::testing::Test,
     ++sent_packets_;
   }
 
-  void OnNewConnection(rtc::AsyncPacketSocket* server,
+  void OnNewConnection(rtc::AsyncListenSocket* /*server*/,
                        rtc::AsyncPacketSocket* new_socket) {
-    listen_socket_.reset(new_socket);
+    recv_socket_ = absl::WrapUnique(new_socket);
     new_socket->SignalReadPacket.connect(this,
                                          &AsyncStunTCPSocketTest::OnReadPacket);
   }
 
   bool Send(const void* data, size_t len) {
     rtc::PacketOptions options;
-    size_t ret =
+    int ret =
         send_socket_->Send(reinterpret_cast<const char*>(data), len, options);
     vss_->ProcessMessagesUntilIdle();
-    return (ret == len);
+    return (ret == static_cast<int>(len));
   }
 
   bool CheckData(const void* data, int len) {
@@ -123,8 +136,8 @@ class AsyncStunTCPSocketTest : public ::testing::Test,
   std::unique_ptr<rtc::VirtualSocketServer> vss_;
   rtc::AutoSocketServerThread thread_;
   std::unique_ptr<AsyncStunTCPSocket> send_socket_;
-  std::unique_ptr<AsyncStunTCPSocket> recv_socket_;
-  std::unique_ptr<rtc::AsyncPacketSocket> listen_socket_;
+  std::unique_ptr<rtc::AsyncListenSocket> listen_socket_;
+  std::unique_ptr<rtc::AsyncPacketSocket> recv_socket_;
   std::list<std::string> recv_packets_;
   int sent_packets_ = 0;
 };
@@ -222,10 +235,6 @@ TEST_F(AsyncStunTCPSocketTest, TestTooSmallMessageBuffer) {
 
 // Verifying a legal large turn message.
 TEST_F(AsyncStunTCPSocketTest, TestMaximumSizeTurnPacket) {
-  // We have problem in getting the SignalWriteEvent from the virtual socket
-  // server. So increasing the send buffer to 64k.
-  // TODO(mallinath) - Remove this setting after we fix vss issue.
-  vss_->set_send_buffer_capacity(64 * 1024);
   unsigned char packet[65539];
   packet[0] = 0x40;
   packet[1] = 0x00;
@@ -236,10 +245,6 @@ TEST_F(AsyncStunTCPSocketTest, TestMaximumSizeTurnPacket) {
 
 // Verifying a legal large stun message.
 TEST_F(AsyncStunTCPSocketTest, TestMaximumSizeStunPacket) {
-  // We have problem in getting the SignalWriteEvent from the virtual socket
-  // server. So increasing the send buffer to 64k.
-  // TODO(mallinath) - Remove this setting after we fix vss issue.
-  vss_->set_send_buffer_capacity(64 * 1024);
   unsigned char packet[65552];
   packet[0] = 0x00;
   packet[1] = 0x01;
@@ -248,8 +253,9 @@ TEST_F(AsyncStunTCPSocketTest, TestMaximumSizeStunPacket) {
   EXPECT_TRUE(Send(packet, sizeof(packet)));
 }
 
-// Investigate why WriteEvent is not signaled from VSS.
-TEST_F(AsyncStunTCPSocketTest, DISABLED_TestWithSmallSendBuffer) {
+// Test that a turn message is sent completely even if it exceeds the socket
+// send buffer capacity.
+TEST_F(AsyncStunTCPSocketTest, TestWithSmallSendBuffer) {
   vss_->set_send_buffer_capacity(1);
   Send(kTurnChannelDataMessageWithOddLength,
        sizeof(kTurnChannelDataMessageWithOddLength));

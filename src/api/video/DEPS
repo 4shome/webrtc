@@ -6,17 +6,36 @@ specific_include_rules = {
     "+modules/video_coding/encoded_frame.h",
   ],
 
-  # Used for a private member variable.
-  "encoded_image\.h": [
-    "+rtc_base/copy_on_write_buffer.h",
+  "encoded_image\.h" : [
+    "+rtc_base/ref_count.h",
   ],
 
   "i010_buffer\.h": [
     "+rtc_base/memory/aligned_malloc.h",
   ],
 
+  "i210_buffer\.h": [
+    "+rtc_base/memory/aligned_malloc.h",
+  ],
+
   "i420_buffer\.h": [
     "+rtc_base/memory/aligned_malloc.h",
+  ],
+
+  "i422_buffer\.h": [
+    "+rtc_base/memory/aligned_malloc.h",
+  ],
+
+  "i444_buffer\.h": [
+    "+rtc_base/memory/aligned_malloc.h",
+  ],
+
+  "nv12_buffer\.h": [
+    "+rtc_base/memory/aligned_malloc.h",
+  ],
+
+  "recordable_encoded_frame\.h": [
+    "+rtc_base/ref_count.h",
   ],
 
   "video_frame\.h": [
@@ -32,5 +51,17 @@ specific_include_rules = {
 
   "video_stream_encoder_create.cc": [
     "+video/video_stream_encoder.h",
+  ],
+
+  "rtp_video_frame_assembler.h": [
+    "+modules/rtp_rtcp/source/rtp_packet_received.h",
+  ],
+
+  "frame_buffer.h": [
+    "+modules/video_coding/utility/decoded_frames_history.h",
+  ],
+
+  "video_frame_matchers\.h": [
+    "+test/gmock.h",
   ],
 }

@@ -9,6 +9,7 @@
  */
 #include "modules/rtp_rtcp/source/rtcp_packet/tmmb_item.h"
 #include "modules/rtp_rtcp/source/rtcp_receiver.h"
+#include "modules/rtp_rtcp/source/rtp_rtcp_interface.h"
 #include "rtc_base/checks.h"
 #include "system_wrappers/include/clock.h"
 
@@ -39,8 +40,12 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
   NullModuleRtpRtcp rtp_rtcp_module;
   SimulatedClock clock(1234);
 
-  RTCPReceiver receiver(&clock, false, nullptr, nullptr, nullptr, nullptr,
-                        nullptr, nullptr, kRtcpIntervalMs, &rtp_rtcp_module);
+  RtpRtcpInterface::Configuration config;
+  config.clock = &clock;
+  config.rtcp_report_interval_ms = kRtcpIntervalMs;
+  config.local_media_ssrc = 1;
+
+  RTCPReceiver receiver(config, &rtp_rtcp_module);
 
   receiver.IncomingPacket(data, size);
 }

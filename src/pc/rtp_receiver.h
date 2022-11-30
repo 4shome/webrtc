@@ -16,11 +16,13 @@
 #define PC_RTP_RECEIVER_H_
 
 #include <stdint.h>
+
 #include <string>
 #include <vector>
 
 #include "absl/types/optional.h"
 #include "api/crypto/frame_decryptor_interface.h"
+#include "api/dtls_transport_interface.h"
 #include "api/media_stream_interface.h"
 #include "api/media_types.h"
 #include "api/rtp_parameters.h"
@@ -32,7 +34,6 @@
 #include "media/base/media_channel.h"
 #include "media/base/video_broadcaster.h"
 #include "pc/video_track_source.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/thread.h"
 
 namespace webrtc {
@@ -40,18 +41,27 @@ namespace webrtc {
 // Internal class used by PeerConnection.
 class RtpReceiverInternal : public RtpReceiverInterface {
  public:
+  // Call on the signaling thread, to let the receiver know that the the
+  // embedded source object should enter a stopped/ended state and the track's
+  // state set to `kEnded`, a final state that cannot be reversed.
   virtual void Stop() = 0;
 
   // Sets the underlying MediaEngine channel associated with this RtpSender.
   // A VoiceMediaChannel should be used for audio RtpSenders and
   // a VideoMediaChannel should be used for video RtpSenders.
-  // Must call SetMediaChannel(nullptr) before the media channel is destroyed.
+  // NOTE:
+  // * SetMediaChannel(nullptr) must be called before the media channel is
+  //   destroyed.
+  // * This method must be invoked on the worker thread.
   virtual void SetMediaChannel(cricket::MediaChannel* media_channel) = 0;
 
   // Configures the RtpReceiver with the underlying media channel, with the
-  // given SSRC as the stream identifier. If |ssrc| is 0, the receiver will
-  // receive packets on unsignaled SSRCs.
+  // given SSRC as the stream identifier.
   virtual void SetupMediaChannel(uint32_t ssrc) = 0;
+
+  // Configures the RtpReceiver with the underlying media channel to receive an
+  // unsignaled receive stream.
+  virtual void SetupUnsignaledMediaChannel() = 0;
 
   virtual void set_transport(
       rtc::scoped_refptr<DtlsTransportInterface> dtls_transport) = 0;
@@ -83,13 +93,6 @@ class RtpReceiverInternal : public RtpReceiverInterface {
 
   static std::vector<rtc::scoped_refptr<MediaStreamInterface>>
   CreateStreamsFromIds(std::vector<std::string> stream_ids);
-
-  static void MaybeAttachFrameDecryptorToMediaChannel(
-      const absl::optional<uint32_t>& ssrc,
-      rtc::Thread* worker_thread,
-      rtc::scoped_refptr<webrtc::FrameDecryptorInterface> frame_decryptor,
-      cricket::MediaChannel* media_channel,
-      bool stopped);
 };
 
 }  // namespace webrtc

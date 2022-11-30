@@ -13,10 +13,12 @@
 
 #include <string>
 
+#include "absl/strings/string_view.h"
+
 // Field trials allow webrtc clients (such as Chrome) to turn on feature code
 // in binaries out in the field and gather information with that.
 //
-// By default WebRTC provides an implementaion of field trials that can be
+// By default WebRTC provides an implementation of field trials that can be
 // found in system_wrappers/source/field_trial.cc. If clients want to provide
 // a custom version, they will have to:
 //
@@ -24,7 +26,7 @@
 //    WEBRTC_EXCLUDE_FIELD_TRIAL_DEFAULT (if GN is used this can be achieved
 //    by setting the GN arg rtc_exclude_field_trial_default to true).
 // 2. Provide an implementation of:
-//    std::string webrtc::field_trial::FindFullName(const std::string& trial).
+//    std::string webrtc::field_trial::FindFullName(absl::string_view trial).
 //
 // They are designed to wire up directly to chrome field trials and to speed up
 // developers by reducing the need to wire APIs to control whether a feature is
@@ -33,7 +35,7 @@
 //
 // 1 - Develop the feature with default behaviour off:
 //
-//   if (FieldTrial::FindFullName("WebRTCExperimenMethod2") == "Enabled")
+//   if (FieldTrial::FindFullName("WebRTCExperimentMethod2") == "Enabled")
 //     method2();
 //   else
 //     method1();
@@ -45,10 +47,10 @@
 //
 // Notes:
 //   - NOT every feature is a candidate to be controlled by this mechanism as
-//     it may require negotation between involved parties (e.g. SDP).
+//     it may require negotiation between involved parties (e.g. SDP).
 //
 // TODO(andresp): since chrome --force-fieldtrials does not marks the trial
-//     as active it does not gets propaged to renderer process. For now one
+//     as active it does not get propagated to the renderer process. For now one
 //     needs to push a config with start_active:true or run a local finch
 //     server.
 //
@@ -61,18 +63,18 @@ namespace field_trial {
 // if the trial does not exists.
 //
 // Note: To keep things tidy append all the trial names with WebRTC.
-std::string FindFullName(const std::string& name);
+std::string FindFullName(absl::string_view name);
 
 // Convenience method, returns true iff FindFullName(name) return a string that
 // starts with "Enabled".
 // TODO(tommi): Make sure all implementations support this.
-inline bool IsEnabled(const char* name) {
+inline bool IsEnabled(absl::string_view name) {
   return FindFullName(name).find("Enabled") == 0;
 }
 
 // Convenience method, returns true iff FindFullName(name) return a string that
 // starts with "Disabled".
-inline bool IsDisabled(const char* name) {
+inline bool IsDisabled(absl::string_view name) {
   return FindFullName(name).find("Disabled") == 0;
 }
 
@@ -83,6 +85,17 @@ inline bool IsDisabled(const char* name) {
 void InitFieldTrialsFromString(const char* trials_string);
 
 const char* GetFieldTrialString();
+
+// Validates the given field trial string.
+bool FieldTrialsStringIsValid(absl::string_view trials_string);
+
+// Merges two field trial strings.
+//
+// If a key (trial) exists twice with conflicting values (groups), the value
+// in 'second' takes precedence.
+// Shall only be called with valid FieldTrial strings.
+std::string MergeFieldTrialsStrings(absl::string_view first,
+                                    absl::string_view second);
 
 }  // namespace field_trial
 }  // namespace webrtc

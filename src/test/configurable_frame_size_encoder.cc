@@ -11,12 +11,12 @@
 #include "test/configurable_frame_size_encoder.h"
 
 #include <string.h>
+
 #include <cstdint>
 #include <type_traits>
 #include <utility>
 
 #include "api/video/encoded_image.h"
-#include "modules/include/module_common_types.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/checks.h"
@@ -27,37 +27,37 @@ namespace test {
 ConfigurableFrameSizeEncoder::ConfigurableFrameSizeEncoder(
     size_t max_frame_size)
     : callback_(NULL),
-      max_frame_size_(max_frame_size),
       current_frame_size_(max_frame_size),
-      buffer_(new uint8_t[max_frame_size]),
-      codec_type_(kVideoCodecGeneric) {
-  memset(buffer_.get(), 0, max_frame_size);
-}
+      codec_type_(kVideoCodecGeneric) {}
 
 ConfigurableFrameSizeEncoder::~ConfigurableFrameSizeEncoder() {}
 
+void ConfigurableFrameSizeEncoder::SetFecControllerOverride(
+    FecControllerOverride* fec_controller_override) {
+  // Ignored.
+}
+
 int32_t ConfigurableFrameSizeEncoder::InitEncode(
     const VideoCodec* codec_settings,
-    int32_t number_of_cores,
-    size_t max_payload_size) {
+    const Settings& settings) {
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
 int32_t ConfigurableFrameSizeEncoder::Encode(
     const VideoFrame& inputImage,
     const std::vector<VideoFrameType>* frame_types) {
-  EncodedImage encodedImage(buffer_.get(), current_frame_size_,
-                            max_frame_size_);
-  encodedImage._completeFrame = true;
+  EncodedImage encodedImage;
+  auto buffer = EncodedImageBuffer::Create(current_frame_size_);
+  memset(buffer->data(), 0, current_frame_size_);
+  encodedImage.SetEncodedData(buffer);
   encodedImage._encodedHeight = inputImage.height();
   encodedImage._encodedWidth = inputImage.width();
   encodedImage._frameType = VideoFrameType::kVideoFrameKey;
   encodedImage.SetTimestamp(inputImage.timestamp());
   encodedImage.capture_time_ms_ = inputImage.render_time_ms();
-  RTPFragmentationHeader* fragmentation = NULL;
   CodecSpecificInfo specific{};
   specific.codecType = codec_type_;
-  callback_->OnEncodedImage(encodedImage, &specific, fragmentation);
+  callback_->OnEncodedImage(encodedImage, &specific);
   if (post_encode_callback_) {
     (*post_encode_callback_)();
   }
@@ -78,7 +78,6 @@ void ConfigurableFrameSizeEncoder::SetRates(
     const RateControlParameters& parameters) {}
 
 int32_t ConfigurableFrameSizeEncoder::SetFrameSize(size_t size) {
-  RTC_DCHECK_LE(size, max_frame_size_);
   current_frame_size_ = size;
   return WEBRTC_VIDEO_CODEC_OK;
 }

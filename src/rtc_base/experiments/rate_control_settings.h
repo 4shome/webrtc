@@ -12,13 +12,40 @@
 #define RTC_BASE_EXPERIMENTS_RATE_CONTROL_SETTINGS_H_
 
 #include "absl/types/optional.h"
-#include "api/transport/webrtc_key_value_config.h"
+#include "api/field_trials_view.h"
+#include "api/units/data_size.h"
 #include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_encoder_config.h"
-#include "rtc_base/experiments/field_trial_parser.h"
-#include "rtc_base/experiments/field_trial_units.h"
+#include "rtc_base/experiments/struct_parameters_parser.h"
 
 namespace webrtc {
+
+struct CongestionWindowConfig {
+  static constexpr char kKey[] = "WebRTC-CongestionWindow";
+  absl::optional<int> queue_size_ms;
+  absl::optional<int> min_bitrate_bps;
+  absl::optional<DataSize> initial_data_window;
+  bool drop_frame_only = false;
+  std::unique_ptr<StructParametersParser> Parser();
+  static CongestionWindowConfig Parse(absl::string_view config);
+};
+
+struct VideoRateControlConfig {
+  static constexpr char kKey[] = "WebRTC-VideoRateControl";
+  absl::optional<double> pacing_factor;
+  bool alr_probing = false;
+  absl::optional<int> vp8_qp_max;
+  absl::optional<int> vp8_min_pixels;
+  bool trust_vp8 = true;
+  bool trust_vp9 = true;
+  bool probe_max_allocation = true;
+  bool bitrate_adjuster = true;
+  bool adjuster_use_headroom = true;
+  bool vp8_s0_boost = false;
+  bool vp8_base_heavy_tl3_alloc = false;
+
+  std::unique_ptr<StructParametersParser> Parser();
+};
 
 class RateControlSettings final {
  public:
@@ -27,7 +54,7 @@ class RateControlSettings final {
 
   static RateControlSettings ParseFromFieldTrials();
   static RateControlSettings ParseFromKeyValueConfig(
-      const WebRtcKeyValueConfig* const key_value_config);
+      const FieldTrialsView* const key_value_config);
 
   // When CongestionWindowPushback is enabled, the pacer is oblivious to
   // the congestion window. The relation between outstanding data and
@@ -35,48 +62,32 @@ class RateControlSettings final {
   bool UseCongestionWindow() const;
   int64_t GetCongestionWindowAdditionalTimeMs() const;
   bool UseCongestionWindowPushback() const;
+  bool UseCongestionWindowDropFrameOnly() const;
   uint32_t CongestionWindowMinPushbackTargetBitrateBps() const;
+  absl::optional<DataSize> CongestionWindowInitialDataWindow() const;
 
   absl::optional<double> GetPacingFactor() const;
   bool UseAlrProbing() const;
 
+  absl::optional<int> LibvpxVp8QpMax() const;
+  absl::optional<int> LibvpxVp8MinPixels() const;
   bool LibvpxVp8TrustedRateController() const;
   bool Vp8BoostBaseLayerQuality() const;
   bool Vp8DynamicRateSettings() const;
   bool LibvpxVp9TrustedRateController() const;
   bool Vp9DynamicRateSettings() const;
 
-  // TODO(bugs.webrtc.org/10272): Remove one of these when we have merged
-  // VideoCodecMode and VideoEncoderConfig::ContentType.
-  double GetSimulcastHysteresisFactor(VideoCodecMode mode) const;
-  double GetSimulcastHysteresisFactor(
-      VideoEncoderConfig::ContentType content_type) const;
+  bool Vp8BaseHeavyTl3RateAllocation() const;
 
   bool TriggerProbeOnMaxAllocatedBitrateChange() const;
   bool UseEncoderBitrateAdjuster() const;
   bool BitrateAdjusterCanUseNetworkHeadroom() const;
 
  private:
-  explicit RateControlSettings(
-      const WebRtcKeyValueConfig* const key_value_config);
+  explicit RateControlSettings(const FieldTrialsView* const key_value_config);
 
-  double GetSimulcastVideoHysteresisFactor() const;
-  double GetSimulcastScreenshareHysteresisFactor() const;
-
-  FieldTrialOptional<int> congestion_window_;
-  FieldTrialOptional<int> congestion_window_pushback_;
-  FieldTrialOptional<double> pacing_factor_;
-  FieldTrialParameter<bool> alr_probing_;
-  FieldTrialParameter<bool> trust_vp8_;
-  FieldTrialParameter<bool> trust_vp9_;
-  FieldTrialParameter<double> video_hysteresis_;
-  FieldTrialParameter<double> screenshare_hysteresis_;
-  FieldTrialParameter<bool> probe_max_allocation_;
-  FieldTrialParameter<bool> bitrate_adjuster_;
-  FieldTrialParameter<bool> adjuster_use_headroom_;
-  FieldTrialParameter<bool> vp8_s0_boost_;
-  FieldTrialParameter<bool> vp8_dynamic_rate_;
-  FieldTrialParameter<bool> vp9_dynamic_rate_;
+  CongestionWindowConfig congestion_window_config_;
+  VideoRateControlConfig video_config_;
 };
 
 }  // namespace webrtc

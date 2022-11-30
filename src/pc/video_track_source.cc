@@ -14,13 +14,13 @@
 
 namespace webrtc {
 
-VideoTrackSource::VideoTrackSource(
-    bool remote)
+VideoTrackSource::VideoTrackSource(bool remote)
     : state_(kInitializing), remote_(remote) {
   worker_thread_checker_.Detach();
 }
 
 void VideoTrackSource::SetState(SourceState new_state) {
+  RTC_DCHECK_RUN_ON(&signaling_thread_checker_);
   if (state_ != new_state) {
     state_ = new_state;
     FireOnChanged();

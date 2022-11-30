@@ -12,13 +12,16 @@
 #define MODULES_DESKTOP_CAPTURE_DESKTOP_CAPTURER_DIFFER_WRAPPER_H_
 
 #include <memory>
-
+#if defined(WEBRTC_USE_GIO)
+#include "modules/desktop_capture/desktop_capture_metadata.h"
+#endif  // defined(WEBRTC_USE_GIO)
 #include "modules/desktop_capture/desktop_capture_types.h"
 #include "modules/desktop_capture/desktop_capturer.h"
 #include "modules/desktop_capture/desktop_frame.h"
 #include "modules/desktop_capture/desktop_geometry.h"
 #include "modules/desktop_capture/shared_desktop_frame.h"
 #include "modules/desktop_capture/shared_memory.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
@@ -30,8 +33,9 @@ namespace webrtc {
 //
 // This class marks entire frame as updated if the frame size or frame stride
 // has been changed.
-class DesktopCapturerDifferWrapper : public DesktopCapturer,
-                                     public DesktopCapturer::Callback {
+class RTC_EXPORT DesktopCapturerDifferWrapper
+    : public DesktopCapturer,
+      public DesktopCapturer::Callback {
  public:
   // Creates a DesktopCapturerDifferWrapper with a DesktopCapturer
   // implementation, and takes its ownership.
@@ -50,7 +54,9 @@ class DesktopCapturerDifferWrapper : public DesktopCapturer,
   bool SelectSource(SourceId id) override;
   bool FocusOnSelectedSource() override;
   bool IsOccluded(const DesktopVector& pos) override;
-
+#if defined(WEBRTC_USE_GIO)
+  DesktopCaptureMetadata GetMetadata() override;
+#endif  // defined(WEBRTC_USE_GIO)
  private:
   // DesktopCapturer::Callback interface.
   void OnCaptureResult(Result result,

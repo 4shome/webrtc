@@ -8,13 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "rtc_base/rtc_certificate.h"
+
 #include <time.h>
+
 #include <memory>
 #include <utility>
 
 #include "rtc_base/checks.h"
 #include "rtc_base/numerics/safe_conversions.h"
-#include "rtc_base/rtc_certificate.h"
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/time_utils.h"
 #include "test/gtest.h"
@@ -31,7 +33,7 @@ class RTCCertificateTest : public ::testing::Test {
  protected:
   scoped_refptr<RTCCertificate> GenerateECDSA() {
     std::unique_ptr<SSLIdentity> identity(
-        SSLIdentity::Generate(kTestCertCommonName, KeyParams::ECDSA()));
+        SSLIdentity::Create(kTestCertCommonName, KeyParams::ECDSA()));
     RTC_CHECK(identity);
     return RTCCertificate::Create(std::move(identity));
   }
@@ -60,7 +62,7 @@ class RTCCertificateTest : public ::testing::Test {
     return cert->HasExpired(now_s * kNumMillisecsPerSec);
   }
 
-  // An RTC_CHECK ensures that |expires_s| this is in valid range of time_t as
+  // An RTC_CHECK ensures that `expires_s` this is in valid range of time_t as
   // is required by SSLIdentityParams. On some 32-bit systems time_t is limited
   // to < 2^31. On such systems this will fail for expiration times of year 2038
   // or later.
@@ -76,7 +78,7 @@ class RTCCertificateTest : public ::testing::Test {
     // is fast to generate.
     params.key_params = KeyParams::ECDSA();
 
-    std::unique_ptr<SSLIdentity> identity(SSLIdentity::GenerateForTest(params));
+    std::unique_ptr<SSLIdentity> identity(SSLIdentity::CreateForTest(params));
     return RTCCertificate::Create(std::move(identity));
   }
 };

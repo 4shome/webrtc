@@ -7,10 +7,12 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
+#include "modules/remote_bitrate_estimator/aimd_rate_control.h"
+
 #include <memory>
 
 #include "api/transport/field_trial_based_config.h"
-#include "modules/remote_bitrate_estimator/aimd_rate_control.h"
+#include "api/units/data_rate.h"
 #include "system_wrappers/include/clock.h"
 #include "test/field_trial.h"
 #include "test/gtest.h"
@@ -20,12 +22,9 @@ namespace {
 
 constexpr int64_t kClockInitialTime = 123456;
 
-constexpr int kMinBwePeriodMsSmoothingExp = 500;
-constexpr int kMinBwePeriodMsNoSmoothingExp = 2000;
-constexpr int kDefaultPeriodMsNoSmoothingExp = 3000;
+constexpr int kMinBwePeriodMs = 2000;
+constexpr int kDefaultPeriodMs = 3000;
 constexpr int kMaxBwePeriodMs = 50000;
-constexpr char kSmoothingExpFieldTrial[] =
-    "WebRTC-Audio-BandwidthSmoothing/Enabled/";
 
 // After an overuse, we back off to 85% to the received bitrate.
 constexpr double kFractionAfterOveruse = 0.85;
@@ -46,7 +45,7 @@ AimdRateControlStates CreateAimdRateControlStates(bool send_side = false) {
 absl::optional<DataRate> OptionalRateFromOptionalBps(
     absl::optional<int> bitrate_bps) {
   if (bitrate_bps) {
-    return DataRate::bps(*bitrate_bps);
+    return DataRate::BitsPerSec(*bitrate_bps);
   } else {
     return absl::nullopt;
   }
@@ -57,12 +56,11 @@ void UpdateRateControl(const AimdRateControlStates& states,
                        int64_t now_ms) {
   RateControlInput input(bandwidth_usage,
                          OptionalRateFromOptionalBps(throughput_estimate));
-  states.aimd_rate_control->Update(&input, Timestamp::ms(now_ms));
+  states.aimd_rate_control->Update(&input, Timestamp::Millis(now_ms));
 }
 void SetEstimate(const AimdRateControlStates& states, int bitrate_bps) {
-  states.aimd_rate_control->SetEstimate(
-      DataRate::bps(bitrate_bps),
-      Timestamp::ms(states.simulated_clock->TimeInMilliseconds()));
+  states.aimd_rate_control->SetEstimate(DataRate::BitsPerSec(bitrate_bps),
+                                        states.simulated_clock->CurrentTime());
 }
 
 }  // namespace
@@ -87,7 +85,7 @@ TEST(AimdRateControlTest, NearMaxIncreaseRateIs5kbpsOn60kbpsAnd100msRtt) {
   auto states = CreateAimdRateControlStates();
   constexpr int kBitrate = 60000;
   SetEstimate(states, kBitrate);
-  states.aimd_rate_control->SetRtt(TimeDelta::ms(100));
+  states.aimd_rate_control->SetRtt(TimeDelta::Millis(100));
   EXPECT_EQ(5000,
             states.aimd_rate_control->GetNearMaxIncreaseRateBpsPerSecond());
 }
@@ -102,22 +100,7 @@ TEST(AimdRateControlTest, GetIncreaseRateAndBandwidthPeriod) {
   EXPECT_NEAR(14000,
               states.aimd_rate_control->GetNearMaxIncreaseRateBpsPerSecond(),
               1000);
-  EXPECT_EQ(kDefaultPeriodMsNoSmoothingExp,
-            states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
-}
-
-TEST(AimdRateControlTest, GetIncreaseRateAndBandwidthPeriodSmoothingExp) {
-  // Smoothing experiment enabled
-  test::ScopedFieldTrials override_field_trials(kSmoothingExpFieldTrial);
-  auto states = CreateAimdRateControlStates();
-  constexpr int kBitrate = 300000;
-  SetEstimate(states, kBitrate);
-  UpdateRateControl(states, BandwidthUsage::kBwOverusing, kBitrate,
-                    states.simulated_clock->TimeInMilliseconds());
-  EXPECT_NEAR(14000,
-              states.aimd_rate_control->GetNearMaxIncreaseRateBpsPerSecond(),
-              1000);
-  EXPECT_EQ(kMinBwePeriodMsSmoothingExp,
+  EXPECT_EQ(kDefaultPeriodMs,
             states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
 }
 
@@ -161,27 +144,13 @@ TEST(AimdRateControlTest, BweNotLimitedByDecreasingAckedBitrate) {
 TEST(AimdRateControlTest, DefaultPeriodUntilFirstOveruse) {
   // Smoothing experiment disabled
   auto states = CreateAimdRateControlStates();
-  states.aimd_rate_control->SetStartBitrate(DataRate::kbps(300));
-  EXPECT_EQ(kDefaultPeriodMsNoSmoothingExp,
+  states.aimd_rate_control->SetStartBitrate(DataRate::KilobitsPerSec(300));
+  EXPECT_EQ(kDefaultPeriodMs,
             states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
   states.simulated_clock->AdvanceTimeMilliseconds(100);
   UpdateRateControl(states, BandwidthUsage::kBwOverusing, 280000,
                     states.simulated_clock->TimeInMilliseconds());
-  EXPECT_NE(kDefaultPeriodMsNoSmoothingExp,
-            states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
-}
-
-TEST(AimdRateControlTest, MinPeriodUntilFirstOveruseSmoothingExp) {
-  // Smoothing experiment enabled
-  test::ScopedFieldTrials override_field_trials(kSmoothingExpFieldTrial);
-  auto states = CreateAimdRateControlStates();
-  states.aimd_rate_control->SetStartBitrate(DataRate::kbps(300));
-  EXPECT_EQ(kMinBwePeriodMsSmoothingExp,
-            states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
-  states.simulated_clock->AdvanceTimeMilliseconds(100);
-  UpdateRateControl(states, BandwidthUsage::kBwOverusing, 280000,
-                    states.simulated_clock->TimeInMilliseconds());
-  EXPECT_NE(kMinBwePeriodMsSmoothingExp,
+  EXPECT_NE(kDefaultPeriodMs,
             states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
 }
 
@@ -201,22 +170,6 @@ TEST(AimdRateControlTest, ExpectedPeriodAfter20kbpsDropAnd5kbpsIncrease) {
   EXPECT_EQ(4000, states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
 }
 
-TEST(AimdRateControlTest, MinPeriodAfterLargeBitrateDecreaseSmoothingExp) {
-  // Smoothing experiment enabled
-  test::ScopedFieldTrials override_field_trials(kSmoothingExpFieldTrial);
-  auto states = CreateAimdRateControlStates();
-  constexpr int kInitialBitrate = 110000;
-  SetEstimate(states, kInitialBitrate);
-  states.simulated_clock->AdvanceTimeMilliseconds(100);
-  // Make such a large drop in bitrate that should be treated as network
-  // degradation.
-  constexpr int kAckedBitrate = kInitialBitrate * 3 / 4 / kFractionAfterOveruse;
-  UpdateRateControl(states, BandwidthUsage::kBwOverusing, kAckedBitrate,
-                    states.simulated_clock->TimeInMilliseconds());
-  EXPECT_EQ(kMinBwePeriodMsSmoothingExp,
-            states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
-}
-
 TEST(AimdRateControlTest, BandwidthPeriodIsNotBelowMin) {
   auto states = CreateAimdRateControlStates();
   constexpr int kInitialBitrate = 10000;
@@ -225,22 +178,7 @@ TEST(AimdRateControlTest, BandwidthPeriodIsNotBelowMin) {
   // Make a small (1.5 kbps) bitrate drop to 8.5 kbps.
   UpdateRateControl(states, BandwidthUsage::kBwOverusing, kInitialBitrate - 1,
                     states.simulated_clock->TimeInMilliseconds());
-  EXPECT_EQ(kMinBwePeriodMsNoSmoothingExp,
-            states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
-}
-
-TEST(AimdRateControlTest, BandwidthPeriodIsNotAboveMaxSmoothingExp) {
-  // Smoothing experiment enabled
-  test::ScopedFieldTrials override_field_trials(kSmoothingExpFieldTrial);
-  auto states = CreateAimdRateControlStates();
-  constexpr int kInitialBitrate = 50000000;
-  SetEstimate(states, kInitialBitrate);
-  states.simulated_clock->AdvanceTimeMilliseconds(100);
-  // Make a large (10 Mbps) bitrate drop to 10 kbps.
-  constexpr int kAckedBitrate = 40000000 / kFractionAfterOveruse;
-  UpdateRateControl(states, BandwidthUsage::kBwOverusing, kAckedBitrate,
-                    states.simulated_clock->TimeInMilliseconds());
-  EXPECT_EQ(kMaxBwePeriodMs,
+  EXPECT_EQ(kMinBwePeriodMs,
             states.aimd_rate_control->GetExpectedBandwidthPeriod().ms());
 }
 
@@ -317,6 +255,62 @@ TEST(AimdRateControlTest, SetEstimateIncreaseBweInAlr) {
             2 * kInitialBitrateBps);
 }
 
+TEST(AimdRateControlTest, SetEstimateUpperLimitedByNetworkEstimate) {
+  auto states = CreateAimdRateControlStates(/*send_side=*/true);
+  NetworkStateEstimate network_estimate;
+  network_estimate.link_capacity_upper = DataRate::KilobitsPerSec(400);
+  states.aimd_rate_control->SetNetworkStateEstimate(network_estimate);
+  SetEstimate(states, 500'000);
+  EXPECT_EQ(states.aimd_rate_control->LatestEstimate(),
+            network_estimate.link_capacity_upper);
+}
+
+TEST(AimdRateControlTest, SetEstimateLowerLimitedByNetworkEstimate) {
+  auto states = CreateAimdRateControlStates(/*send_side=*/true);
+  NetworkStateEstimate network_estimate;
+  network_estimate.link_capacity_lower = DataRate::KilobitsPerSec(400);
+  states.aimd_rate_control->SetNetworkStateEstimate(network_estimate);
+  SetEstimate(states, 100'000);
+  // 0.85 is default backoff factor. (`beta_`)
+  EXPECT_EQ(states.aimd_rate_control->LatestEstimate(),
+            network_estimate.link_capacity_lower * 0.85);
+}
+
+TEST(AimdRateControlTest,
+     SetEstimateIgnoredIfLowerThanNetworkEstimateAndCurrent) {
+  auto states = CreateAimdRateControlStates(/*send_side=*/true);
+  SetEstimate(states, 200'000);
+  ASSERT_EQ(states.aimd_rate_control->LatestEstimate().kbps(), 200);
+  NetworkStateEstimate network_estimate;
+  network_estimate.link_capacity_lower = DataRate::KilobitsPerSec(400);
+  states.aimd_rate_control->SetNetworkStateEstimate(network_estimate);
+  // Ignore the next SetEstimate, since the estimate is lower than 85% of
+  // the network estimate.
+  SetEstimate(states, 100'000);
+  EXPECT_EQ(states.aimd_rate_control->LatestEstimate().kbps(), 200);
+}
+
+TEST(AimdRateControlTest, SetEstimateIgnoresNetworkEstimatesLowerThanCurrent) {
+  test::ScopedFieldTrials override_field_trials(
+      "WebRTC-Bwe-EstimateBoundedIncrease/"
+      "ratio:0.85,ignore_acked:true,ignore_decr:true/");
+  auto states = CreateAimdRateControlStates(/*send_side=*/true);
+  states.aimd_rate_control->SetStartBitrate(DataRate::KilobitsPerSec(30));
+  NetworkStateEstimate network_estimate;
+  network_estimate.link_capacity_upper = DataRate::KilobitsPerSec(400);
+  states.aimd_rate_control->SetNetworkStateEstimate(network_estimate);
+  SetEstimate(states, 500'000);
+  ASSERT_EQ(states.aimd_rate_control->LatestEstimate(),
+            network_estimate.link_capacity_upper * 0.85);
+
+  NetworkStateEstimate lower_network_estimate;
+  lower_network_estimate.link_capacity_upper = DataRate::KilobitsPerSec(300);
+  states.aimd_rate_control->SetNetworkStateEstimate(lower_network_estimate);
+  SetEstimate(states, 500'000);
+  EXPECT_EQ(states.aimd_rate_control->LatestEstimate(),
+            network_estimate.link_capacity_upper * 0.85);
+}
+
 TEST(AimdRateControlTest, EstimateIncreaseWhileNotInAlr) {
   // Allow the estimate to increase as long as alr is not detected to ensure
   // tha BWE can not get stuck at a certain bitrate.
@@ -334,6 +328,156 @@ TEST(AimdRateControlTest, EstimateIncreaseWhileNotInAlr) {
     states.simulated_clock->AdvanceTimeMilliseconds(100);
   }
   EXPECT_GT(states.aimd_rate_control->LatestEstimate().bps(),
+            kInitialBitrateBps);
+}
+
+TEST(AimdRateControlTest, EstimateNotLimitedByNetworkEstimateIfDisabled) {
+  test::ScopedFieldTrials override_field_trials(
+      "WebRTC-Bwe-EstimateBoundedIncrease/Disabled/");
+  auto states = CreateAimdRateControlStates(/*send_side=*/true);
+  constexpr int kInitialBitrateBps = 123000;
+  SetEstimate(states, kInitialBitrateBps);
+  states.aimd_rate_control->SetInApplicationLimitedRegion(false);
+  NetworkStateEstimate network_estimate;
+  network_estimate.link_capacity_upper = DataRate::KilobitsPerSec(150);
+  states.aimd_rate_control->SetNetworkStateEstimate(network_estimate);
+
+  for (int i = 0; i < 100; ++i) {
+    UpdateRateControl(states, BandwidthUsage::kBwNormal, absl::nullopt,
+                      states.simulated_clock->TimeInMilliseconds());
+    states.simulated_clock->AdvanceTimeMilliseconds(100);
+  }
+  EXPECT_GT(states.aimd_rate_control->LatestEstimate(),
+            network_estimate.link_capacity_upper);
+}
+
+TEST(AimdRateControlTest,
+     EstimateSlowlyIncreaseToUpperLinkCapacityEstimateIfConfigured) {
+  // Even if alr is detected, the delay based estimator is allowed to increase
+  // up to a percentage of upper link capacity.
+  test::ScopedFieldTrials override_field_trials(
+      "WebRTC-Bwe-EstimateBoundedIncrease/"
+      "ratio:0.85,ignore_acked:true,immediate_incr:false/"
+      "WebRTC-DontIncreaseDelayBasedBweInAlr/Enabled/");
+  auto states = CreateAimdRateControlStates(/*send_side=*/true);
+  constexpr int kInitialBitrateBps = 123000;
+  SetEstimate(states, kInitialBitrateBps);
+  states.aimd_rate_control->SetInApplicationLimitedRegion(true);
+
+  NetworkStateEstimate network_estimate;
+  network_estimate.link_capacity_upper = DataRate::KilobitsPerSec(200);
+  states.aimd_rate_control->SetNetworkStateEstimate(network_estimate);
+  for (int i = 0; i < 10; ++i) {
+    UpdateRateControl(states, BandwidthUsage::kBwNormal, absl::nullopt,
+                      states.simulated_clock->TimeInMilliseconds());
+    states.simulated_clock->AdvanceTimeMilliseconds(100);
+    EXPECT_LT(states.aimd_rate_control->LatestEstimate(),
+              network_estimate.link_capacity_upper * 0.85);
+  }
+  for (int i = 0; i < 50; ++i) {
+    UpdateRateControl(states, BandwidthUsage::kBwNormal, absl::nullopt,
+                      states.simulated_clock->TimeInMilliseconds());
+    states.simulated_clock->AdvanceTimeMilliseconds(100);
+  }
+  EXPECT_EQ(states.aimd_rate_control->LatestEstimate(),
+            network_estimate.link_capacity_upper * 0.85);
+}
+
+TEST(AimdRateControlTest,
+     EstimateImmediatelyIncreaseToUpperLinkCapacityEstimateIfConfigured) {
+  // Even if alr is detected, the delay based estimator is allowed to increase
+  // up to a percentage of upper link capacity.
+  test::ScopedFieldTrials override_field_trials(
+      "WebRTC-Bwe-EstimateBoundedIncrease/"
+      "ratio:0.85,ignore_acked:true,immediate_incr:true/"
+      "WebRTC-DontIncreaseDelayBasedBweInAlr/Enabled/");
+  auto states = CreateAimdRateControlStates(/*send_side=*/true);
+  constexpr int kInitialBitrateBps = 123000;
+  SetEstimate(states, kInitialBitrateBps);
+  states.aimd_rate_control->SetInApplicationLimitedRegion(true);
+
+  NetworkStateEstimate network_estimate;
+  network_estimate.link_capacity_upper = DataRate::KilobitsPerSec(200);
+  states.aimd_rate_control->SetNetworkStateEstimate(network_estimate);
+  UpdateRateControl(states, BandwidthUsage::kBwNormal, absl::nullopt,
+                    states.simulated_clock->TimeInMilliseconds());
+  EXPECT_EQ(states.aimd_rate_control->LatestEstimate(),
+            network_estimate.link_capacity_upper * 0.85);
+}
+
+TEST(AimdRateControlTest, EstimateNotLoweredByNetworkEstimate) {
+  // The delay based estimator is allowed to increase up to a percentage of
+  // upper link capacity but does not decrease unless the delay detector
+  // discover an overuse.
+  test::ScopedFieldTrials override_field_trials(
+      "WebRTC-Bwe-EstimateBoundedIncrease/"
+      "ratio:0.85,ignore_acked:true,ignore_decr:true/"
+      "WebRTC-DontIncreaseDelayBasedBweInAlr/Enabled/");
+  auto states = CreateAimdRateControlStates(/*send_side=*/true);
+  constexpr int kInitialBitrateBps = 123000;
+  constexpr int kEstimatedThroughputBps = 30'000;
+  SetEstimate(states, kInitialBitrateBps);
+
+  NetworkStateEstimate network_estimate;
+  network_estimate.link_capacity_upper = DataRate::KilobitsPerSec(200);
+  states.aimd_rate_control->SetNetworkStateEstimate(network_estimate);
+  for (int i = 0; i < 100; ++i) {
+    UpdateRateControl(states, BandwidthUsage::kBwNormal,
+                      kEstimatedThroughputBps,
+                      states.simulated_clock->TimeInMilliseconds());
+    states.simulated_clock->AdvanceTimeMilliseconds(100);
+  }
+  DataRate estimate_after_increase = states.aimd_rate_control->LatestEstimate();
+  ASSERT_EQ(estimate_after_increase,
+            network_estimate.link_capacity_upper * 0.85);
+
+  // A lower network estimate does not decrease the estimate immediately,
+  // but the estimate is not allowed to increase.
+  network_estimate.link_capacity_upper = DataRate::KilobitsPerSec(100);
+  network_estimate.link_capacity_lower = DataRate::KilobitsPerSec(80);
+  states.aimd_rate_control->SetNetworkStateEstimate(network_estimate);
+  for (int i = 0; i < 10; ++i) {
+    UpdateRateControl(states, BandwidthUsage::kBwNormal,
+                      kEstimatedThroughputBps,
+                      states.simulated_clock->TimeInMilliseconds());
+    states.simulated_clock->AdvanceTimeMilliseconds(100);
+    EXPECT_EQ(states.aimd_rate_control->LatestEstimate(),
+              estimate_after_increase);
+  }
+
+  // If the detector detects and overuse, BWE drops to a value relative the
+  // network estimate.
+  UpdateRateControl(states, BandwidthUsage::kBwOverusing,
+                    kEstimatedThroughputBps,
+                    states.simulated_clock->TimeInMilliseconds());
+  EXPECT_LT(states.aimd_rate_control->LatestEstimate(),
+            network_estimate.link_capacity_lower);
+  EXPECT_GT(states.aimd_rate_control->LatestEstimate().bps(),
+            kEstimatedThroughputBps);
+}
+
+TEST(AimdRateControlTest, EstimateDoesNotIncreaseInAlrIfNetworkEstimateNotSet) {
+  // When alr is detected, the delay based estimator is not allowed to increase
+  // bwe since there will be no feedback from the network if the new estimate
+  // is correct.
+  test::ScopedFieldTrials override_field_trials(
+      "WebRTC-Bwe-EstimateBoundedIncrease/ratio:0.85,ignore_acked:true/"
+      "WebRTC-DontIncreaseDelayBasedBweInAlr/Enabled/");
+  auto states = CreateAimdRateControlStates(/*send_side=*/true);
+  constexpr int kInitialBitrateBps = 123000;
+  SetEstimate(states, kInitialBitrateBps);
+  states.aimd_rate_control->SetInApplicationLimitedRegion(true);
+  UpdateRateControl(states, BandwidthUsage::kBwNormal, kInitialBitrateBps,
+                    states.simulated_clock->TimeInMilliseconds());
+  ASSERT_EQ(states.aimd_rate_control->LatestEstimate().bps(),
+            kInitialBitrateBps);
+
+  for (int i = 0; i < 100; ++i) {
+    UpdateRateControl(states, BandwidthUsage::kBwNormal, absl::nullopt,
+                      states.simulated_clock->TimeInMilliseconds());
+    states.simulated_clock->AdvanceTimeMilliseconds(100);
+  }
+  EXPECT_EQ(states.aimd_rate_control->LatestEstimate().bps(),
             kInitialBitrateBps);
 }
 

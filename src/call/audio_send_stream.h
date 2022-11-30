@@ -23,17 +23,17 @@
 #include "api/call/transport.h"
 #include "api/crypto/crypto_options.h"
 #include "api/crypto/frame_encryptor_interface.h"
-#include "api/media_transport_interface.h"
+#include "api/frame_transformer_interface.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
+#include "call/audio_sender.h"
 #include "call/rtp_config.h"
 #include "modules/audio_processing/include/audio_processing_statistics.h"
+#include "modules/rtp_rtcp/include/report_block_data.h"
 
 namespace webrtc {
 
-class AudioFrame;
-
-class AudioSendStream {
+class AudioSendStream : public AudioSender {
  public:
   struct Stats {
     Stats();
@@ -41,7 +41,8 @@ class AudioSendStream {
 
     // TODO(solenberg): Harmonize naming and defaults with receive stream stats.
     uint32_t local_ssrc = 0;
-    int64_t bytes_sent = 0;
+    int64_t payload_bytes_sent = 0;
+    int64_t header_and_padding_bytes_sent = 0;
     // https://w3c.github.io/webrtc-stats/#dom-rtcoutboundrtpstreamstats-retransmittedbytessent
     uint64_t retransmitted_bytes_sent = 0;
     int32_t packets_sent = 0;
@@ -51,25 +52,28 @@ class AudioSendStream {
     float fraction_lost = -1.0f;
     std::string codec_name;
     absl::optional<int> codec_payload_type;
-    int32_t ext_seqnum = -1;
     int32_t jitter_ms = -1;
     int64_t rtt_ms = -1;
-    int32_t audio_level = -1;
+    int16_t audio_level = 0;
     // See description of "totalAudioEnergy" in the WebRTC stats spec:
     // https://w3c.github.io/webrtc-stats/#dom-rtcmediastreamtrackstats-totalaudioenergy
     double total_input_energy = 0.0;
     double total_input_duration = 0.0;
-    bool typing_noise_detected = false;
 
     ANAStats ana_statistics;
     AudioProcessingStats apm_statistics;
 
     int64_t target_bitrate_bps = 0;
+    // A snapshot of Report Blocks with additional data of interest to
+    // statistics. Within this list, the sender-source SSRC pair is unique and
+    // per-pair the ReportBlockData represents the latest Report Block that was
+    // received for that pair.
+    std::vector<ReportBlockData> report_block_datas;
+    uint32_t nacks_rcvd = 0;
   };
 
   struct Config {
     Config() = delete;
-    Config(Transport* send_transport, MediaTransportInterface* media_transport);
     explicit Config(Transport* send_transport);
     ~Config();
     std::string ToString() const;
@@ -108,8 +112,6 @@ class AudioSendStream {
     // the entire life of the AudioSendStream and is owned by the API client.
     Transport* send_transport = nullptr;
 
-    MediaTransportInterface* media_transport = nullptr;
-
     // Bitrate limits used for variable audio bitrate streams. Set both to -1 to
     // disable audio bitrate adaptation.
     // Note: This is still an experimental feature and not ready for real usage.
@@ -137,7 +139,9 @@ class AudioSendStream {
       SdpAudioFormat format;
       bool nack_enabled = false;
       bool transport_cc_enabled = false;
+      bool enable_non_sender_rtt = false;
       absl::optional<int> cng_payload_type;
+      absl::optional<int> red_payload_type;
       // If unset, use the encoder's default target bitrate.
       absl::optional<int> target_bitrate_bps;
     };
@@ -156,6 +160,10 @@ class AudioSendStream {
     // encryptor in whatever way the caller choses. This is not required by
     // default.
     rtc::scoped_refptr<webrtc::FrameEncryptorInterface> frame_encryptor;
+
+    // An optional frame transformer used by insertable streams to transform
+    // encoded frames.
+    rtc::scoped_refptr<webrtc::FrameTransformerInterface> frame_transformer;
   };
 
   virtual ~AudioSendStream() = default;
@@ -172,10 +180,6 @@ class AudioSendStream {
   // When a stream is stopped, it can't receive, process or deliver packets.
   virtual void Stop() = 0;
 
-  // Encode and send audio.
-  virtual void SendAudioData(
-      std::unique_ptr<webrtc::AudioFrame> audio_frame) = 0;
-
   // TODO(solenberg): Make payload_type a config property instead.
   virtual bool SendTelephoneEvent(int payload_type,
                                   int payload_frequency,
@@ -187,6 +191,7 @@ class AudioSendStream {
   virtual Stats GetStats() const = 0;
   virtual Stats GetStats(bool has_remote_tracks) const = 0;
 };
+
 }  // namespace webrtc
 
 #endif  // CALL_AUDIO_SEND_STREAM_H_

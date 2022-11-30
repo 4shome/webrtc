@@ -12,11 +12,12 @@
 #define MODULES_AUDIO_PROCESSING_AEC3_ERL_ESTIMATOR_H_
 
 #include <stddef.h>
+
 #include <array>
+#include <vector>
 
 #include "api/array_view.h"
 #include "modules/audio_processing/aec3/aec3_common.h"
-#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -26,13 +27,18 @@ class ErlEstimator {
   explicit ErlEstimator(size_t startup_phase_length_blocks_);
   ~ErlEstimator();
 
+  ErlEstimator(const ErlEstimator&) = delete;
+  ErlEstimator& operator=(const ErlEstimator&) = delete;
+
   // Resets the ERL estimation.
   void Reset();
 
   // Updates the ERL estimate.
-  void Update(bool converged_filter,
-              rtc::ArrayView<const float> render_spectrum,
-              rtc::ArrayView<const float> capture_spectrum);
+  void Update(const std::vector<bool>& converged_filters,
+              rtc::ArrayView<const std::array<float, kFftLengthBy2Plus1>>
+                  render_spectra,
+              rtc::ArrayView<const std::array<float, kFftLengthBy2Plus1>>
+                  capture_spectra);
 
   // Returns the most recent ERL estimate.
   const std::array<float, kFftLengthBy2Plus1>& Erl() const { return erl_; }
@@ -45,7 +51,6 @@ class ErlEstimator {
   float erl_time_domain_;
   int hold_counter_time_domain_;
   size_t blocks_since_reset_ = 0;
-  RTC_DISALLOW_COPY_AND_ASSIGN(ErlEstimator);
 };
 
 }  // namespace webrtc

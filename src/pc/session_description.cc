@@ -10,12 +10,10 @@
 
 #include "pc/session_description.h"
 
-#include <algorithm>
-#include <utility>
-
 #include "absl/algorithm/container.h"
 #include "absl/memory/memory.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/strings/string_builder.h"
 
 namespace cricket {
 namespace {
@@ -67,17 +65,17 @@ const std::string* ContentGroup::FirstContentName() const {
   return (!content_names_.empty()) ? &(*content_names_.begin()) : NULL;
 }
 
-bool ContentGroup::HasContentName(const std::string& content_name) const {
+bool ContentGroup::HasContentName(absl::string_view content_name) const {
   return absl::c_linear_search(content_names_, content_name);
 }
 
-void ContentGroup::AddContentName(const std::string& content_name) {
+void ContentGroup::AddContentName(absl::string_view content_name) {
   if (!HasContentName(content_name)) {
-    content_names_.push_back(content_name);
+    content_names_.emplace_back(content_name);
   }
 }
 
-bool ContentGroup::RemoveContentName(const std::string& content_name) {
+bool ContentGroup::RemoveContentName(absl::string_view content_name) {
   ContentNames::iterator iter = absl::c_find(content_names_, content_name);
   if (iter == content_names_.end()) {
     return false;
@@ -86,29 +84,27 @@ bool ContentGroup::RemoveContentName(const std::string& content_name) {
   return true;
 }
 
+std::string ContentGroup::ToString() const {
+  rtc::StringBuilder acc;
+  acc << semantics_ << "(";
+  if (!content_names_.empty()) {
+    for (const auto& name : content_names_) {
+      acc << name << " ";
+    }
+  }
+  acc << ")";
+  return acc.Release();
+}
+
 SessionDescription::SessionDescription() = default;
 SessionDescription::SessionDescription(const SessionDescription&) = default;
 
-SessionDescription::~SessionDescription() {
-  for (ContentInfos::iterator content = contents_.begin();
-       content != contents_.end(); ++content) {
-    delete content->description;
-  }
-}
+SessionDescription::~SessionDescription() {}
 
 std::unique_ptr<SessionDescription> SessionDescription::Clone() const {
-  // Copy the non-special portions using the private copy constructor.
-  auto copy = absl::WrapUnique(new SessionDescription(*this));
-  // Copy all ContentDescriptions.
-  for (ContentInfos::iterator content = copy->contents_.begin();
-       content != copy->contents().end(); ++content) {
-    content->description = content->description->Copy();
-  }
-  return copy;
-}
-
-SessionDescription* SessionDescription::Copy() const {
-  return Clone().release();
+  // Copy using the private copy constructor.
+  // This will clone the descriptions using ContentInfo's copy constructor.
+  return absl::WrapUnique(new SessionDescription(*this));
 }
 
 const ContentInfo* SessionDescription::GetContentByName(
@@ -149,53 +145,55 @@ const ContentInfo* SessionDescription::FirstContent() const {
   return (contents_.empty()) ? NULL : &(*contents_.begin());
 }
 
-void SessionDescription::AddContent(const std::string& name,
-                                    MediaProtocolType type,
-                                    MediaContentDescription* description) {
+void SessionDescription::AddContent(
+    const std::string& name,
+    MediaProtocolType type,
+    std::unique_ptr<MediaContentDescription> description) {
   ContentInfo content(type);
   content.name = name;
-  content.description = description;
-  AddContent(&content);
+  content.set_media_description(std::move(description));
+  AddContent(std::move(content));
 }
 
-void SessionDescription::AddContent(const std::string& name,
-                                    MediaProtocolType type,
-                                    bool rejected,
-                                    MediaContentDescription* description) {
+void SessionDescription::AddContent(
+    const std::string& name,
+    MediaProtocolType type,
+    bool rejected,
+    std::unique_ptr<MediaContentDescription> description) {
   ContentInfo content(type);
   content.name = name;
   content.rejected = rejected;
-  content.description = description;
-  AddContent(&content);
+  content.set_media_description(std::move(description));
+  AddContent(std::move(content));
 }
 
-void SessionDescription::AddContent(const std::string& name,
-                                    MediaProtocolType type,
-                                    bool rejected,
-                                    bool bundle_only,
-                                    MediaContentDescription* description) {
+void SessionDescription::AddContent(
+    const std::string& name,
+    MediaProtocolType type,
+    bool rejected,
+    bool bundle_only,
+    std::unique_ptr<MediaContentDescription> description) {
   ContentInfo content(type);
   content.name = name;
   content.rejected = rejected;
   content.bundle_only = bundle_only;
-  content.description = description;
-  AddContent(&content);
+  content.set_media_description(std::move(description));
+  AddContent(std::move(content));
 }
 
-void SessionDescription::AddContent(ContentInfo* content) {
+void SessionDescription::AddContent(ContentInfo&& content) {
   if (extmap_allow_mixed()) {
     // Mixed support on session level overrides setting on media level.
-    content->description->set_extmap_allow_mixed_enum(
+    content.media_description()->set_extmap_allow_mixed_enum(
         MediaContentDescription::kSession);
   }
-  contents_.push_back(std::move(*content));
+  contents_.push_back(std::move(content));
 }
 
 bool SessionDescription::RemoveContentByName(const std::string& name) {
   for (ContentInfos::iterator content = contents_.begin();
        content != contents_.end(); ++content) {
     if (content->name == name) {
-      delete content->description;
       contents_.erase(content);
       return true;
     }
@@ -270,6 +268,45 @@ const ContentGroup* SessionDescription::GetGroupByName(
     }
   }
   return NULL;
+}
+
+std::vector<const ContentGroup*> SessionDescription::GetGroupsByName(
+    const std::string& name) const {
+  std::vector<const ContentGroup*> content_groups;
+  for (const ContentGroup& content_group : content_groups_) {
+    if (content_group.semantics() == name) {
+      content_groups.push_back(&content_group);
+    }
+  }
+  return content_groups;
+}
+
+ContentInfo::~ContentInfo() {
+}
+
+// Copy operator.
+ContentInfo::ContentInfo(const ContentInfo& o)
+    : name(o.name),
+      type(o.type),
+      rejected(o.rejected),
+      bundle_only(o.bundle_only),
+      description_(o.description_->Clone()) {}
+
+ContentInfo& ContentInfo::operator=(const ContentInfo& o) {
+  name = o.name;
+  type = o.type;
+  rejected = o.rejected;
+  bundle_only = o.bundle_only;
+  description_ = o.description_->Clone();
+  return *this;
+}
+
+const MediaContentDescription* ContentInfo::media_description() const {
+  return description_.get();
+}
+
+MediaContentDescription* ContentInfo::media_description() {
+  return description_.get();
 }
 
 }  // namespace cricket

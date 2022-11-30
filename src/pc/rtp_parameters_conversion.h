@@ -11,7 +11,6 @@
 #ifndef PC_RTP_PARAMETERS_CONVERSION_H_
 #define PC_RTP_PARAMETERS_CONVERSION_H_
 
-#include <iosfwd>
 #include <vector>
 
 #include "absl/types/optional.h"
@@ -58,10 +57,6 @@ template <typename C>
 RTCErrorOr<std::vector<C>> ToCricketCodecs(
     const std::vector<RtpCodecParameters>& codecs);
 
-// Validates that header extension IDs aren't duplicated.
-RTCErrorOr<cricket::RtpHeaderExtensions> ToCricketRtpHeaderExtensions(
-    const std::vector<RtpHeaderExtensionParameters>& extensions);
-
 // SSRCs are allowed to be ommitted. This may be used for receive parameters
 // where SSRCs are unsignaled.
 RTCErrorOr<cricket::StreamParamsVec> ToCricketStreamParamsVec(
@@ -79,7 +74,7 @@ RTCErrorOr<cricket::StreamParamsVec> ToCricketStreamParamsVec(
 // functionality is not yet implemented.
 //*****************************************************************************
 
-// Returns empty value if |cricket_feedback| is a feedback type not
+// Returns empty value if `cricket_feedback` is a feedback type not
 // supported/recognized.
 absl::optional<RtcpFeedback> ToRtcpFeedback(
     const cricket::FeedbackParam& cricket_feedback);

@@ -12,7 +12,10 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+
 #include <utility>
+
+#include "absl/strings/string_view.h"
 
 namespace webrtc {
 namespace test {
@@ -20,7 +23,7 @@ namespace test {
 NetEqStatsPlotter::NetEqStatsPlotter(bool make_matlab_plot,
                                      bool make_python_plot,
                                      bool show_concealment_events,
-                                     std::string base_file_name)
+                                     absl::string_view base_file_name)
     : make_matlab_plot_(make_matlab_plot),
       make_python_plot_(make_python_plot),
       show_concealment_events_(show_concealment_events),
@@ -74,6 +77,33 @@ void NetEqStatsPlotter::SimulationEnded(int64_t simulation_time_ms) {
     for (auto concealment_event : stats_getter_->concealment_events())
       printf("%s\n", concealment_event.ToString().c_str());
     printf(" end of concealment_events_ms\n");
+  }
+
+  const auto lifetime_stats_vector = stats_getter_->lifetime_stats();
+  if (!lifetime_stats_vector->empty()) {
+    auto lifetime_stats = lifetime_stats_vector->back().second;
+    printf("  total_samples_received: %" PRIu64 "\n",
+           lifetime_stats.total_samples_received);
+    printf("  concealed_samples: %" PRIu64 "\n",
+           lifetime_stats.concealed_samples);
+    printf("  concealment_events: %" PRIu64 "\n",
+           lifetime_stats.concealment_events);
+    printf("  delayed_packet_outage_samples: %" PRIu64 "\n",
+           lifetime_stats.delayed_packet_outage_samples);
+    printf("  num_interruptions: %d\n", lifetime_stats.interruption_count);
+    printf("  sum_interruption_length_ms: %d ms\n",
+           lifetime_stats.total_interruption_duration_ms);
+    printf("  interruption_ratio: %f\n",
+           static_cast<double>(lifetime_stats.total_interruption_duration_ms) /
+               simulation_time_ms);
+    printf("  removed_samples_for_acceleration: %" PRIu64 "\n",
+           lifetime_stats.removed_samples_for_acceleration);
+    printf("  inserted_samples_for_deceleration: %" PRIu64 "\n",
+           lifetime_stats.inserted_samples_for_deceleration);
+    printf("  generated_noise_samples: %" PRIu64 "\n",
+           lifetime_stats.generated_noise_samples);
+    printf("  packets_discarded: %" PRIu64 "\n",
+           lifetime_stats.packets_discarded);
   }
 }
 

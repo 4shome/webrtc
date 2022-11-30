@@ -11,6 +11,7 @@
 #include "modules/audio_processing/test/bitexactness_tools.h"
 
 #include <math.h>
+
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -32,7 +33,7 @@ std::string GetApmRenderTestVectorFileName(int sample_rate_hz) {
     case 48000:
       return ResourcePath("far48_stereo", "pcm");
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
   }
   return "";
 }
@@ -48,7 +49,7 @@ std::string GetApmCaptureTestVectorFileName(int sample_rate_hz) {
     case 48000:
       return ResourcePath("near48_stereo", "pcm");
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
   }
   return "";
 }

@@ -15,7 +15,7 @@ group("audio_mixer") {
   ]
 }
 
-rtc_static_library("audio_mixer_impl") {
+rtc_library("audio_mixer_impl") {
   visibility = [ "*" ]
   sources = [
     "audio_mixer_impl.cc",
@@ -29,7 +29,8 @@ rtc_static_library("audio_mixer_impl") {
 
   public = [
     "audio_mixer_impl.h",
-    "default_output_rate_calculator.h",  # For creating a mixer with limiter disabled.
+    "default_output_rate_calculator.h",  # For creating a mixer with limiter
+                                         # disabled.
     "frame_combiner.h",
   ]
 
@@ -38,25 +39,29 @@ rtc_static_library("audio_mixer_impl") {
   deps = [
     ":audio_frame_manipulator",
     "../../api:array_view",
+    "../../api:rtp_packet_info",
     "../../api:scoped_refptr",
     "../../api/audio:audio_frame_api",
     "../../api/audio:audio_mixer_api",
     "../../audio/utility:audio_frame_operations",
     "../../common_audio",
     "../../rtc_base:checks",
-    "../../rtc_base:rtc_base_approved",
+    "../../rtc_base:logging",
+    "../../rtc_base:macromagic",
+    "../../rtc_base:race_checker",
+    "../../rtc_base:refcount",
+    "../../rtc_base:safe_conversions",
+    "../../rtc_base/synchronization:mutex",
     "../../system_wrappers",
     "../../system_wrappers:metrics",
-    "../audio_processing",
     "../audio_processing:api",
     "../audio_processing:apm_logging",
     "../audio_processing:audio_frame_view",
     "../audio_processing/agc2:fixed_digital",
-    "//third_party/abseil-cpp/absl/memory",
   ]
 }
 
-rtc_static_library("audio_frame_manipulator") {
+rtc_library("audio_frame_manipulator") {
   visibility = [
     ":*",
     "../../modules:*",
@@ -71,18 +76,14 @@ rtc_static_library("audio_frame_manipulator") {
     "../../api/audio:audio_frame_api",
     "../../audio/utility:audio_frame_operations",
     "../../rtc_base:checks",
-    "../../rtc_base:rtc_base_approved",
   ]
 }
 
 if (rtc_include_tests) {
-  rtc_source_set("audio_mixer_unittests") {
+  rtc_library("audio_mixer_test_utils") {
     testonly = true
 
     sources = [
-      "audio_frame_manipulator_unittest.cc",
-      "audio_mixer_impl_unittest.cc",
-      "frame_combiner_unittest.cc",
       "gain_change_calculator.cc",
       "gain_change_calculator.h",
       "sine_wave_generator.cc",
@@ -94,27 +95,49 @@ if (rtc_include_tests) {
       ":audio_mixer_impl",
       "../../api:array_view",
       "../../api/audio:audio_frame_api",
-      "../../api/audio:audio_mixer_api",
-      "../../audio/utility:audio_frame_operations",
       "../../rtc_base:checks",
-      "../../rtc_base:rtc_base_approved",
-      "../../rtc_base:task_queue_for_test",
-      "../../test:test_support",
-      "//third_party/abseil-cpp/absl/memory",
+      "../../rtc_base:safe_conversions",
     ]
   }
 
-  rtc_executable("audio_mixer_test") {
+  rtc_library("audio_mixer_unittests") {
     testonly = true
-    sources = [
-      "audio_mixer_test.cc",
-    ]
 
-    deps = [
-      ":audio_mixer_impl",
-      "../../api/audio:audio_mixer_api",
-      "../../common_audio",
-      "../../rtc_base:rtc_base_approved",
+    sources = [
+      "audio_frame_manipulator_unittest.cc",
+      "audio_mixer_impl_unittest.cc",
+      "frame_combiner_unittest.cc",
     ]
+    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
+    deps = [
+      ":audio_frame_manipulator",
+      ":audio_mixer_impl",
+      ":audio_mixer_test_utils",
+      "../../api:array_view",
+      "../../api:rtp_packet_info",
+      "../../api/audio:audio_mixer_api",
+      "../../api/units:timestamp",
+      "../../audio/utility:audio_frame_operations",
+      "../../rtc_base:checks",
+      "../../rtc_base:stringutils",
+      "../../rtc_base:task_queue_for_test",
+      "../../test:test_support",
+    ]
+  }
+
+  if (!build_with_chromium) {
+    rtc_executable("audio_mixer_test") {
+      testonly = true
+      sources = [ "audio_mixer_test.cc" ]
+
+      deps = [
+        ":audio_mixer_impl",
+        "../../api/audio:audio_mixer_api",
+        "../../common_audio",
+        "../../rtc_base:stringutils",
+        "//third_party/abseil-cpp/absl/flags:flag",
+        "//third_party/abseil-cpp/absl/flags:parse",
+      ]
+    }
   }
 }

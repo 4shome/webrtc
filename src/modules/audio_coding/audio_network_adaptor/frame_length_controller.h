@@ -12,13 +12,13 @@
 #define MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_FRAME_LENGTH_CONTROLLER_H_
 
 #include <stddef.h>
+
 #include <map>
 #include <set>
 
 #include "absl/types/optional.h"
 #include "modules/audio_coding/audio_network_adaptor/controller.h"
 #include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
-#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -61,16 +61,17 @@ class FrameLengthController final : public Controller {
 
   ~FrameLengthController() override;
 
+  FrameLengthController(const FrameLengthController&) = delete;
+  FrameLengthController& operator=(const FrameLengthController&) = delete;
+
   void UpdateNetworkMetrics(const NetworkMetrics& network_metrics) override;
 
   void MakeDecision(AudioEncoderRuntimeConfig* config) override;
 
  private:
-  bool FrameLengthIncreasingDecision(
-      const AudioEncoderRuntimeConfig& config) const;
+  bool FrameLengthIncreasingDecision(const AudioEncoderRuntimeConfig& config);
 
-  bool FrameLengthDecreasingDecision(
-      const AudioEncoderRuntimeConfig& config) const;
+  bool FrameLengthDecreasingDecision(const AudioEncoderRuntimeConfig& config);
 
   const Config config_;
 
@@ -85,8 +86,6 @@ class FrameLengthController final : public Controller {
   // True if the previous frame length decision was an increase, otherwise
   // false.
   bool prev_decision_increase_ = false;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(FrameLengthController);
 };
 
 }  // namespace webrtc

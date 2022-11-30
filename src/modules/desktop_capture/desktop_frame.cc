@@ -11,12 +11,15 @@
 #include "modules/desktop_capture/desktop_frame.h"
 
 #include <string.h>
+
+#include <cmath>
+#include <memory>
 #include <utility>
 
-#include "absl/memory/memory.h"
 #include "modules/desktop_capture/desktop_capture_types.h"
 #include "modules/desktop_capture/desktop_geometry.h"
 #include "rtc_base/checks.h"
+#include "third_party/libyuv/include/libyuv/planar_functions.h"
 
 namespace webrtc {
 
@@ -42,11 +45,9 @@ void DesktopFrame::CopyPixelsFrom(const uint8_t* src_buffer,
   RTC_CHECK(DesktopRect::MakeSize(size()).ContainsRect(dest_rect));
 
   uint8_t* dest = GetFrameDataAtPos(dest_rect.top_left());
-  for (int y = 0; y < dest_rect.height(); ++y) {
-    memcpy(dest, src_buffer, DesktopFrame::kBytesPerPixel * dest_rect.width());
-    src_buffer += src_stride;
-    dest += stride();
-  }
+  libyuv::CopyPlane(src_buffer, src_stride, dest, stride(),
+                    DesktopFrame::kBytesPerPixel * dest_rect.width(),
+                    dest_rect.height());
 }
 
 void DesktopFrame::CopyPixelsFrom(const DesktopFrame& src_frame,
@@ -60,6 +61,47 @@ void DesktopFrame::CopyPixelsFrom(const DesktopFrame& src_frame,
                  dest_rect);
 }
 
+bool DesktopFrame::CopyIntersectingPixelsFrom(const DesktopFrame& src_frame,
+                                              double horizontal_scale,
+                                              double vertical_scale) {
+  const DesktopVector& origin = top_left();
+  const DesktopVector& src_frame_origin = src_frame.top_left();
+
+  DesktopVector src_frame_offset = src_frame_origin.subtract(origin);
+
+  // Determine the intersection, first adjusting its origin to account for any
+  // DPI scaling.
+  DesktopRect intersection_rect = src_frame.rect();
+  if (horizontal_scale != 1.0 || vertical_scale != 1.0) {
+    DesktopVector origin_adjustment(
+        static_cast<int>(
+            std::round((horizontal_scale - 1.0) * src_frame_offset.x())),
+        static_cast<int>(
+            std::round((vertical_scale - 1.0) * src_frame_offset.y())));
+
+    intersection_rect.Translate(origin_adjustment);
+
+    src_frame_offset = src_frame_offset.add(origin_adjustment);
+  }
+
+  intersection_rect.IntersectWith(rect());
+  if (intersection_rect.is_empty()) {
+    return false;
+  }
+
+  // Translate the intersection rect to be relative to the outer rect.
+  intersection_rect.Translate(-origin.x(), -origin.y());
+
+  // Determine source position for the copy (offsets of outer frame from
+  // source origin, if positive).
+  int32_t src_pos_x = std::max(0, -src_frame_offset.x());
+  int32_t src_pos_y = std::max(0, -src_frame_offset.y());
+
+  CopyPixelsFrom(src_frame, DesktopVector(src_pos_x, src_pos_y),
+                 intersection_rect);
+  return true;
+}
+
 DesktopRect DesktopFrame::rect() const {
   const float scale = scale_factor();
   // Only scale the size.
@@ -70,7 +112,7 @@ DesktopRect DesktopFrame::rect() const {
 float DesktopFrame::scale_factor() const {
   float scale = 1.0f;
 
-#if defined(WEBRTC_MAC)
+#if defined(WEBRTC_MAC) || defined(CHROMEOS)
   // At least on Windows the logical and physical pixel are the same
   // See http://crbug.com/948362.
   if (!dpi().is_zero() && dpi().x() == dpi().y())
@@ -90,6 +132,7 @@ void DesktopFrame::CopyFrameInfoFrom(const DesktopFrame& other) {
   set_capturer_id(other.capturer_id());
   *mutable_updated_region() = other.updated_region();
   set_top_left(other.top_left());
+  set_icc_profile(other.icc_profile());
 }
 
 void DesktopFrame::MoveFrameInfoFrom(DesktopFrame* other) {
@@ -98,6 +141,7 @@ void DesktopFrame::MoveFrameInfoFrom(DesktopFrame* other) {
   set_capturer_id(other->capturer_id());
   mutable_updated_region()->Swap(other->mutable_updated_region());
   set_top_left(other->top_left());
+  set_icc_profile(other->icc_profile());
 }
 
 BasicDesktopFrame::BasicDesktopFrame(DesktopSize size)
@@ -113,10 +157,12 @@ BasicDesktopFrame::~BasicDesktopFrame() {
 // static
 DesktopFrame* BasicDesktopFrame::CopyOf(const DesktopFrame& frame) {
   DesktopFrame* result = new BasicDesktopFrame(frame.size());
-  for (int y = 0; y < frame.size().height(); ++y) {
-    memcpy(result->data() + y * result->stride(),
-           frame.data() + y * frame.stride(),
-           frame.size().width() * kBytesPerPixel);
+  // TODO(crbug.com/1330019): Temporary workaround for a known libyuv crash when
+  // the height or width is 0. Remove this once this change has been merged.
+  if (frame.size().width() && frame.size().height()) {
+    libyuv::CopyPlane(frame.data(), frame.stride(), result->data(),
+                      result->stride(), frame.size().width() * kBytesPerPixel,
+                      frame.size().height());
   }
   result->CopyFrameInfoFrom(frame);
   return result;
@@ -134,7 +180,7 @@ std::unique_ptr<DesktopFrame> SharedMemoryDesktopFrame::Create(
   if (!shared_memory)
     return nullptr;
 
-  return absl::make_unique<SharedMemoryDesktopFrame>(
+  return std::make_unique<SharedMemoryDesktopFrame>(
       size, size.width() * kBytesPerPixel, std::move(shared_memory));
 }
 

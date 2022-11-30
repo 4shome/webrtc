@@ -13,12 +13,17 @@
 #include <cstdint>
 #include <utility>
 
+#include "absl/strings/string_view.h"
 #include "api/array_view.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
 
 namespace rtc {
 
 namespace {
+
+using ::testing::ElementsAre;
+using ::testing::ElementsAreArray;
 
 // clang-format off
 const uint8_t kTestData[] = {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
@@ -69,6 +74,13 @@ TEST(BufferTest, TestConstructArray) {
   EXPECT_EQ(0, memcmp(buf.data(), kTestData, 16));
 }
 
+TEST(BufferTest, TestStringViewConversion) {
+  Buffer buf(kTestData);
+  absl::string_view view = buf;
+  EXPECT_EQ(view,
+            absl::string_view(reinterpret_cast<const char*>(kTestData), 16u));
+}
+
 TEST(BufferTest, TestSetData) {
   Buffer buf(kTestData + 4, 7);
   buf.SetData(kTestData, 9);
@@ -104,10 +116,12 @@ TEST(BufferTest, TestSetAndAppendWithUnknownArg) {
   buf.SetData(TestDataContainer());
   EXPECT_EQ(3u, buf.size());
   EXPECT_EQ(Buffer(kTestData, 3), buf);
+  EXPECT_THAT(buf, ElementsAre(0, 1, 2));
   buf.AppendData(TestDataContainer());
   EXPECT_EQ(6u, buf.size());
   EXPECT_EQ(0, memcmp(buf.data(), kTestData, 3));
   EXPECT_EQ(0, memcmp(buf.data() + 3, kTestData, 3));
+  EXPECT_THAT(buf, ElementsAre(0, 1, 2, 0, 1, 2));
 }
 
 TEST(BufferTest, TestSetSizeSmaller) {
@@ -362,9 +376,7 @@ TEST(BufferTest, TestBracketWrite) {
     buf[i] = kTestData[i];
   }
 
-  for (size_t i = 0; i != 7u; ++i) {
-    EXPECT_EQ(buf[i], kTestData[i]);
-  }
+  EXPECT_THAT(buf, ElementsAreArray(kTestData, 7));
 }
 
 TEST(BufferTest, TestBeginEnd) {
@@ -392,9 +404,7 @@ TEST(BufferTest, TestInt16) {
   EXPECT_EQ(buf.capacity(), 5u);
   EXPECT_NE(buf.data(), nullptr);
   EXPECT_FALSE(buf.empty());
-  for (size_t i = 0; i != buf.size(); ++i) {
-    EXPECT_EQ(test_data[i], buf[i]);
-  }
+  EXPECT_THAT(buf, ElementsAreArray(test_data));
   BufferT<int16_t> buf2(test_data);
   EXPECT_EQ(buf, buf2);
   buf2[0] = 9;
@@ -445,7 +455,7 @@ TEST(BufferTest, TestStruct) {
   EXPECT_EQ(kObsidian, buf[2].stone);
 }
 
-TEST(BufferTest, DieOnUseAfterMove) {
+TEST(BufferDeathTest, DieOnUseAfterMove) {
   Buffer buf(17);
   Buffer buf2 = std::move(buf);
   EXPECT_EQ(buf2.size(), 17u);

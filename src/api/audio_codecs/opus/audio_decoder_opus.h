@@ -18,6 +18,7 @@
 #include "api/audio_codecs/audio_codec_pair_id.h"
 #include "api/audio_codecs/audio_decoder.h"
 #include "api/audio_codecs/audio_format.h"
+#include "api/field_trials_view.h"
 #include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
@@ -26,13 +27,16 @@ namespace webrtc {
 // CreateAudioDecoderFactory<...>().
 struct RTC_EXPORT AudioDecoderOpus {
   struct Config {
-    int num_channels;
+    bool IsOk() const;  // Checks if the values are currently OK.
+    int sample_rate_hz = 48000;
+    int num_channels = 1;
   };
   static absl::optional<Config> SdpToConfig(const SdpAudioFormat& audio_format);
   static void AppendSupportedDecoders(std::vector<AudioCodecSpec>* specs);
   static std::unique_ptr<AudioDecoder> MakeAudioDecoder(
       Config config,
-      absl::optional<AudioCodecPairId> codec_pair_id = absl::nullopt);
+      absl::optional<AudioCodecPairId> codec_pair_id = absl::nullopt,
+      const FieldTrialsView* field_trials = nullptr);
 };
 
 }  // namespace webrtc

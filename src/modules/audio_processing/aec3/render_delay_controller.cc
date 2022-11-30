@@ -7,8 +7,12 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
+#include "modules/audio_processing/aec3/render_delay_controller.h"
+
 #include <stddef.h>
+
 #include <algorithm>
+#include <atomic>
 #include <memory>
 
 #include "absl/types/optional.h"
@@ -18,12 +22,9 @@
 #include "modules/audio_processing/aec3/delay_estimate.h"
 #include "modules/audio_processing/aec3/downsampled_render_buffer.h"
 #include "modules/audio_processing/aec3/echo_path_delay_estimator.h"
-#include "modules/audio_processing/aec3/render_delay_controller.h"
 #include "modules/audio_processing/aec3/render_delay_controller_metrics.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
-#include "rtc_base/atomic_ops.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -32,21 +33,27 @@ namespace {
 class RenderDelayControllerImpl final : public RenderDelayController {
  public:
   RenderDelayControllerImpl(const EchoCanceller3Config& config,
-                            int sample_rate_hz);
+                            int sample_rate_hz,
+                            size_t num_capture_channels);
+
+  RenderDelayControllerImpl() = delete;
+  RenderDelayControllerImpl(const RenderDelayControllerImpl&) = delete;
+  RenderDelayControllerImpl& operator=(const RenderDelayControllerImpl&) =
+      delete;
+
   ~RenderDelayControllerImpl() override;
   void Reset(bool reset_delay_confidence) override;
   void LogRenderCall() override;
   absl::optional<DelayEstimate> GetDelay(
       const DownsampledRenderBuffer& render_buffer,
       size_t render_delay_buffer_delay,
-      rtc::ArrayView<const float> capture) override;
+      const Block& capture) override;
   bool HasClockdrift() const override;
 
  private:
-  static int instance_count_;
+  static std::atomic<int> instance_count_;
   std::unique_ptr<ApmDataDumper> data_dumper_;
   const int hysteresis_limit_blocks_;
-  const int delay_headroom_samples_;
   absl::optional<DelayEstimate> delay_;
   EchoPathDelayEstimator delay_estimator_;
   RenderDelayControllerMetrics metrics_;
@@ -54,21 +61,14 @@ class RenderDelayControllerImpl final : public RenderDelayController {
   size_t capture_call_counter_ = 0;
   int delay_change_counter_ = 0;
   DelayEstimate::Quality last_delay_estimate_quality_;
-  RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(RenderDelayControllerImpl);
 };
 
 DelayEstimate ComputeBufferDelay(
     const absl::optional<DelayEstimate>& current_delay,
     int hysteresis_limit_blocks,
-    int delay_headroom_samples,
     DelayEstimate estimated_delay) {
-  // Subtract delay headroom.
-  const int delay_with_headroom_samples = std::max(
-      static_cast<int>(estimated_delay.delay) - delay_headroom_samples, 0);
-
   // Compute the buffer delay increase required to achieve the desired latency.
-  size_t new_delay_blocks = delay_with_headroom_samples >> kBlockSizeLog2;
-
+  size_t new_delay_blocks = estimated_delay.delay >> kBlockSizeLog2;
   // Add hysteresis.
   if (current_delay) {
     size_t current_delay_blocks = current_delay->delay;
@@ -77,23 +77,21 @@ DelayEstimate ComputeBufferDelay(
       new_delay_blocks = current_delay_blocks;
     }
   }
-
   DelayEstimate new_delay = estimated_delay;
   new_delay.delay = new_delay_blocks;
   return new_delay;
 }
 
-int RenderDelayControllerImpl::instance_count_ = 0;
+std::atomic<int> RenderDelayControllerImpl::instance_count_(0);
 
 RenderDelayControllerImpl::RenderDelayControllerImpl(
     const EchoCanceller3Config& config,
-    int sample_rate_hz)
-    : data_dumper_(
-          new ApmDataDumper(rtc::AtomicOps::Increment(&instance_count_))),
+    int sample_rate_hz,
+    size_t num_capture_channels)
+    : data_dumper_(new ApmDataDumper(instance_count_.fetch_add(1) + 1)),
       hysteresis_limit_blocks_(
           static_cast<int>(config.delay.hysteresis_limit_blocks)),
-      delay_headroom_samples_(config.delay.delay_headroom_samples),
-      delay_estimator_(data_dumper_.get(), config),
+      delay_estimator_(data_dumper_.get(), config, num_capture_channels),
       last_delay_estimate_quality_(DelayEstimate::Quality::kCoarse) {
   RTC_DCHECK(ValidFullBandRate(sample_rate_hz));
   delay_estimator_.LogDelayEstimationProperties(sample_rate_hz, 0);
@@ -116,8 +114,7 @@ void RenderDelayControllerImpl::LogRenderCall() {}
 absl::optional<DelayEstimate> RenderDelayControllerImpl::GetDelay(
     const DownsampledRenderBuffer& render_buffer,
     size_t render_delay_buffer_delay,
-    rtc::ArrayView<const float> capture) {
-  RTC_DCHECK_EQ(kBlockSize, capture.size());
+    const Block& capture) {
   ++capture_call_counter_;
 
   auto delay_samples = delay_estimator_.EstimateDelay(render_buffer, capture);
@@ -153,9 +150,8 @@ absl::optional<DelayEstimate> RenderDelayControllerImpl::GetDelay(
     const bool use_hysteresis =
         last_delay_estimate_quality_ == DelayEstimate::Quality::kRefined &&
         delay_samples_->quality == DelayEstimate::Quality::kRefined;
-    delay_ = ComputeBufferDelay(delay_,
-                                use_hysteresis ? hysteresis_limit_blocks_ : 0,
-                                delay_headroom_samples_, *delay_samples_);
+    delay_ = ComputeBufferDelay(
+        delay_, use_hysteresis ? hysteresis_limit_blocks_ : 0, *delay_samples_);
     last_delay_estimate_quality_ = delay_samples_->quality;
   }
 
@@ -179,8 +175,10 @@ bool RenderDelayControllerImpl::HasClockdrift() const {
 
 RenderDelayController* RenderDelayController::Create(
     const EchoCanceller3Config& config,
-    int sample_rate_hz) {
-  return new RenderDelayControllerImpl(config, sample_rate_hz);
+    int sample_rate_hz,
+    size_t num_capture_channels) {
+  return new RenderDelayControllerImpl(config, sample_rate_hz,
+                                       num_capture_channels);
 }
 
 }  // namespace webrtc

@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <cstdint>
 #include <map>
 #include <utility>
@@ -31,6 +32,7 @@
 #include "api/video/video_source_interface.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/libyuv/include/libyuv/convert_from.h"
 
 namespace {
@@ -250,7 +252,7 @@ bool GtkMainWnd::Destroy() {
 }
 
 void GtkMainWnd::SwitchToConnectUI() {
-  RTC_LOG(INFO) << __FUNCTION__;
+  RTC_LOG(LS_INFO) << __FUNCTION__;
 
   RTC_DCHECK(IsWindow());
   RTC_DCHECK(vbox_ == NULL);
@@ -262,20 +264,12 @@ void GtkMainWnd::SwitchToConnectUI() {
     peer_list_ = NULL;
   }
 
-#if GTK_MAJOR_VERSION == 2
-  vbox_ = gtk_vbox_new(FALSE, 5);
-#else
   vbox_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-#endif
   GtkWidget* valign = gtk_alignment_new(0, 1, 0, 0);
   gtk_container_add(GTK_CONTAINER(vbox_), valign);
   gtk_container_add(GTK_CONTAINER(window_), vbox_);
 
-#if GTK_MAJOR_VERSION == 2
-  GtkWidget* hbox = gtk_hbox_new(FALSE, 5);
-#else
   GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-#endif
 
   GtkWidget* label = gtk_label_new("Server");
   gtk_container_add(GTK_CONTAINER(hbox), label);
@@ -306,7 +300,7 @@ void GtkMainWnd::SwitchToConnectUI() {
 }
 
 void GtkMainWnd::SwitchToPeerList(const Peers& peers) {
-  RTC_LOG(INFO) << __FUNCTION__;
+  RTC_LOG(LS_INFO) << __FUNCTION__;
 
   if (!peer_list_) {
     gtk_container_set_border_width(GTK_CONTAINER(window_), 0);
@@ -343,7 +337,7 @@ void GtkMainWnd::SwitchToPeerList(const Peers& peers) {
 }
 
 void GtkMainWnd::SwitchToStreamingUI() {
-  RTC_LOG(INFO) << __FUNCTION__;
+  RTC_LOG(LS_INFO) << __FUNCTION__;
 
   RTC_DCHECK(draw_area_ == NULL);
 
@@ -384,11 +378,7 @@ void GtkMainWnd::OnClicked(GtkWidget* widget) {
 void GtkMainWnd::OnKeyPress(GtkWidget* widget, GdkEventKey* key) {
   if (key->type == GDK_KEY_PRESS) {
     switch (key->keyval) {
-#if GTK_MAJOR_VERSION == 2
-      case GDK_Escape:
-#else
       case GDK_KEY_Escape:
-#endif
         if (draw_area_) {
           callback_->DisconnectFromCurrentPeer();
         } else if (peer_list_) {
@@ -396,13 +386,8 @@ void GtkMainWnd::OnKeyPress(GtkWidget* widget, GdkEventKey* key) {
         }
         break;
 
-#if GTK_MAJOR_VERSION == 2
-      case GDK_KP_Enter:
-      case GDK_Return:
-#else
       case GDK_KEY_KP_Enter:
       case GDK_KEY_Return:
-#endif
         if (vbox_) {
           OnClicked(NULL);
         } else if (peer_list_) {
@@ -488,22 +473,14 @@ void GtkMainWnd::OnRedraw() {
       }
     }
 
-#if GTK_MAJOR_VERSION == 2
-    gdk_draw_rgb_32_image(draw_area_->window,
-                          draw_area_->style->fg_gc[GTK_STATE_NORMAL], 0, 0,
-                          width_ * 2, height_ * 2, GDK_RGB_DITHER_MAX,
-                          draw_buffer_.get(), (width_ * 2) * 4);
-#else
     gtk_widget_queue_draw(draw_area_);
-#endif
   }
 
   gdk_threads_leave();
 }
 
 void GtkMainWnd::Draw(GtkWidget* widget, cairo_t* cr) {
-#if GTK_MAJOR_VERSION != 2
-  cairo_format_t format = CAIRO_FORMAT_RGB24;
+  cairo_format_t format = CAIRO_FORMAT_ARGB32;
   cairo_surface_t* surface = cairo_image_surface_create_for_data(
       draw_buffer_.get(), format, width_ * 2, height_ * 2,
       cairo_format_stride_for_width(format, width_ * 2));
@@ -511,9 +488,6 @@ void GtkMainWnd::Draw(GtkWidget* widget, cairo_t* cr) {
   cairo_rectangle(cr, 0, 0, width_ * 2, height_ * 2);
   cairo_fill(cr);
   cairo_surface_destroy(surface);
-#else
-  RTC_NOTREACHED();
-#endif
 }
 
 GtkMainWnd::VideoRenderer::VideoRenderer(
@@ -553,13 +527,14 @@ void GtkMainWnd::VideoRenderer::OnFrame(const webrtc::VideoFrame& video_frame) {
   }
   SetSize(buffer->width(), buffer->height());
 
-  // The order in the name of libyuv::I420To(ABGR,RGBA) is ambiguous because
-  // it doesn't tell you if it is referring to how it is laid out in memory as
-  // bytes or if endiannes is taken into account.
-  // This was supposed to be a call to libyuv::I420ToRGBA but it was resulting
-  // in a reddish video output (see https://bugs.webrtc.org/6857) because it
-  // was producing an unexpected byte order (ABGR, byte swapped).
-  libyuv::I420ToABGR(buffer->DataY(), buffer->StrideY(), buffer->DataU(),
+  // TODO(bugs.webrtc.org/6857): This conversion is correct for little-endian
+  // only. Cairo ARGB32 treats pixels as 32-bit values in *native* byte order,
+  // with B in the least significant byte of the 32-bit value. Which on
+  // little-endian means that memory layout is BGRA, with the B byte stored at
+  // lowest address. Libyuv's ARGB format (surprisingly?) uses the same
+  // little-endian format, with B in the first byte in memory, regardless of
+  // native endianness.
+  libyuv::I420ToARGB(buffer->DataY(), buffer->StrideY(), buffer->DataU(),
                      buffer->StrideU(), buffer->DataV(), buffer->StrideV(),
                      image_.get(), width_ * 4, buffer->width(),
                      buffer->height());

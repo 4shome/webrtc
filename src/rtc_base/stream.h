@@ -11,16 +11,13 @@
 #ifndef RTC_BASE_STREAM_H_
 #define RTC_BASE_STREAM_H_
 
-#include <stdio.h>
-
 #include <memory>
 
 #include "rtc_base/buffer.h"
-#include "rtc_base/constructor_magic.h"
-#include "rtc_base/critical_section.h"
 #include "rtc_base/message_handler.h"
-#include "rtc_base/message_queue.h"
+#include "rtc_base/system/rtc_export.h"
 #include "rtc_base/third_party/sigslot/sigslot.h"
+#include "rtc_base/thread.h"
 
 namespace rtc {
 
@@ -50,18 +47,12 @@ enum StreamResult { SR_ERROR, SR_SUCCESS, SR_BLOCK, SR_EOS };
 //  SE_WRITE: Data can be written, so Write is likely to not return SR_BLOCK
 enum StreamEvent { SE_OPEN = 1, SE_READ = 2, SE_WRITE = 4, SE_CLOSE = 8 };
 
-class Thread;
-
-struct StreamEventData : public MessageData {
-  int events, error;
-  StreamEventData(int ev, int er) : events(ev), error(er) {}
-};
-
-class StreamInterface : public MessageHandler {
+class RTC_EXPORT StreamInterface {
  public:
-  enum { MSG_POST_EVENT = 0xF1F1, MSG_MAX = MSG_POST_EVENT };
+  virtual ~StreamInterface() {}
 
-  ~StreamInterface() override;
+  StreamInterface(const StreamInterface&) = delete;
+  StreamInterface& operator=(const StreamInterface&) = delete;
 
   virtual StreamState GetState() const = 0;
 
@@ -100,13 +91,6 @@ class StreamInterface : public MessageHandler {
   // certain events will be raised in the future.
   sigslot::signal3<StreamInterface*, int, int> SignalEvent;
 
-  // Like calling SignalEvent, but posts a message to the specified thread,
-  // which will call SignalEvent.  This helps unroll the stack and prevent
-  // re-entrancy.
-  void PostEvent(Thread* t, int events, int err);
-  // Like the aforementioned method, but posts to the current thread.
-  void PostEvent(int events, int err);
-
   // Return true if flush is successful.
   virtual bool Flush();
 
@@ -128,101 +112,6 @@ class StreamInterface : public MessageHandler {
 
  protected:
   StreamInterface();
-
-  // MessageHandler Interface
-  void OnMessage(Message* msg) override;
-
- private:
-  RTC_DISALLOW_COPY_AND_ASSIGN(StreamInterface);
-};
-
-///////////////////////////////////////////////////////////////////////////////
-// StreamAdapterInterface is a convenient base-class for adapting a stream.
-// By default, all operations are pass-through.  Override the methods that you
-// require adaptation.  Streams should really be upgraded to reference-counted.
-// In the meantime, use the owned flag to indicate whether the adapter should
-// own the adapted stream.
-///////////////////////////////////////////////////////////////////////////////
-
-class StreamAdapterInterface : public StreamInterface,
-                               public sigslot::has_slots<> {
- public:
-  explicit StreamAdapterInterface(StreamInterface* stream, bool owned = true);
-
-  // Core Stream Interface
-  StreamState GetState() const override;
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
-  void Close() override;
-
-  bool Flush() override;
-
-  void Attach(StreamInterface* stream, bool owned = true);
-  StreamInterface* Detach();
-
- protected:
-  ~StreamAdapterInterface() override;
-
-  // Note that the adapter presents itself as the origin of the stream events,
-  // since users of the adapter may not recognize the adapted object.
-  virtual void OnEvent(StreamInterface* stream, int events, int err);
-  StreamInterface* stream() { return stream_; }
-
- private:
-  StreamInterface* stream_;
-  bool owned_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(StreamAdapterInterface);
-};
-
-///////////////////////////////////////////////////////////////////////////////
-// FileStream is a simple implementation of a StreamInterface, which does not
-// support asynchronous notification.
-///////////////////////////////////////////////////////////////////////////////
-
-// TODO(bugs.webrtc.org/6463): Delete this class.
-class FileStream : public StreamInterface {
- public:
-  FileStream();
-  ~FileStream() override;
-
-  // The semantics of filename and mode are the same as stdio's fopen
-  virtual bool Open(const std::string& filename, const char* mode, int* error);
-  virtual bool OpenShare(const std::string& filename,
-                         const char* mode,
-                         int shflag,
-                         int* error);
-
-  // By default, reads and writes are buffered for efficiency.  Disabling
-  // buffering causes writes to block until the bytes on disk are updated.
-  virtual bool DisableBuffering();
-
-  StreamState GetState() const override;
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
-  void Close() override;
-  virtual bool SetPosition(size_t position);
-
-  bool Flush() override;
-
- protected:
-  virtual void DoClose();
-
-  FILE* file_;
-
- private:
-  RTC_DISALLOW_COPY_AND_ASSIGN(FileStream);
 };
 
 }  // namespace rtc

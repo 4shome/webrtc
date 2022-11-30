@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env vpython3
 
 # Copyright (c) 2017 The WebRTC project authors. All Rights Reserved.
 #
@@ -14,25 +14,25 @@ import os
 import re
 import sys
 
-
 # TARGET_RE matches a GN target, and extracts the target name and the contents.
-TARGET_RE = re.compile(r'\d+\$(?P<indent>\s*)\w+\("(?P<target_name>\w+)"\) {'
-                       r'(?P<target_contents>.*?)'
-                       r'\d+\$(?P=indent)}',
-                       re.MULTILINE | re.DOTALL)
+TARGET_RE = re.compile(
+    r'(?P<indent>\s*)\w+\("(?P<target_name>\w+)"\) {'
+    r'(?P<target_contents>.*?)'
+    r'(?P=indent)}', re.MULTILINE | re.DOTALL)
 
 # SOURCES_RE matches a block of sources inside a GN target.
 SOURCES_RE = re.compile(r'sources \+?= \[(?P<sources>.*?)\]',
                         re.MULTILINE | re.DOTALL)
 
-ERROR_MESSAGE = ("{build_file_path}:{line_number} in target '{target_name}':\n"
+ERROR_MESSAGE = ("{build_file_path} in target '{target_name}':\n"
                  "  Source file '{source_file}'\n"
                  "  crosses boundary of package '{subpackage}'.")
 
 
 class PackageBoundaryViolation(
-    collections.namedtuple('PackageBoundaryViolation',
-        'build_file_path line_number target_name source_file subpackage')):
+        collections.namedtuple(
+            'PackageBoundaryViolation',
+            'build_file_path target_name source_file subpackage')):
   def __str__(self):
     return ERROR_MESSAGE.format(**self._asdict())
 
@@ -42,18 +42,18 @@ def _BuildSubpackagesPattern(packages, query):
   of the given query."""
   query += os.path.sep
   length = len(query)
-  pattern = r'(?P<line_number>\d+)\$\s*"(?P<source_file>(?P<subpackage>'
-  pattern += '|'.join(re.escape(package[length:].replace(os.path.sep, '/'))
-                      for package in packages if package.startswith(query))
+  pattern = r'\s*"(?P<source_file>(?P<subpackage>'
+  pattern += '|'.join(
+      re.escape(package[length:].replace(os.path.sep, '/'))
+      for package in packages if package.startswith(query))
   pattern += r')/[\w\./]*)"'
   return re.compile(pattern)
 
 
 def _ReadFileAndPrependLines(file_path):
-  """Reads the contents of a file and prepends the line number to every line."""
+  """Reads the contents of a file."""
   with open(file_path) as f:
-    return "".join("{}${}".format(line_number, line)
-                   for line_number, line in enumerate(f, 1))
+    return "".join(f.readlines())
 
 
 def _CheckBuildFile(build_file_path, packages):
@@ -73,15 +73,15 @@ def _CheckBuildFile(build_file_path, packages):
       for subpackages_match in subpackages_re.finditer(sources):
         subpackage = subpackages_match.group('subpackage')
         source_file = subpackages_match.group('source_file')
-        line_number = subpackages_match.group('line_number')
         if subpackage:
-          yield PackageBoundaryViolation(build_file_path, line_number,
-                                         target_name, source_file, subpackage)
+          yield PackageBoundaryViolation(build_file_path, target_name,
+                                         source_file, subpackage)
 
 
 def CheckPackageBoundaries(root_dir, build_files=None):
-  packages = [root for root, _, files in os.walk(root_dir)
-              if 'BUILD.gn' in files]
+  packages = [
+      root for root, _, files in os.walk(root_dir) if 'BUILD.gn' in files
+  ]
 
   if build_files is not None:
     for build_file_path in build_files:
@@ -98,18 +98,23 @@ def CheckPackageBoundaries(root_dir, build_files=None):
 def main(argv):
   parser = argparse.ArgumentParser(
       description='Script that checks package boundary violations in GN '
-                  'build files.')
+      'build files.')
 
-  parser.add_argument('root_dir', metavar='ROOT_DIR',
+  parser.add_argument('root_dir',
+                      metavar='ROOT_DIR',
                       help='The root directory that contains all BUILD.gn '
-                           'files to be processed.')
-  parser.add_argument('build_files', metavar='BUILD_FILE', nargs='*',
+                      'files to be processed.')
+  parser.add_argument('build_files',
+                      metavar='BUILD_FILE',
+                      nargs='*',
                       help='A list of BUILD.gn files to be processed. If no '
-                           'files are given, all BUILD.gn files under ROOT_DIR '
-                           'will be processed.')
-  parser.add_argument('--max_messages', type=int, default=None,
+                      'files are given, all BUILD.gn files under ROOT_DIR '
+                      'will be processed.')
+  parser.add_argument('--max_messages',
+                      type=int,
+                      default=None,
                       help='If set, the maximum number of violations to be '
-                           'displayed.')
+                      'displayed.')
 
   args = parser.parse_args(argv)
 
@@ -118,8 +123,8 @@ def main(argv):
 
   for i, message in enumerate(messages):
     if i > 0:
-      print
-    print message
+      print()
+    print(message)
 
   return bool(messages)
 

@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <string>
+
 #include "rtc_base/gunit.h"
 #include "rtc_base/proxy_server.h"
 #include "rtc_base/socket_adapters.h"
@@ -42,8 +43,8 @@ class ProxyTest : public ::testing::Test {
 
 // Tests whether we can use a SOCKS5 proxy to connect to a server.
 TEST_F(ProxyTest, TestSocks5Connect) {
-  rtc::AsyncSocket* socket =
-      ss()->CreateAsyncSocket(kSocksProxyIntAddr.family(), SOCK_STREAM);
+  rtc::Socket* socket =
+      ss()->CreateSocket(kSocksProxyIntAddr.family(), SOCK_STREAM);
   rtc::AsyncSocksProxySocket* proxy_socket = new rtc::AsyncSocksProxySocket(
       socket, kSocksProxyIntAddr, "", rtc::CryptString());
   // TODO: IPv6-ize these tests when proxy supports IPv6.

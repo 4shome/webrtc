@@ -19,25 +19,11 @@ using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::make_tuple;
 using ::testing::SizeIs;
-using webrtc::rtcp::Dlrr;
 using webrtc::rtcp::ExtendedReports;
 using webrtc::rtcp::ReceiveTimeInfo;
 using webrtc::rtcp::Rrtr;
 
 namespace webrtc {
-// Define comparision operators that shouldn't be needed in production,
-// but make testing matches more clear.
-namespace rtcp {
-bool operator==(const Rrtr& rrtr1, const Rrtr& rrtr2) {
-  return rrtr1.ntp() == rrtr2.ntp();
-}
-
-bool operator==(const ReceiveTimeInfo& time1, const ReceiveTimeInfo& time2) {
-  return time1.ssrc == time2.ssrc && time1.last_rr == time2.last_rr &&
-         time1.delay_since_last_rr == time2.delay_since_last_rr;
-}
-}  // namespace rtcp
-
 namespace {
 constexpr uint32_t kSenderSsrc = 0x12345678;
 constexpr uint8_t kEmptyPacket[] = {0x80, 207,  0x00, 0x01,

@@ -10,9 +10,10 @@
 
 #include <stddef.h>
 #include <stdio.h>
+
+#include <memory>
 #include <random>
 
-#include "absl/memory/memory.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/null_socket_server.h"
 #include "rtc_base/thread.h"
@@ -54,6 +55,7 @@ TEST(SanitizersDeathTest, AddressSanitizer) {
 void SignedIntegerOverflow() {
   int32_t x = 1234567890;
   x *= 2;
+  (void)x;
 }
 
 // For ubsan_vptr:
@@ -83,7 +85,10 @@ TEST(SanitizersDeathTest, UndefinedSanitizer) {
 class IncrementThread : public Thread {
  public:
   explicit IncrementThread(int* value)
-      : Thread(absl::make_unique<NullSocketServer>()), value_(value) {}
+      : Thread(std::make_unique<NullSocketServer>()), value_(value) {}
+
+  IncrementThread(const IncrementThread&) = delete;
+  IncrementThread& operator=(const IncrementThread&) = delete;
 
   void Run() override {
     ++*value_;
@@ -95,8 +100,6 @@ class IncrementThread : public Thread {
 
  private:
   int* value_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(IncrementThread);
 };
 
 void DataRace() {
@@ -109,7 +112,7 @@ void DataRace() {
   thread2.Join();
   // TSan seems to mess with gtest's death detection.
   // Fail intentionally, and rely on detecting the error message.
-  RTC_CHECK(false);
+  RTC_CHECK_NOTREACHED();
 }
 
 TEST(SanitizersDeathTest, ThreadSanitizer) {

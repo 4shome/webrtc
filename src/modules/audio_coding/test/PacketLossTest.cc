@@ -12,6 +12,7 @@
 
 #include <memory>
 
+#include "absl/strings/string_view.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "rtc_base/strings/string_builder.h"
 #include "test/gtest.h"
@@ -28,7 +29,7 @@ ReceiverWithPacketLoss::ReceiverWithPacketLoss()
 
 void ReceiverWithPacketLoss::Setup(AudioCodingModule* acm,
                                    RTPStream* rtpStream,
-                                   std::string out_file_name,
+                                   absl::string_view out_file_name,
                                    int channels,
                                    int file_num,
                                    int loss_rate,
@@ -89,7 +90,7 @@ SenderWithFEC::SenderWithFEC() : expected_loss_rate_(0) {}
 
 void SenderWithFEC::Setup(AudioCodingModule* acm,
                           RTPStream* rtpStream,
-                          std::string in_file_name,
+                          absl::string_view in_file_name,
                           int payload_type,
                           SdpAudioFormat format,
                           int expected_loss_rate) {
@@ -147,7 +148,7 @@ void PacketLossTest::Perform() {
   rtpFile.WriteHeader();
   SenderWithFEC sender;
   sender.Setup(acm.get(), &rtpFile, in_file_name_, 120, send_format,
-                 expected_loss_rate_);
+               expected_loss_rate_);
   sender.Run();
   sender.Teardown();
   rtpFile.Close();
@@ -156,7 +157,7 @@ void PacketLossTest::Perform() {
   rtpFile.ReadHeader();
   ReceiverWithPacketLoss receiver;
   receiver.Setup(acm.get(), &rtpFile, "packetLoss_out", channels_, 15,
-                   actual_loss_rate_, burst_length_);
+                 actual_loss_rate_, burst_length_);
   receiver.Run();
   receiver.Teardown();
   rtpFile.Close();

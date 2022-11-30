@@ -11,11 +11,11 @@
 #define MODULES_RTP_RTCP_SOURCE_RTP_FORMAT_VIDEO_GENERIC_H_
 
 #include <stdint.h>
+
 #include <vector>
 
 #include "api/array_view.h"
 #include "modules/rtp_rtcp/source/rtp_format.h"
-#include "rtc_base/constructor_magic.h"
 
 namespace webrtc {
 
@@ -34,42 +34,38 @@ class RtpPacketizerGeneric : public RtpPacketizer {
  public:
   // Initialize with payload from encoder.
   // The payload_data must be exactly one encoded generic frame.
+  // Packets returned by `NextPacket` will contain the generic payload header.
   RtpPacketizerGeneric(rtc::ArrayView<const uint8_t> payload,
                        PayloadSizeLimits limits,
-                       const RTPVideoHeader& rtp_video_header,
-                       VideoFrameType frametype);
+                       const RTPVideoHeader& rtp_video_header);
+  // Initialize with payload from encoder.
+  // The payload_data must be exactly one encoded generic frame.
+  // Packets returned by `NextPacket` will contain raw payload without the
+  // generic payload header.
+  RtpPacketizerGeneric(rtc::ArrayView<const uint8_t> payload,
+                       PayloadSizeLimits limits);
 
   ~RtpPacketizerGeneric() override;
 
+  RtpPacketizerGeneric(const RtpPacketizerGeneric&) = delete;
+  RtpPacketizerGeneric& operator=(const RtpPacketizerGeneric&) = delete;
+
   size_t NumPackets() const override;
 
-  // Get the next payload with generic payload header.
-  // Write payload and set marker bit of the |packet|.
+  // Get the next payload.
+  // Write payload and set marker bit of the `packet`.
   // Returns true on success, false otherwise.
   bool NextPacket(RtpPacketToSend* packet) override;
 
  private:
   // Fills header_ and header_size_ members.
-  void BuildHeader(const RTPVideoHeader& rtp_video_header,
-                   VideoFrameType frame_type);
+  void BuildHeader(const RTPVideoHeader& rtp_video_header);
 
   uint8_t header_[3];
   size_t header_size_;
   rtc::ArrayView<const uint8_t> remaining_payload_;
   std::vector<int> payload_sizes_;
   std::vector<int>::const_iterator current_packet_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(RtpPacketizerGeneric);
-};
-
-// Depacketizer for generic codec.
-class RtpDepacketizerGeneric : public RtpDepacketizer {
- public:
-  ~RtpDepacketizerGeneric() override;
-
-  bool Parse(ParsedPayload* parsed_payload,
-             const uint8_t* payload_data,
-             size_t payload_data_length) override;
 };
 }  // namespace webrtc
 #endif  // MODULES_RTP_RTCP_SOURCE_RTP_FORMAT_VIDEO_GENERIC_H_

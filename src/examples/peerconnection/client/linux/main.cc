@@ -12,15 +12,13 @@
 #include <gtk/gtk.h>
 #include <stdio.h>
 
+#include "absl/flags/parse.h"
 #include "api/scoped_refptr.h"
 #include "examples/peerconnection/client/conductor.h"
 #include "examples/peerconnection/client/flag_defs.h"
 #include "examples/peerconnection/client/linux/main_wnd.h"
 #include "examples/peerconnection/client/peer_connection_client.h"
-#include "rtc_base/flags.h"
-#include "rtc_base/message_queue.h"
 #include "rtc_base/physical_socket_server.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/thread.h"
 #include "system_wrappers/include/field_trial.h"
@@ -32,15 +30,14 @@ class CustomSocketServer : public rtc::PhysicalSocketServer {
       : wnd_(wnd), conductor_(NULL), client_(NULL) {}
   virtual ~CustomSocketServer() {}
 
-  void SetMessageQueue(rtc::MessageQueue* queue) override {
-    message_queue_ = queue;
-  }
+  void SetMessageQueue(rtc::Thread* queue) override { message_queue_ = queue; }
 
   void set_client(PeerConnectionClient* client) { client_ = client; }
   void set_conductor(Conductor* conductor) { conductor_ = conductor; }
 
   // Override so that we can also pump the GTK message loop.
-  bool Wait(int cms, bool process_io) override {
+  // This function never waits.
+  bool Wait(webrtc::TimeDelta max_wait_duration, bool process_io) override {
     // Pump GTK events.
     // TODO(henrike): We really should move either the socket server or UI to a
     // different thread.  Alternatively we could look at merging the two loops
@@ -53,12 +50,12 @@ class CustomSocketServer : public rtc::PhysicalSocketServer {
         client_ != NULL && !client_->is_connected()) {
       message_queue_->Quit();
     }
-    return rtc::PhysicalSocketServer::Wait(0 /*cms == -1 ? 1 : cms*/,
+    return rtc::PhysicalSocketServer::Wait(webrtc::TimeDelta::Zero(),
                                            process_io);
   }
 
  protected:
-  rtc::MessageQueue* message_queue_;
+  rtc::Thread* message_queue_;
   GtkMainWnd* wnd_;
   Conductor* conductor_;
   PeerConnectionClient* client_;
@@ -77,25 +74,25 @@ int main(int argc, char* argv[]) {
   g_thread_init(NULL);
 #endif
 
-  rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, true);
-  if (FLAG_help) {
-    rtc::FlagList::Print(NULL, false);
-    return 0;
-  }
+  absl::ParseCommandLine(argc, argv);
 
-  webrtc::test::ValidateFieldTrialsStringOrDie(FLAG_force_fieldtrials);
   // InitFieldTrialsFromString stores the char*, so the char array must outlive
   // the application.
-  webrtc::field_trial::InitFieldTrialsFromString(FLAG_force_fieldtrials);
+  const std::string forced_field_trials =
+      absl::GetFlag(FLAGS_force_fieldtrials);
+  webrtc::field_trial::InitFieldTrialsFromString(forced_field_trials.c_str());
 
   // Abort if the user specifies a port that is outside the allowed
   // range [1, 65535].
-  if ((FLAG_port < 1) || (FLAG_port > 65535)) {
-    printf("Error: %i is not a valid port.\n", FLAG_port);
+  if ((absl::GetFlag(FLAGS_port) < 1) || (absl::GetFlag(FLAGS_port) > 65535)) {
+    printf("Error: %i is not a valid port.\n", absl::GetFlag(FLAGS_port));
     return -1;
   }
 
-  GtkMainWnd wnd(FLAG_server, FLAG_port, FLAG_autoconnect, FLAG_autocall);
+  const std::string server = absl::GetFlag(FLAGS_server);
+  GtkMainWnd wnd(server.c_str(), absl::GetFlag(FLAGS_port),
+                 absl::GetFlag(FLAGS_autoconnect),
+                 absl::GetFlag(FLAGS_autocall));
   wnd.Create();
 
   CustomSocketServer socket_server(&wnd);
@@ -104,10 +101,9 @@ int main(int argc, char* argv[]) {
   rtc::InitializeSSL();
   // Must be constructed after we set the socketserver.
   PeerConnectionClient client;
-  rtc::scoped_refptr<Conductor> conductor(
-      new rtc::RefCountedObject<Conductor>(&client, &wnd));
+  auto conductor = rtc::make_ref_counted<Conductor>(&client, &wnd);
   socket_server.set_client(&client);
-  socket_server.set_conductor(conductor);
+  socket_server.set_conductor(conductor.get());
 
   thread.Run();
 

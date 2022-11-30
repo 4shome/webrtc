@@ -13,6 +13,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <limits>
 #include <string>
 #include <vector>
@@ -49,8 +50,8 @@ class RTC_EXPORT VideoBitrateAllocation {
   // Get the sum of all the temporal layer for a specific spatial layer.
   uint32_t GetSpatialLayerSum(size_t spatial_index) const;
 
-  // Sum of bitrates of temporal layers, from layer 0 to |temporal_index|
-  // inclusive, of specified spatial layer |spatial_index|. Bitrates of lower
+  // Sum of bitrates of temporal layers, from layer 0 to `temporal_index`
+  // inclusive, of specified spatial layer `spatial_index`. Bitrates of lower
   // spatial layers are not included.
   uint32_t GetTemporalLayerSum(size_t spatial_index,
                                size_t temporal_index) const;
@@ -79,9 +80,15 @@ class RTC_EXPORT VideoBitrateAllocation {
 
   std::string ToString() const;
 
+  // Indicates if the allocation has some layers/streams disabled due to
+  // low available bandwidth.
+  void set_bw_limited(bool limited) { is_bw_limited_ = limited; }
+  bool is_bw_limited() const { return is_bw_limited_; }
+
  private:
   uint32_t sum_;
   absl::optional<uint32_t> bitrates_[kMaxSpatialLayers][kMaxTemporalStreams];
+  bool is_bw_limited_;
 };
 
 }  // namespace webrtc

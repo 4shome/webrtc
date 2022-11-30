@@ -13,10 +13,13 @@
 #include "modules/audio_processing/agc/loudness_histogram.h"
 
 #include <stdio.h>
+
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
 
+#include "absl/strings/string_view.h"
 #include "modules/audio_processing/agc/utility.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
@@ -34,7 +37,7 @@ const double kRelativeErrTol = 1e-10;
 
 class LoudnessHistogramTest : public ::testing::Test {
  protected:
-  void RunTest(bool enable_circular_buff, const char* filename);
+  void RunTest(bool enable_circular_buff, absl::string_view filename);
 
  private:
   void TestClean();
@@ -48,8 +51,8 @@ void LoudnessHistogramTest::TestClean() {
 }
 
 void LoudnessHistogramTest::RunTest(bool enable_circular_buff,
-                                    const char* filename) {
-  FILE* in_file = fopen(filename, "rb");
+                                    absl::string_view filename) {
+  FILE* in_file = fopen(std::string(filename).c_str(), "rb");
   ASSERT_TRUE(in_file != NULL);
   if (enable_circular_buff) {
     int buffer_size;
@@ -62,14 +65,12 @@ void LoudnessHistogramTest::RunTest(bool enable_circular_buff,
 
   InputOutput io;
   int num_updates = 0;
-  int num_reset = 0;
   while (fread(&io, sizeof(InputOutput), 1, in_file) == 1) {
     if (io.rms < 0) {
       // We have to reset.
       hist_->Reset();
       TestClean();
       num_updates = 0;
-      num_reset++;
       // Read the next chunk of input.
       if (fread(&io, sizeof(InputOutput), 1, in_file) != 1)
         break;

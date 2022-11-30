@@ -10,20 +10,21 @@
 
 #include "sdk/android/native_api/jni/java_types.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
-#include "sdk/android/generated_external_classes_jni/jni/ArrayList_jni.h"
-#include "sdk/android/generated_external_classes_jni/jni/Boolean_jni.h"
-#include "sdk/android/generated_external_classes_jni/jni/Double_jni.h"
-#include "sdk/android/generated_external_classes_jni/jni/Enum_jni.h"
-#include "sdk/android/generated_external_classes_jni/jni/Integer_jni.h"
-#include "sdk/android/generated_external_classes_jni/jni/Iterable_jni.h"
-#include "sdk/android/generated_external_classes_jni/jni/Iterator_jni.h"
-#include "sdk/android/generated_external_classes_jni/jni/LinkedHashMap_jni.h"
-#include "sdk/android/generated_external_classes_jni/jni/Long_jni.h"
-#include "sdk/android/generated_external_classes_jni/jni/Map_jni.h"
-#include "sdk/android/generated_native_api_jni/jni/JniHelper_jni.h"
+#include "sdk/android/generated_external_classes_jni/ArrayList_jni.h"
+#include "sdk/android/generated_external_classes_jni/Boolean_jni.h"
+#include "sdk/android/generated_external_classes_jni/Double_jni.h"
+#include "sdk/android/generated_external_classes_jni/Enum_jni.h"
+#include "sdk/android/generated_external_classes_jni/Integer_jni.h"
+#include "sdk/android/generated_external_classes_jni/Iterable_jni.h"
+#include "sdk/android/generated_external_classes_jni/Iterator_jni.h"
+#include "sdk/android/generated_external_classes_jni/LinkedHashMap_jni.h"
+#include "sdk/android/generated_external_classes_jni/Long_jni.h"
+#include "sdk/android/generated_external_classes_jni/Map_jni.h"
+#include "sdk/android/generated_native_api_jni/JniHelper_jni.h"
 
 namespace webrtc {
 
@@ -51,14 +52,15 @@ Iterable::Iterator::Iterator(JNIEnv* jni, const JavaRef<jobject>& iterable)
 Iterable::Iterator::Iterator(Iterator&& other)
     : jni_(std::move(other.jni_)),
       iterator_(std::move(other.iterator_)),
-      value_(std::move(other.value_)),
-      thread_checker_(std::move(other.thread_checker_)) {}
+      value_(std::move(other.value_)) {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+}
 
 Iterable::Iterator::~Iterator() = default;
 
 // Advances the iterator one step.
 Iterable::Iterator& Iterable::Iterator::operator++() {
-  RTC_CHECK(thread_checker_.IsCurrent());
+  RTC_DCHECK_RUN_ON(&thread_checker_);
   if (AtEnd()) {
     // Can't move past the end.
     return *this;
@@ -93,7 +95,7 @@ ScopedJavaLocalRef<jobject>& Iterable::Iterator::operator*() {
 }
 
 bool Iterable::Iterator::AtEnd() const {
-  RTC_CHECK(thread_checker_.IsCurrent());
+  RTC_DCHECK_RUN_ON(&thread_checker_);
   return jni_ == nullptr || IsNull(jni_, iterator_);
 }
 

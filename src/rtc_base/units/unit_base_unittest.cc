@@ -18,18 +18,13 @@ class TestUnit final : public rtc_units_impl::RelativeUnit<TestUnit> {
  public:
   TestUnit() = delete;
 
-  using UnitBase::FromStaticValue;
   using UnitBase::FromValue;
   using UnitBase::ToValue;
   using UnitBase::ToValueOr;
 
-  template <int64_t kilo>
-  static constexpr TestUnit FromStaticKilo() {
-    return FromStaticFraction<kilo, 1000>();
-  }
   template <typename T>
-  static TestUnit FromKilo(T kilo) {
-    return FromFraction<1000>(kilo);
+  static constexpr TestUnit FromKilo(T kilo) {
+    return FromFraction(1000, kilo);
   }
   template <typename T = int64_t>
   T ToKilo() const {
@@ -44,10 +39,14 @@ class TestUnit final : public rtc_units_impl::RelativeUnit<TestUnit> {
   }
 
  private:
-  friend class UnitBase<TestUnit>;
+  friend class rtc_units_impl::UnitBase<TestUnit>;
   static constexpr bool one_sided = false;
   using RelativeUnit<TestUnit>::RelativeUnit;
 };
+constexpr TestUnit TestUnitAddKilo(TestUnit value, int add_kilo) {
+  value += TestUnit::FromKilo(add_kilo);
+  return value;
+}
 }  // namespace
 namespace test {
 TEST(UnitBaseTest, ConstExpr) {
@@ -62,11 +61,14 @@ TEST(UnitBaseTest, ConstExpr) {
 
   static_assert(kTestUnitPlusInf > kTestUnitZero, "");
 
-  constexpr TestUnit kTestUnitKilo = TestUnit::FromStaticKilo<kValue>();
-  constexpr TestUnit kTestUnitValue = TestUnit::FromStaticValue<kValue>();
+  constexpr TestUnit kTestUnitKilo = TestUnit::FromKilo(kValue);
+  constexpr TestUnit kTestUnitValue = TestUnit::FromValue(kValue);
 
   static_assert(kTestUnitKilo.ToKiloOr(0) == kValue, "");
   static_assert(kTestUnitValue.ToValueOr(0) == kValue, "");
+  static_assert(TestUnitAddKilo(kTestUnitValue, 2).ToValue() == kValue + 2000,
+                "");
+  static_assert(TestUnit::FromValue(500) / 2 == TestUnit::FromValue(250));
 }
 
 TEST(UnitBaseTest, GetBackSameValues) {
@@ -215,6 +217,10 @@ TEST(UnitBaseTest, MathOperations) {
   EXPECT_EQ(mutable_delta, TestUnit::FromKilo(kValueA + kValueB));
   mutable_delta -= TestUnit::FromKilo(kValueB);
   EXPECT_EQ(mutable_delta, TestUnit::FromKilo(kValueA));
+
+  // Division by an int rounds towards zero to follow regular int division.
+  EXPECT_EQ(TestUnit::FromValue(789) / 10, TestUnit::FromValue(78));
+  EXPECT_EQ(TestUnit::FromValue(-789) / 10, TestUnit::FromValue(-78));
 }
 
 TEST(UnitBaseTest, InfinityOperations) {
@@ -230,5 +236,16 @@ TEST(UnitBaseTest, InfinityOperations) {
   EXPECT_TRUE((finite + TestUnit::MinusInfinity()).IsMinusInfinity());
   EXPECT_TRUE((finite - TestUnit::PlusInfinity()).IsMinusInfinity());
 }
+
+TEST(UnitBaseTest, UnaryMinus) {
+  const int64_t kValue = 1337;
+  const TestUnit unit = TestUnit::FromValue(kValue);
+  EXPECT_EQ(-unit.ToValue(), -kValue);
+
+  // Check infinity.
+  EXPECT_EQ(-TestUnit::PlusInfinity(), TestUnit::MinusInfinity());
+  EXPECT_EQ(-TestUnit::MinusInfinity(), TestUnit::PlusInfinity());
+}
+
 }  // namespace test
 }  // namespace webrtc

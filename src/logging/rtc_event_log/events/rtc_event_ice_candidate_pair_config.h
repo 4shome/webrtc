@@ -12,9 +12,15 @@
 #define LOGGING_RTC_EVENT_LOG_EVENTS_RTC_EVENT_ICE_CANDIDATE_PAIR_CONFIG_H_
 
 #include <stdint.h>
-#include <memory>
 
-#include "logging/rtc_event_log/events/rtc_event.h"
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "absl/strings/string_view.h"
+#include "api/rtc_event_log/rtc_event.h"
+#include "api/units/timestamp.h"
+#include "logging/rtc_event_log/events/rtc_event_field_encoding_parser.h"
 
 namespace webrtc {
 
@@ -63,6 +69,23 @@ enum class IceCandidateNetworkType {
   kNumValues,
 };
 
+struct LoggedIceCandidatePairConfig {
+  int64_t log_time_us() const { return timestamp.us(); }
+  int64_t log_time_ms() const { return timestamp.ms(); }
+  Timestamp log_time() const { return timestamp; }
+
+  Timestamp timestamp = Timestamp::MinusInfinity();
+  IceCandidatePairConfigType type;
+  uint32_t candidate_pair_id;
+  IceCandidateType local_candidate_type;
+  IceCandidatePairProtocol local_relay_protocol;
+  IceCandidateNetworkType local_network_type;
+  IceCandidatePairAddressFamily local_address_family;
+  IceCandidateType remote_candidate_type;
+  IceCandidatePairAddressFamily remote_address_family;
+  IceCandidatePairProtocol candidate_pair_protocol;
+};
+
 class IceCandidatePairDescription {
  public:
   IceCandidatePairDescription();
@@ -82,6 +105,8 @@ class IceCandidatePairDescription {
 
 class RtcEventIceCandidatePairConfig final : public RtcEvent {
  public:
+  static constexpr Type kType = Type::IceCandidatePairConfig;
+
   RtcEventIceCandidatePairConfig(
       IceCandidatePairConfigType type,
       uint32_t candidate_pair_id,
@@ -89,9 +114,9 @@ class RtcEventIceCandidatePairConfig final : public RtcEvent {
 
   ~RtcEventIceCandidatePairConfig() override;
 
-  Type GetType() const override;
-
-  bool IsConfigEvent() const override;
+  Type GetType() const override { return kType; }
+  // N.B. An ICE config event is not considered an RtcEventLog config event.
+  bool IsConfigEvent() const override { return false; }
 
   std::unique_ptr<RtcEventIceCandidatePairConfig> Copy() const;
 
@@ -99,6 +124,19 @@ class RtcEventIceCandidatePairConfig final : public RtcEvent {
   uint32_t candidate_pair_id() const { return candidate_pair_id_; }
   const IceCandidatePairDescription& candidate_pair_desc() const {
     return candidate_pair_desc_;
+  }
+
+  static std::string Encode(rtc::ArrayView<const RtcEvent*> batch) {
+    // TODO(terelius): Implement
+    return "";
+  }
+
+  static RtcEventLogParseStatus Parse(
+      absl::string_view encoded_bytes,
+      bool batched,
+      std::vector<LoggedIceCandidatePairConfig>& output) {
+    // TODO(terelius): Implement
+    return RtcEventLogParseStatus::Error("Not Implemented", __FILE__, __LINE__);
   }
 
  private:

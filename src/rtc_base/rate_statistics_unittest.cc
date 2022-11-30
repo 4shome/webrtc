@@ -8,9 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "rtc_base/rate_statistics.h"
+
 #include <cstdlib>
 
-#include "rtc_base/rate_statistics.h"
 #include "test/gtest.h"
 
 namespace {
@@ -147,14 +148,15 @@ TEST_F(RateStatisticsTest, ResetAfterSilence) {
 
   now_ms += kWindowMs + 1;
   EXPECT_FALSE(static_cast<bool>(stats_.Rate(now_ms)));
+  // Silence over window size should trigger auto reset for coming sample.
   stats_.Update(1000, now_ms);
   ++now_ms;
   stats_.Update(1000, now_ms);
   // We expect two samples of 1000 bytes, and that the bitrate is measured over
-  // 500 ms, i.e. 2 * 8 * 1000 / 0.500 = 32000.
-  EXPECT_EQ(32000u, *stats_.Rate(now_ms));
+  // active window instead of full window, which is now_ms - first_timestamp + 1
+  EXPECT_EQ(kExpectedBitrate, *stats_.Rate(now_ms));
 
-  // Reset, add the same samples again.
+  // Manual reset, add the same samples again.
   stats_.Reset();
   EXPECT_FALSE(static_cast<bool>(stats_.Rate(now_ms)));
   stats_.Update(1000, now_ms);
@@ -271,10 +273,46 @@ TEST_F(RateStatisticsTest, HandlesQuietPeriods) {
   EXPECT_FALSE(static_cast<bool>(stats_.Rate(now_ms)));
 
   // Move window a long way out.
+  // This will cause an automatic reset of the window
+  // First data point won't give a valid result
   now_ms += 2 * kWindowMs;
+  stats_.Update(0, now_ms);
+  bitrate = stats_.Rate(now_ms);
+  EXPECT_FALSE(static_cast<bool>(stats_.Rate(now_ms)));
+  // Second data point gives valid result
+  ++now_ms;
   stats_.Update(0, now_ms);
   bitrate = stats_.Rate(now_ms);
   EXPECT_TRUE(static_cast<bool>(bitrate));
   EXPECT_EQ(0u, *bitrate);
 }
+
+TEST_F(RateStatisticsTest, HandlesBigNumbers) {
+  int64_t large_number = 0x100000000u;
+  int64_t now_ms = 0;
+  stats_.Update(large_number, now_ms++);
+  stats_.Update(large_number, now_ms);
+  EXPECT_TRUE(stats_.Rate(now_ms));
+  EXPECT_EQ(large_number * RateStatistics::kBpsScale, *stats_.Rate(now_ms));
+}
+
+TEST_F(RateStatisticsTest, HandlesTooLargeNumbers) {
+  int64_t very_large_number = std::numeric_limits<int64_t>::max();
+  int64_t now_ms = 0;
+  stats_.Update(very_large_number, now_ms++);
+  stats_.Update(very_large_number, now_ms);
+  // This should overflow the internal accumulator.
+  EXPECT_FALSE(stats_.Rate(now_ms));
+}
+
+TEST_F(RateStatisticsTest, HandlesSomewhatLargeNumbers) {
+  int64_t very_large_number = std::numeric_limits<int64_t>::max();
+  int64_t now_ms = 0;
+  stats_.Update(very_large_number / 4, now_ms++);
+  stats_.Update(very_large_number / 4, now_ms);
+  // This should generate a rate of more than int64_t max, but still
+  // accumulate less than int64_t overflow.
+  EXPECT_FALSE(stats_.Rate(now_ms));
+}
+
 }  // namespace

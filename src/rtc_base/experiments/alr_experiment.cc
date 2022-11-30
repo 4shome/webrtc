@@ -12,8 +12,10 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "api/transport/field_trial_based_config.h"
 #include "rtc_base/logging.h"
 
@@ -31,22 +33,22 @@ bool AlrExperimentSettings::MaxOneFieldTrialEnabled() {
 }
 
 bool AlrExperimentSettings::MaxOneFieldTrialEnabled(
-    const WebRtcKeyValueConfig& key_value_config) {
+    const FieldTrialsView& key_value_config) {
   return key_value_config.Lookup(kStrictPacingAndProbingExperimentName)
              .empty() ||
          key_value_config.Lookup(kScreenshareProbingBweExperimentName).empty();
 }
 
 absl::optional<AlrExperimentSettings>
-AlrExperimentSettings::CreateFromFieldTrial(const char* experiment_name) {
+AlrExperimentSettings::CreateFromFieldTrial(absl::string_view experiment_name) {
   return AlrExperimentSettings::CreateFromFieldTrial(FieldTrialBasedConfig(),
                                                      experiment_name);
 }
 
 absl::optional<AlrExperimentSettings>
 AlrExperimentSettings::CreateFromFieldTrial(
-    const WebRtcKeyValueConfig& key_value_config,
-    const char* experiment_name) {
+    const FieldTrialsView& key_value_config,
+    absl::string_view experiment_name) {
   absl::optional<AlrExperimentSettings> ret;
   std::string group_name = key_value_config.Lookup(experiment_name);
 
@@ -79,9 +81,9 @@ AlrExperimentSettings::CreateFromFieldTrial(
                         "pacing factor: "
                      << settings.pacing_factor << ", max pacer queue length: "
                      << settings.max_paced_queue_time
-                     << ", ALR start bandwidth usage percent: "
+                     << ", ALR bandwidth usage percent: "
                      << settings.alr_bandwidth_usage_percent
-                     << ", ALR end budget level percent: "
+                     << ", ALR start budget level percent: "
                      << settings.alr_start_budget_level_percent
                      << ", ALR end budget level percent: "
                      << settings.alr_stop_budget_level_percent

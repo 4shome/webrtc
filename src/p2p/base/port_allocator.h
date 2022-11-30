@@ -16,6 +16,9 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
+#include "api/sequence_checker.h"
+#include "api/transport/enums.h"
 #include "p2p/base/port.h"
 #include "p2p/base/port_interface.h"
 #include "rtc_base/helpers.h"
@@ -24,7 +27,6 @@
 #include "rtc_base/system/rtc_export.h"
 #include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
-#include "rtc_base/thread_checker.h"
 
 namespace webrtc {
 class TurnCustomizer;
@@ -133,7 +135,7 @@ enum class TlsCertPolicy {
 // TODO(deadbeef): Rename to TurnCredentials (and username to ufrag).
 struct RelayCredentials {
   RelayCredentials() {}
-  RelayCredentials(const std::string& username, const std::string& password)
+  RelayCredentials(absl::string_view username, absl::string_view password)
       : username(username), password(password) {}
 
   bool operator==(const RelayCredentials& o) const {
@@ -148,33 +150,32 @@ struct RelayCredentials {
 typedef std::vector<ProtocolAddress> PortList;
 // TODO(deadbeef): Rename to TurnServerConfig.
 struct RTC_EXPORT RelayServerConfig {
-  explicit RelayServerConfig(RelayType type);
+  RelayServerConfig();
   RelayServerConfig(const rtc::SocketAddress& address,
-                    const std::string& username,
-                    const std::string& password,
+                    absl::string_view username,
+                    absl::string_view password,
                     ProtocolType proto);
-  RelayServerConfig(const std::string& address,
+  RelayServerConfig(absl::string_view address,
                     int port,
-                    const std::string& username,
-                    const std::string& password,
+                    absl::string_view username,
+                    absl::string_view password,
                     ProtocolType proto);
   // Legacy constructor where "secure" and PROTO_TCP implies PROTO_TLS.
-  RelayServerConfig(const std::string& address,
+  RelayServerConfig(absl::string_view address,
                     int port,
-                    const std::string& username,
-                    const std::string& password,
+                    absl::string_view username,
+                    absl::string_view password,
                     ProtocolType proto,
                     bool secure);
   RelayServerConfig(const RelayServerConfig&);
   ~RelayServerConfig();
 
   bool operator==(const RelayServerConfig& o) const {
-    return type == o.type && ports == o.ports && credentials == o.credentials &&
+    return ports == o.ports && credentials == o.credentials &&
            priority == o.priority;
   }
   bool operator!=(const RelayServerConfig& o) const { return !(*this == o); }
 
-  RelayType type;
   PortList ports;
   RelayCredentials credentials;
   int priority = 0;
@@ -182,15 +183,16 @@ struct RTC_EXPORT RelayServerConfig {
   std::vector<std::string> tls_alpn_protocols;
   std::vector<std::string> tls_elliptic_curves;
   rtc::SSLCertificateVerifier* tls_cert_verifier = nullptr;
+  std::string turn_logging_id;
 };
 
 class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
  public:
   // Content name passed in mostly for logging and debugging.
-  PortAllocatorSession(const std::string& content_name,
+  PortAllocatorSession(absl::string_view content_name,
                        int component,
-                       const std::string& ice_ufrag,
-                       const std::string& ice_pwd,
+                       absl::string_view ice_ufrag,
+                       absl::string_view ice_pwd,
                        uint32_t flags);
 
   // Subclasses should clean up any ports created.
@@ -203,6 +205,10 @@ class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
   const std::string& ice_ufrag() const { return ice_ufrag_; }
   const std::string& ice_pwd() const { return ice_pwd_; }
   bool pooled() const { return pooled_; }
+
+  // TODO(bugs.webrtc.org/14605): move this to the constructor
+  void set_ice_tiebreaker(uint64_t tiebreaker) { tiebreaker_ = tiebreaker; }
+  uint64_t ice_tiebreaker() const { return tiebreaker_; }
 
   // Setting this filter should affect not only candidates gathered in the
   // future, but candidates already gathered and ports already "ready",
@@ -239,12 +245,10 @@ class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
   // network. Only if all networks of an interface have no connection, the
   // implementation should start re-gathering on all networks of that interface.
   virtual void RegatherOnFailedNetworks() {}
-  // Re-gathers candidates on all networks.
-  virtual void RegatherOnAllNetworks() {}
   // Get candidate-level stats from all candidates on the ready ports and return
   // the stats to the given list.
   virtual void GetCandidateStatsFromReadyPorts(
-      CandidateStatsList* candidate_stats_list) const;
+      CandidateStatsList* candidate_stats_list) const {}
   // Set the interval at which STUN candidates will resend STUN binding requests
   // on the underlying ports to keep NAT bindings open.
   // The default value of the interval in implementation is restored if a null
@@ -271,6 +275,8 @@ class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
       SignalPortsPruned;
   sigslot::signal2<PortAllocatorSession*, const std::vector<Candidate>&>
       SignalCandidatesReady;
+  sigslot::signal2<PortAllocatorSession*, const IceCandidateErrorEvent&>
+      SignalCandidateError;
   // Candidates should be signaled to be removed when the port that generated
   // the candidates is removed.
   sigslot::signal2<PortAllocatorSession*, const std::vector<Candidate>&>
@@ -282,7 +288,6 @@ class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
 
   virtual uint32_t generation();
   virtual void set_generation(uint32_t generation);
-  sigslot::signal1<PortAllocatorSession*> SignalDestroyed;
 
  protected:
   // This method is called when a pooled session (which doesn't have these
@@ -299,14 +304,14 @@ class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
   const std::string& password() const { return ice_pwd_; }
 
  private:
-  void SetIceParameters(const std::string& content_name,
+  void SetIceParameters(absl::string_view content_name,
                         int component,
-                        const std::string& ice_ufrag,
-                        const std::string& ice_pwd) {
-    content_name_ = content_name;
+                        absl::string_view ice_ufrag,
+                        absl::string_view ice_pwd) {
+    content_name_ = std::string(content_name);
     component_ = component;
-    ice_ufrag_ = ice_ufrag;
-    ice_pwd_ = ice_pwd;
+    ice_ufrag_ = std::string(ice_ufrag);
+    ice_pwd_ = std::string(ice_pwd);
     UpdateIceParametersInternal();
   }
 
@@ -320,6 +325,9 @@ class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
   std::string ice_pwd_;
 
   bool pooled_ = false;
+
+  // TODO(bugs.webrtc.org/14605): move this to the constructor
+  uint64_t tiebreaker_;
 
   // SetIceParameters is an implementation detail which only PortAllocator
   // should be able to call.
@@ -357,6 +365,7 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   // created or destroyed as necessary.
   //
   // Returns true if the configuration could successfully be changed.
+  // Deprecated
   bool SetConfiguration(const ServerAddresses& stun_servers,
                         const std::vector<RelayServerConfig>& turn_servers,
                         int candidate_pool_size,
@@ -364,6 +373,16 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
                         webrtc::TurnCustomizer* turn_customizer = nullptr,
                         const absl::optional<int>&
                             stun_candidate_keepalive_interval = absl::nullopt);
+  bool SetConfiguration(const ServerAddresses& stun_servers,
+                        const std::vector<RelayServerConfig>& turn_servers,
+                        int candidate_pool_size,
+                        webrtc::PortPrunePolicy turn_port_prune_policy,
+                        webrtc::TurnCustomizer* turn_customizer = nullptr,
+                        const absl::optional<int>&
+                            stun_candidate_keepalive_interval = absl::nullopt);
+
+  void SetIceTiebreaker(uint64_t tiebreaker);
+  uint64_t IceTiebreaker() const { return tiebreaker_; }
 
   const ServerAddresses& stun_servers() const {
     CheckRunOnValidThreadIfInitialized();
@@ -392,11 +411,21 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   // loopback interfaces.
   virtual void SetNetworkIgnoreMask(int network_ignore_mask) = 0;
 
+  // Set whether VPN connections should be preferred, avoided, mandated or
+  // blocked.
+  virtual void SetVpnPreference(webrtc::VpnPreference preference) {
+    vpn_preference_ = preference;
+  }
+
+  // Set list of <ipaddress, mask> that shall be categorized as VPN.
+  // Implemented by BasicPortAllocator.
+  virtual void SetVpnList(const std::vector<rtc::NetworkMask>& vpn_list) {}
+
   std::unique_ptr<PortAllocatorSession> CreateSession(
-      const std::string& content_name,
+      absl::string_view content_name,
       int component,
-      const std::string& ice_ufrag,
-      const std::string& ice_pwd);
+      absl::string_view ice_ufrag,
+      absl::string_view ice_pwd);
 
   // Get an available pooled session and set the transport information on it.
   //
@@ -406,10 +435,10 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   //   return a pooled session with matching ice credentials.
   // If no pooled sessions are available, returns null.
   std::unique_ptr<PortAllocatorSession> TakePooledSession(
-      const std::string& content_name,
+      absl::string_view content_name,
       int component,
-      const std::string& ice_ufrag,
-      const std::string& ice_pwd);
+      absl::string_view ice_ufrag,
+      absl::string_view ice_pwd);
 
   // Returns the next session that would be returned by TakePooledSession
   // optionally restricting it to sessions with specified ice credentials.
@@ -427,6 +456,13 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
 
   // Discard any remaining pooled sessions.
   void DiscardCandidatePool();
+
+  // Clears the address and the related address fields of a local candidate to
+  // avoid IP leakage. This is applicable in several scenarios:
+  // 1. Sanitization is configured via the candidate filter.
+  // 2. Sanitization is configured via the port allocator flags.
+  // 3. mDNS concealment of private IPs is enabled.
+  Candidate SanitizeCandidate(const Candidate& c) const;
 
   uint32_t flags() const {
     CheckRunOnValidThreadIfInitialized();
@@ -451,9 +487,9 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
     return proxy_;
   }
 
-  void set_proxy(const std::string& agent, const rtc::ProxyInfo& proxy) {
+  void set_proxy(absl::string_view agent, const rtc::ProxyInfo& proxy) {
     CheckRunOnValidThreadIfInitialized();
-    agent_ = agent;
+    agent_ = std::string(agent);
     proxy_ = proxy;
   }
 
@@ -528,25 +564,32 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
     return candidate_filter_;
   }
 
-  void set_candidate_filter(uint32_t filter) {
-    CheckRunOnValidThreadIfInitialized();
-    candidate_filter_ = filter;
-  }
+  // The new filter value will be populated to future allocation sessions, when
+  // they are created via CreateSession, and also pooled sessions when one is
+  // taken via TakePooledSession.
+  //
+  // A change in the candidate filter also fires a signal
+  // `SignalCandidateFilterChanged`, so that objects subscribed to this signal
+  // can, for example, update the candidate filter for sessions created by this
+  // allocator and already taken by the object.
+  //
+  // Specifically for the session taken by the ICE transport, we currently do
+  // not support removing candidate pairs formed with local candidates from this
+  // session that are disabled by the new candidate filter.
+  void SetCandidateFilter(uint32_t filter);
+  // Deprecated.
+  // TODO(qingsi): Remove this after Chromium migrates to the new method.
+  void set_candidate_filter(uint32_t filter) { SetCandidateFilter(filter); }
 
+  // Deprecated (by the next method).
   bool prune_turn_ports() const {
     CheckRunOnValidThreadIfInitialized();
-    return prune_turn_ports_;
+    return turn_port_prune_policy_ == webrtc::PRUNE_BASED_ON_PRIORITY;
   }
 
-  // Gets/Sets the Origin value used for WebRTC STUN requests.
-  const std::string& origin() const {
+  webrtc::PortPrunePolicy turn_port_prune_policy() const {
     CheckRunOnValidThreadIfInitialized();
-    return origin_;
-  }
-
-  void set_origin(const std::string& origin) {
-    CheckRunOnValidThreadIfInitialized();
-    origin_ = origin;
+    return turn_port_prune_policy_;
   }
 
   webrtc::TurnCustomizer* turn_customizer() {
@@ -565,16 +608,25 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   // Return IceParameters of the pooled sessions.
   std::vector<IceParameters> GetPooledIceCredentials();
 
+  // Fired when `candidate_filter_` changes.
+  sigslot::signal2<uint32_t /* prev_filter */, uint32_t /* cur_filter */>
+      SignalCandidateFilterChanged;
+
  protected:
+  // TODO(webrtc::13579): Remove std::string version once downstream users have
+  // migrated to the absl::string_view version.
   virtual PortAllocatorSession* CreateSessionInternal(
-      const std::string& content_name,
+      absl::string_view content_name,
       int component,
-      const std::string& ice_ufrag,
-      const std::string& ice_pwd) = 0;
+      absl::string_view ice_ufrag,
+      absl::string_view ice_pwd) = 0;
 
   const std::vector<std::unique_ptr<PortAllocatorSession>>& pooled_sessions() {
     return pooled_sessions_;
   }
+
+  // Returns true if there is an mDNS responder attached to the network manager.
+  virtual bool MdnsObfuscationEnabled() const { return false; }
 
   // The following thread checks are only done in DCHECK for the consistency
   // with the exsiting thread checks.
@@ -597,7 +649,8 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   bool allow_tcp_listen_;
   uint32_t candidate_filter_;
   std::string origin_;
-  rtc::ThreadChecker thread_checker_;
+  webrtc::SequenceChecker thread_checker_;
+  webrtc::VpnPreference vpn_preference_ = webrtc::VpnPreference::kDefault;
 
  private:
   ServerAddresses stun_servers_;
@@ -605,7 +658,7 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   int candidate_pool_size_ = 0;  // Last value passed into SetConfiguration.
   std::vector<std::unique_ptr<PortAllocatorSession>> pooled_sessions_;
   bool candidate_pool_frozen_ = false;
-  bool prune_turn_ports_ = false;
+  webrtc::PortPrunePolicy turn_port_prune_policy_ = webrtc::NO_PRUNE;
 
   // Customizer for TURN messages.
   // The instance is owned by application and will be shared among
@@ -622,6 +675,9 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   // if ice_credentials is nullptr.
   std::vector<std::unique_ptr<PortAllocatorSession>>::const_iterator
   FindPooledSession(const IceParameters* ice_credentials = nullptr) const;
+
+  // ICE tie breaker.
+  uint64_t tiebreaker_;
 };
 
 }  // namespace cricket

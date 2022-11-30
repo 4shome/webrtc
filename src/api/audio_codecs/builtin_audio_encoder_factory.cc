@@ -22,6 +22,7 @@
 #endif
 #include "api/audio_codecs/isac/audio_encoder_isac.h"
 #if WEBRTC_USE_BUILTIN_OPUS
+#include "api/audio_codecs/opus/audio_encoder_multi_channel_opus.h"
 #include "api/audio_codecs/opus/audio_encoder_opus.h"  // nogncheck
 #endif
 
@@ -46,8 +47,10 @@ struct NotAdvertised {
   static std::unique_ptr<AudioEncoder> MakeAudioEncoder(
       const Config& config,
       int payload_type,
-      absl::optional<AudioCodecPairId> codec_pair_id = absl::nullopt) {
-    return T::MakeAudioEncoder(config, payload_type, codec_pair_id);
+      absl::optional<AudioCodecPairId> codec_pair_id = absl::nullopt,
+      const FieldTrialsView* field_trials = nullptr) {
+    return T::MakeAudioEncoder(config, payload_type, codec_pair_id,
+                               field_trials);
   }
 };
 
@@ -57,7 +60,7 @@ rtc::scoped_refptr<AudioEncoderFactory> CreateBuiltinAudioEncoderFactory() {
   return CreateAudioEncoderFactory<
 
 #if WEBRTC_USE_BUILTIN_OPUS
-      AudioEncoderOpus,
+      AudioEncoderOpus, NotAdvertised<AudioEncoderMultiChannelOpus>,
 #endif
 
       AudioEncoderIsac, AudioEncoderG722,

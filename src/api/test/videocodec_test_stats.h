@@ -13,6 +13,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <map>
 #include <string>
 #include <vector>
 
@@ -32,6 +34,9 @@ class VideoCodecTestStats {
 
     std::string ToString() const;
 
+    // Returns name -> value text map of frame statistics.
+    std::map<std::string, std::string> ToMap() const;
+
     size_t frame_number = 0;
     size_t rtp_timestamp = 0;
 
@@ -41,6 +46,7 @@ class VideoCodecTestStats {
     bool encoding_successful = false;
     size_t encode_time_us = 0;
     size_t target_bitrate_kbps = 0;
+    double target_framerate_fps = 0.0;
     size_t length_bytes = 0;
     VideoFrameType frame_type = VideoFrameType::kVideoFrameDelta;
 
@@ -65,6 +71,7 @@ class VideoCodecTestStats {
     int qp = -1;
 
     // Quality.
+    bool quality_analysis_successful = false;
     float psnr_y = 0.0f;
     float psnr_u = 0.0f;
     float psnr_v = 0.0f;
@@ -74,6 +81,9 @@ class VideoCodecTestStats {
 
   struct VideoStatistics {
     std::string ToString(std::string prefix) const;
+
+    // Returns name -> value text map of video statistics.
+    std::map<std::string, std::string> ToMap() const;
 
     size_t target_bitrate_kbps = 0;
     float input_framerate_fps = 0.0f;
@@ -91,10 +101,17 @@ class VideoCodecTestStats {
     float enc_speed_fps = 0.0f;
     float dec_speed_fps = 0.0f;
 
+    float avg_encode_latency_sec = 0.0f;
+    float max_encode_latency_sec = 0.0f;
+    float avg_decode_latency_sec = 0.0f;
+    float max_decode_latency_sec = 0.0f;
+
     float avg_delay_sec = 0.0f;
     float max_key_frame_delay_sec = 0.0f;
     float max_delta_frame_delay_sec = 0.0f;
     float time_to_reach_target_bitrate_sec = 0.0f;
+    float avg_bitrate_mismatch_pct = 0.0f;
+    float avg_framerate_mismatch_pct = 0.0f;
 
     float avg_key_frame_size_bytes = 0.0f;
     float avg_delta_frame_size_bytes = 0.0f;

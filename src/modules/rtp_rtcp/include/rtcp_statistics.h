@@ -13,23 +13,64 @@
 
 #include <stdint.h>
 
+#include "absl/strings/string_view.h"
+
 namespace webrtc {
 
-// Statistics for an RTCP channel
-struct RtcpStatistics {
-  uint8_t fraction_lost = 0;
-  int32_t packets_lost = 0;  // Defined as a 24 bit signed integer in RTCP
-  uint32_t extended_highest_sequence_number = 0;
-  uint32_t jitter = 0;
+// Statistics for RTCP packet types.
+struct RtcpPacketTypeCounter {
+  RtcpPacketTypeCounter()
+      : nack_packets(0),
+        fir_packets(0),
+        pli_packets(0),
+        nack_requests(0),
+        unique_nack_requests(0) {}
+
+  void Add(const RtcpPacketTypeCounter& other) {
+    nack_packets += other.nack_packets;
+    fir_packets += other.fir_packets;
+    pli_packets += other.pli_packets;
+    nack_requests += other.nack_requests;
+    unique_nack_requests += other.unique_nack_requests;
+  }
+
+  void Subtract(const RtcpPacketTypeCounter& other) {
+    nack_packets -= other.nack_packets;
+    fir_packets -= other.fir_packets;
+    pli_packets -= other.pli_packets;
+    nack_requests -= other.nack_requests;
+    unique_nack_requests -= other.unique_nack_requests;
+  }
+
+  int UniqueNackRequestsInPercent() const {
+    if (nack_requests == 0) {
+      return 0;
+    }
+    return static_cast<int>((unique_nack_requests * 100.0f / nack_requests) +
+                            0.5f);
+  }
+
+  uint32_t nack_packets;          // Number of RTCP NACK packets.
+  uint32_t fir_packets;           // Number of RTCP FIR packets.
+  uint32_t pli_packets;           // Number of RTCP PLI packets.
+  uint32_t nack_requests;         // Number of NACKed RTP packets.
+  uint32_t unique_nack_requests;  // Number of unique NACKed RTP packets.
 };
 
-class RtcpStatisticsCallback {
+class RtcpPacketTypeCounterObserver {
  public:
-  virtual ~RtcpStatisticsCallback() {}
+  virtual ~RtcpPacketTypeCounterObserver() {}
+  virtual void RtcpPacketTypesCounterUpdated(
+      uint32_t ssrc,
+      const RtcpPacketTypeCounter& packet_counter) = 0;
+};
 
-  virtual void StatisticsUpdated(const RtcpStatistics& statistics,
-                                 uint32_t ssrc) = 0;
-  virtual void CNameChanged(const char* cname, uint32_t ssrc) = 0;
+// Invoked for each cname passed in RTCP SDES blocks.
+class RtcpCnameCallback {
+ public:
+  virtual ~RtcpCnameCallback() = default;
+
+  virtual void OnCname(uint32_t ssrc, absl::string_view cname) = 0;
 };
 
 }  // namespace webrtc

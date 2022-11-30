@@ -8,9 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "api/audio_codecs/builtin_audio_decoder_factory.h"
+
 #include <memory>
 
-#include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -103,9 +104,9 @@ TEST(AudioDecoderFactoryTest, CreateL16) {
   rtc::scoped_refptr<AudioDecoderFactory> adf =
       CreateBuiltinAudioDecoderFactory();
   ASSERT_TRUE(adf);
-  // L16 supports any clock rate, any number of channels.
+  // L16 supports any clock rate and any number of channels up to 24.
   const int clockrates[] = {8000, 16000, 32000, 48000};
-  const int num_channels[] = {1, 2, 3, 4711};
+  const int num_channels[] = {1, 2, 3, 24};
   for (int clockrate : clockrates) {
     EXPECT_FALSE(adf->MakeAudioDecoder(SdpAudioFormat("l16", clockrate, 0),
                                        absl::nullopt));
@@ -113,6 +114,34 @@ TEST(AudioDecoderFactoryTest, CreateL16) {
       EXPECT_TRUE(adf->MakeAudioDecoder(
           SdpAudioFormat("l16", clockrate, channels), absl::nullopt));
     }
+  }
+}
+
+// Tests that using more channels than the maximum does not work
+TEST(AudioDecoderFactoryTest, MaxNrOfChannels) {
+  rtc::scoped_refptr<AudioDecoderFactory> adf =
+      CreateBuiltinAudioDecoderFactory();
+  std::vector<std::string> codecs = {
+#ifdef WEBRTC_CODEC_OPUS
+    "opus",
+#endif
+#if defined(WEBRTC_CODEC_ISAC) || defined(WEBRTC_CODEC_ISACFX)
+    "isac",
+#endif
+#ifdef WEBRTC_CODEC_ILBC
+    "ilbc",
+#endif
+    "pcmu",
+    "pcma",
+    "l16",
+    "G722",
+    "G711",
+  };
+
+  for (auto codec : codecs) {
+    EXPECT_FALSE(adf->MakeAudioDecoder(
+        SdpAudioFormat(codec, 32000, AudioDecoder::kMaxNumberOfChannels + 1),
+        absl::nullopt));
   }
 }
 
@@ -149,7 +178,7 @@ TEST(AudioDecoderFactoryTest, CreateOpus) {
   for (int hz : {8000, 16000, 32000, 48000}) {
     for (int channels : {0, 1, 2, 3}) {
       for (std::string stereo : {"XX", "0", "1", "2"}) {
-        std::map<std::string, std::string> params;
+        SdpAudioFormat::Parameters params;
         if (stereo != "XX") {
           params["stereo"] = stereo;
         }

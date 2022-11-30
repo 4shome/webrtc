@@ -18,6 +18,7 @@
 #include <string>
 #include <utility>
 
+#include "absl/strings/string_view.h"
 #include "rtc_base/arraysize.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/platform_thread_types.h"
@@ -38,9 +39,9 @@ using core_audio_utility::ErrorToString;
 // Converts from channel mask to list of included channels.
 // Each audio data format contains channels for one or more of the positions
 // listed below. The number of channels simply equals the number of nonzero
-// flag bits in the |channel_mask|. The relative positions of the channels
+// flag bits in the `channel_mask`. The relative positions of the channels
 // within each block of audio data always follow the same relative ordering
-// as the flag bits in the table below. For example, if |channel_mask| contains
+// as the flag bits in the table below. For example, if `channel_mask` contains
 // the value 0x00000033, the format defines four audio channels that are
 // assigned for playback to the front-left, front-right, back-left,
 // and back-right speakers, respectively. The channel data should be interleaved
@@ -131,50 +132,72 @@ std::string ChannelMaskToString(DWORD channel_mask) {
   return ss;
 }
 
-// Converts from channel mask to DirectSound speaker configuration.
-// The values below are copied from ksmedia.h.
-// Example: KSAUDIO_SPEAKER_STEREO = (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT).
-const char* DirectSoundConfigToString(DWORD channel_mask) {
-  switch (channel_mask) {
-    case KSAUDIO_SPEAKER_DIRECTOUT:
-      return "KSAUDIO_DIRECTOUT";
-    case KSAUDIO_SPEAKER_MONO:
-      // Front center (C)
-      return "KSAUDIO_MONO";
-    case KSAUDIO_SPEAKER_1POINT1:
-      return "KSAUDIO_1POINT1";
-    case KSAUDIO_SPEAKER_STEREO:
-      // Front left (L), front right (R).
-      return "KSAUDIO_STEREO";
-    case KSAUDIO_SPEAKER_2POINT1:
-      return "KSAUDIO_2POINT1";
-    case KSAUDIO_SPEAKER_3POINT0:
-      return "KSAUDIO_3POINT0";
-    case KSAUDIO_SPEAKER_3POINT1:
-      return "KSAUDIO_3POINT1";
-    case KSAUDIO_SPEAKER_QUAD:
-      // L, R, back left (Lb), back right (Rb).
-      return "KSAUDIO_QUAD";
-    case KSAUDIO_SPEAKER_SURROUND:
-      // L, R, front center (C), back center (Cb).
-      return "KSAUDIO_SURROUND";
-    case KSAUDIO_SPEAKER_5POINT0:
-      return "KSAUDIO_5POINT0";
-    case KSAUDIO_SPEAKER_5POINT1:
-      return "KSAUDIO_5POINT1";
-    case KSAUDIO_SPEAKER_7POINT0:
-      return "KSAUDIO_7POINT0";
-    case KSAUDIO_SPEAKER_7POINT1:
-      // L, R, C, Lb, Rb, front left-of-center, front right-of-center, LFE.
-      return "KSAUDIO_7POINT1";
-    case KSAUDIO_SPEAKER_5POINT1_SURROUND:
-      // L, R, C, side left (Ls), side right (Rs), LFE.
-      return "KSAUDIO_5POINT1_SURROUND";
-    case KSAUDIO_SPEAKER_7POINT1_SURROUND:
-      // L, R, C, Lb, Rb, Ls, Rs, LFE.
-      return "KSAUDIO_7POINT1_SURROUND";
+#if !defined(KSAUDIO_SPEAKER_1POINT1)
+// These values are only defined in ksmedia.h after a certain version, to build
+// cleanly for older windows versions this just defines the ones that are
+// missing.
+#define KSAUDIO_SPEAKER_1POINT1 (SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY)
+#define KSAUDIO_SPEAKER_2POINT1 \
+  (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_LOW_FREQUENCY)
+#define KSAUDIO_SPEAKER_3POINT0 \
+  (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER)
+#define KSAUDIO_SPEAKER_3POINT1                                      \
+  (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | \
+   SPEAKER_LOW_FREQUENCY)
+#define KSAUDIO_SPEAKER_5POINT0                                      \
+  (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | \
+   SPEAKER_SIDE_LEFT | SPEAKER_SIDE_RIGHT)
+#define KSAUDIO_SPEAKER_7POINT0                                      \
+  (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | \
+   SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT | SPEAKER_SIDE_LEFT |      \
+   SPEAKER_SIDE_RIGHT)
+#endif
+
+#if !defined(AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY)
+#define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000
+#define AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000
+#endif
+
+// Converts the most common format tags defined in mmreg.h into string
+// equivalents. Mainly intended for log messages.
+const char* WaveFormatTagToString(WORD format_tag) {
+  switch (format_tag) {
+    case WAVE_FORMAT_UNKNOWN:
+      return "WAVE_FORMAT_UNKNOWN";
+    case WAVE_FORMAT_PCM:
+      return "WAVE_FORMAT_PCM";
+    case WAVE_FORMAT_IEEE_FLOAT:
+      return "WAVE_FORMAT_IEEE_FLOAT";
+    case WAVE_FORMAT_EXTENSIBLE:
+      return "WAVE_FORMAT_EXTENSIBLE";
     default:
-      return "KSAUDIO_INVALID";
+      return "UNKNOWN";
+  }
+}
+
+const char* RoleToString(const ERole role) {
+  switch (role) {
+    case eConsole:
+      return "Console";
+    case eMultimedia:
+      return "Multimedia";
+    case eCommunications:
+      return "Communications";
+    default:
+      return "Unsupported";
+  }
+}
+
+const char* FlowToString(const EDataFlow flow) {
+  switch (flow) {
+    case eRender:
+      return "Render";
+    case eCapture:
+      return "Capture";
+    case eAll:
+      return "Render or Capture";
+    default:
+      return "Unsupported";
   }
 }
 
@@ -183,7 +206,7 @@ bool LoadAudiosesDll() {
       L"%WINDIR%\\system32\\audioses.dll";
   wchar_t path[MAX_PATH] = {0};
   ExpandEnvironmentStringsW(kAudiosesDLL, path, arraysize(path));
-  RTC_DLOG(INFO) << rtc::ToUtf8(path);
+  RTC_DLOG(LS_INFO) << rtc::ToUtf8(path);
   return (LoadLibraryExW(path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH) !=
           nullptr);
 }
@@ -192,7 +215,7 @@ bool LoadAvrtDll() {
   static const wchar_t* const kAvrtDLL = L"%WINDIR%\\system32\\Avrt.dll";
   wchar_t path[MAX_PATH] = {0};
   ExpandEnvironmentStringsW(kAvrtDLL, path, arraysize(path));
-  RTC_DLOG(INFO) << rtc::ToUtf8(path);
+  RTC_DLOG(LS_INFO) << rtc::ToUtf8(path);
   return (LoadLibraryExW(path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH) !=
           nullptr);
 }
@@ -256,12 +279,15 @@ bool IsDeviceActive(IMMDevice* device) {
   return SUCCEEDED(device->GetState(&state)) && (state & DEVICE_STATE_ACTIVE);
 }
 
-// Retrieve an audio device specified by |device_id| or a default device
-// specified by data-flow direction and role if |device_id| is default.
-ComPtr<IMMDevice> CreateDeviceInternal(const std::string& device_id,
+// Retrieve an audio device specified by `device_id` or a default device
+// specified by data-flow direction and role if `device_id` is default.
+ComPtr<IMMDevice> CreateDeviceInternal(absl::string_view device_id,
                                        EDataFlow data_flow,
                                        ERole role) {
-  RTC_DLOG(INFO) << "CreateDeviceInternal: " << role;
+  RTC_DLOG(LS_INFO) << "CreateDeviceInternal: "
+                       "id="
+                    << device_id << ", flow=" << FlowToString(data_flow)
+                    << ", role=" << RoleToString(role);
   ComPtr<IMMDevice> audio_endpoint_device;
 
   // Create the IMMDeviceEnumerator interface.
@@ -271,6 +297,13 @@ ComPtr<IMMDevice> CreateDeviceInternal(const std::string& device_id,
 
   _com_error error(S_FALSE);
   if (device_id == AudioDeviceName::kDefaultDeviceId) {
+    // Get the default audio endpoint for the specified data-flow direction and
+    // role. Note that, if only a single rendering or capture device is
+    // available, the system always assigns all three rendering or capture roles
+    // to that device. If the method fails to find a rendering or capture device
+    // for the specified role, this means that no rendering or capture device is
+    // available at all. If no device is available, the method sets the output
+    // pointer to NULL and returns ERROR_NOT_FOUND.
     error = device_enum->GetDefaultAudioEndpoint(
         data_flow, role, audio_endpoint_device.GetAddressOf());
     if (FAILED(error.Error())) {
@@ -279,6 +312,8 @@ ComPtr<IMMDevice> CreateDeviceInternal(const std::string& device_id,
           << ErrorToString(error);
     }
   } else {
+    // Ask for an audio endpoint device that is identified by an endpoint ID
+    // string.
     error = device_enum->GetDevice(rtc::ToUtf16(device_id).c_str(),
                                    audio_endpoint_device.GetAddressOf());
     if (FAILED(error.Error())) {
@@ -289,7 +324,7 @@ ComPtr<IMMDevice> CreateDeviceInternal(const std::string& device_id,
 
   // Verify that the audio endpoint device is active, i.e., that the audio
   // adapter that connects to the endpoint device is present and enabled.
-  if (SUCCEEDED(error.Error()) &&
+  if (SUCCEEDED(error.Error()) && audio_endpoint_device.Get() &&
       !IsDeviceActive(audio_endpoint_device.Get())) {
     RTC_LOG(LS_WARNING) << "Selected endpoint device is not active";
     audio_endpoint_device.Reset();
@@ -439,73 +474,124 @@ ComPtr<IMMDeviceCollection> CreateCollectionInternal(EDataFlow data_flow) {
 
 bool GetDeviceNamesInternal(EDataFlow data_flow,
                             webrtc::AudioDeviceNames* device_names) {
-  // Always add the default device in index 0 and the default communication
-  // device as index 1 in the vector. The name of the default device starts
-  // with "Default - " and the default communication device starts with
-  // "Communication - ".
-  //  Example of friendly name: "Default - Headset (SB Arena Headset)"
-  ERole role[] = {eConsole, eCommunications};
-  ComPtr<IMMDevice> default_device;
-  AudioDeviceName default_device_name;
-  for (size_t i = 0; i < arraysize(role); ++i) {
-    default_device = CreateDeviceInternal(AudioDeviceName::kDefaultDeviceId,
-                                          data_flow, role[i]);
-    std::string device_name;
-    device_name += (role[i] == eConsole ? "Default - " : "Communication - ");
-    device_name += GetDeviceFriendlyNameInternal(default_device.Get());
-    std::string unique_id = GetDeviceIdInternal(default_device.Get());
-
-    default_device_name.device_name = std::move(device_name);
-    default_device_name.unique_id = std::move(unique_id);
-    RTC_DLOG(INFO) << "friendly name: " << default_device_name.device_name;
-    RTC_DLOG(INFO) << "unique id    : " << default_device_name.unique_id;
-    // Add combination of user-friendly and unique name to the output list.
-    device_names->emplace_back(default_device_name);
-  }
-
-  // Next, add all active input devices on index 2 and above. Note that,
-  // one device can have more than one role. Hence, if only one input device
-  // is present, the output vector will contain three elements all with the
-  // same unique ID but with different names.
-  // Example (one capture device but three elements in device_names):
-  //   0: friendly name: Default - Headset (SB Arena Headset)
-  //   0: unique id    : {0.0.1.00000000}.{822d99bb-d9b0-4f6f-b2a5-cd1be220d338}
-  //   1: friendly name: Communication - Headset (SB Arena Headset)
-  //   1: unique id    : {0.0.1.00000000}.{822d99bb-d9b0-4f6f-b2a5-cd1be220d338}
-  //   2: friendly name: Headset (SB Arena Headset)
-  //   2: unique id    : {0.0.1.00000000}.{822d99bb-d9b0-4f6f-b2a5-cd1be220d338}
+  RTC_DLOG(LS_INFO) << "GetDeviceNamesInternal: flow="
+                    << FlowToString(data_flow);
 
   // Generate a collection of active audio endpoint devices for the specified
   // direction.
   ComPtr<IMMDeviceCollection> collection = CreateCollectionInternal(data_flow);
   if (!collection.Get()) {
+    RTC_LOG(LS_ERROR) << "Failed to create a collection of active devices";
     return false;
   }
 
-  // Retrieve the number of active audio devices for the specified direction.
+  // Retrieve the number of active (present, not disabled and plugged in) audio
+  // devices for the specified direction.
   UINT number_of_active_devices = 0;
-  collection->GetCount(&number_of_active_devices);
-  if (number_of_active_devices == 0) {
-    return true;
+  _com_error error = collection->GetCount(&number_of_active_devices);
+  if (FAILED(error.Error())) {
+    RTC_LOG(LS_ERROR) << "IMMDeviceCollection::GetCount failed: "
+                      << ErrorToString(error);
+    return false;
   }
 
-  // Loop over all active devices and add friendly name and unique ID to the
-  // |device_names| list which already contains two elements
-  RTC_DCHECK_EQ(device_names->size(), 2);
+  if (number_of_active_devices == 0) {
+    RTC_DLOG(LS_WARNING) << "Found no active devices";
+    return false;
+  }
+
+  // Loop over all active devices and add friendly name and unique id to the
+  // `device_names` queue. For now, devices are added at indexes 0, 1, ..., N-1
+  // but they will be moved to 2,3,..., N+1 at the next stage when default and
+  // default communication devices are added at index 0 and 1.
+  ComPtr<IMMDevice> audio_device;
   for (UINT i = 0; i < number_of_active_devices; ++i) {
     // Retrieve a pointer to the specified item in the device collection.
-    ComPtr<IMMDevice> audio_device;
-    _com_error error = collection->Item(i, audio_device.GetAddressOf());
-    if (FAILED(error.Error()))
+    error = collection->Item(i, audio_device.GetAddressOf());
+    if (FAILED(error.Error())) {
+      // Skip this item and try to get the next item instead; will result in an
+      // incomplete list of devices.
+      RTC_LOG(LS_WARNING) << "IMMDeviceCollection::Item failed: "
+                          << ErrorToString(error);
       continue;
+    }
+    if (!audio_device.Get()) {
+      RTC_LOG(LS_WARNING) << "Invalid audio device";
+      continue;
+    }
+
     // Retrieve the complete device name for the given audio device endpoint.
     AudioDeviceName device_name(
         GetDeviceFriendlyNameInternal(audio_device.Get()),
         GetDeviceIdInternal(audio_device.Get()));
-    RTC_DLOG(INFO) << "friendly name: " << device_name.device_name;
-    RTC_DLOG(INFO) << "unique id    : " << device_name.unique_id;
     // Add combination of user-friendly and unique name to the output list.
-    device_names->emplace_back(device_name);
+    device_names->push_back(device_name);
+  }
+
+  // Log a warning of the list of device is not complete but let's keep on
+  // trying to add default and default communications device at the front.
+  if (device_names->size() != number_of_active_devices) {
+    RTC_DLOG(LS_WARNING)
+        << "List of device names does not contain all active devices";
+  }
+
+  // Avoid adding default and default communication devices if no active device
+  // could be added to the queue. We might as well break here and return false
+  // since no active devices were identified.
+  if (device_names->empty()) {
+    RTC_DLOG(LS_ERROR) << "List of active devices is empty";
+    return false;
+  }
+
+  // Prepend the queue with two more elements: one for the default device and
+  // one for the default communication device (can correspond to the same unique
+  // id if only one active device exists). The first element (index 0) is the
+  // default device and the second element (index 1) is the default
+  // communication device.
+  ERole role[] = {eCommunications, eConsole};
+  ComPtr<IMMDevice> default_device;
+  AudioDeviceName default_device_name;
+  for (size_t i = 0; i < arraysize(role); ++i) {
+    default_device = CreateDeviceInternal(AudioDeviceName::kDefaultDeviceId,
+                                          data_flow, role[i]);
+    if (!default_device.Get()) {
+      // Add empty strings to device name if the device could not be created.
+      RTC_DLOG(LS_WARNING) << "Failed to add device with role: "
+                           << RoleToString(role[i]);
+      default_device_name.device_name = std::string();
+      default_device_name.unique_id = std::string();
+    } else {
+      // Populate the device name with friendly name and unique id.
+      std::string device_name;
+      device_name += (role[i] == eConsole ? "Default - " : "Communication - ");
+      device_name += GetDeviceFriendlyNameInternal(default_device.Get());
+      std::string unique_id = GetDeviceIdInternal(default_device.Get());
+      default_device_name.device_name = std::move(device_name);
+      default_device_name.unique_id = std::move(unique_id);
+    }
+
+    // Add combination of user-friendly and unique name to the output queue.
+    // The last element (<=> eConsole) will be at the front of the queue, hence
+    // at index 0. Empty strings will be added for cases where no default
+    // devices were found.
+    device_names->push_front(default_device_name);
+  }
+
+  // Example of log output when only one device is active. Note that the queue
+  // contains two extra elements at index 0 (Default) and 1 (Communication) to
+  // allow selection of device by role instead of id. All elements corresponds
+  // the same unique id.
+  // [0] friendly name: Default - Headset Microphone (2- Arctis 7 Chat)
+  // [0] unique id    : {0.0.1.00000000}.{ff9eed76-196e-467a-b295-26986e69451c}
+  // [1] friendly name: Communication - Headset Microphone (2- Arctis 7 Chat)
+  // [1] unique id    : {0.0.1.00000000}.{ff9eed76-196e-467a-b295-26986e69451c}
+  // [2] friendly name: Headset Microphone (2- Arctis 7 Chat)
+  // [2] unique id    : {0.0.1.00000000}.{ff9eed76-196e-467a-b295-26986e69451c}
+  for (size_t i = 0; i < device_names->size(); ++i) {
+    RTC_DLOG(LS_INFO) << "[" << i
+                      << "] friendly name: " << (*device_names)[i].device_name;
+    RTC_DLOG(LS_INFO) << "[" << i
+                      << "] unique id    : " << (*device_names)[i].unique_id;
   }
 
   return true;
@@ -526,11 +612,11 @@ HRESULT GetPreferredAudioParametersInternal(IAudioClient* client,
     return hr;
 
   int sample_rate = mix_format.Format.nSamplesPerSec;
-  // Override default sample rate if |fixed_sample_rate| is set and different
+  // Override default sample rate if `fixed_sample_rate` is set and different
   // from the default rate.
   if (fixed_sample_rate > 0 && fixed_sample_rate != sample_rate) {
-    RTC_DLOG(INFO) << "Using fixed sample rate instead of the preferred: "
-                   << sample_rate << " is replaced by " << fixed_sample_rate;
+    RTC_DLOG(LS_INFO) << "Using fixed sample rate instead of the preferred: "
+                      << sample_rate << " is replaced by " << fixed_sample_rate;
     sample_rate = fixed_sample_rate;
   }
   // TODO(henrika): utilize full mix_format.Format.wBitsPerSample.
@@ -549,7 +635,7 @@ HRESULT GetPreferredAudioParametersInternal(IAudioClient* client,
 
   AudioParameters audio_params(sample_rate, channels, frames_per_buffer);
   *params = audio_params;
-  RTC_DLOG(INFO) << audio_params.ToString();
+  RTC_DLOG(LS_INFO) << audio_params.ToString();
 
   return hr;
 }
@@ -558,14 +644,39 @@ HRESULT GetPreferredAudioParametersInternal(IAudioClient* client,
 
 namespace core_audio_utility {
 
+// core_audio_utility::WaveFormatWrapper implementation.
+WAVEFORMATEXTENSIBLE* WaveFormatWrapper::GetExtensible() const {
+  RTC_CHECK(IsExtensible());
+  return reinterpret_cast<WAVEFORMATEXTENSIBLE*>(ptr_);
+}
+
+bool WaveFormatWrapper::IsExtensible() const {
+  return ptr_->wFormatTag == WAVE_FORMAT_EXTENSIBLE && ptr_->cbSize >= 22;
+}
+
+bool WaveFormatWrapper::IsPcm() const {
+  return IsExtensible() ? GetExtensible()->SubFormat == KSDATAFORMAT_SUBTYPE_PCM
+                        : ptr_->wFormatTag == WAVE_FORMAT_PCM;
+}
+
+bool WaveFormatWrapper::IsFloat() const {
+  return IsExtensible()
+             ? GetExtensible()->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+             : ptr_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT;
+}
+
+size_t WaveFormatWrapper::size() const {
+  return sizeof(*ptr_) + ptr_->cbSize;
+}
+
 bool IsSupported() {
-  RTC_DLOG(INFO) << "IsSupported";
+  RTC_DLOG(LS_INFO) << "IsSupported";
   static bool g_is_supported = IsSupportedInternal();
   return g_is_supported;
 }
 
 bool IsMMCSSSupported() {
-  RTC_DLOG(INFO) << "IsMMCSSSupported";
+  RTC_DLOG(LS_INFO) << "IsMMCSSSupported";
   return LoadAvrtDll();
 }
 
@@ -588,7 +699,7 @@ int NumberOfActiveDevices(EDataFlow data_flow) {
   } else if (data_flow == eAll) {
     str = "Total number of devices: ";
   }
-  RTC_DLOG(INFO) << str << number_of_active_devices;
+  RTC_DLOG(LS_INFO) << str << number_of_active_devices;
   return static_cast<int>(number_of_active_devices);
 }
 
@@ -603,59 +714,59 @@ uint32_t GetAudioClientVersion() {
 }
 
 ComPtr<IMMDeviceEnumerator> CreateDeviceEnumerator() {
-  RTC_DLOG(INFO) << "CreateDeviceEnumerator";
+  RTC_DLOG(LS_INFO) << "CreateDeviceEnumerator";
   return CreateDeviceEnumeratorInternal(true);
 }
 
 std::string GetDefaultInputDeviceID() {
-  RTC_DLOG(INFO) << "GetDefaultInputDeviceID";
+  RTC_DLOG(LS_INFO) << "GetDefaultInputDeviceID";
   ComPtr<IMMDevice> device(
       CreateDevice(AudioDeviceName::kDefaultDeviceId, eCapture, eConsole));
   return device.Get() ? GetDeviceIdInternal(device.Get()) : std::string();
 }
 
 std::string GetDefaultOutputDeviceID() {
-  RTC_DLOG(INFO) << "GetDefaultOutputDeviceID";
+  RTC_DLOG(LS_INFO) << "GetDefaultOutputDeviceID";
   ComPtr<IMMDevice> device(
       CreateDevice(AudioDeviceName::kDefaultDeviceId, eRender, eConsole));
   return device.Get() ? GetDeviceIdInternal(device.Get()) : std::string();
 }
 
 std::string GetCommunicationsInputDeviceID() {
-  RTC_DLOG(INFO) << "GetCommunicationsInputDeviceID";
+  RTC_DLOG(LS_INFO) << "GetCommunicationsInputDeviceID";
   ComPtr<IMMDevice> device(CreateDevice(AudioDeviceName::kDefaultDeviceId,
                                         eCapture, eCommunications));
   return device.Get() ? GetDeviceIdInternal(device.Get()) : std::string();
 }
 
 std::string GetCommunicationsOutputDeviceID() {
-  RTC_DLOG(INFO) << "GetCommunicationsOutputDeviceID";
+  RTC_DLOG(LS_INFO) << "GetCommunicationsOutputDeviceID";
   ComPtr<IMMDevice> device(CreateDevice(AudioDeviceName::kDefaultDeviceId,
                                         eRender, eCommunications));
   return device.Get() ? GetDeviceIdInternal(device.Get()) : std::string();
 }
 
-ComPtr<IMMDevice> CreateDevice(const std::string& device_id,
+ComPtr<IMMDevice> CreateDevice(absl::string_view device_id,
                                EDataFlow data_flow,
                                ERole role) {
-  RTC_DLOG(INFO) << "CreateDevice";
+  RTC_DLOG(LS_INFO) << "CreateDevice";
   return CreateDeviceInternal(device_id, data_flow, role);
 }
 
 AudioDeviceName GetDeviceName(IMMDevice* device) {
-  RTC_DLOG(INFO) << "GetDeviceName";
+  RTC_DLOG(LS_INFO) << "GetDeviceName";
   RTC_DCHECK(device);
   AudioDeviceName device_name(GetDeviceFriendlyNameInternal(device),
                               GetDeviceIdInternal(device));
-  RTC_DLOG(INFO) << "friendly name: " << device_name.device_name;
-  RTC_DLOG(INFO) << "unique id    : " << device_name.unique_id;
+  RTC_DLOG(LS_INFO) << "friendly name: " << device_name.device_name;
+  RTC_DLOG(LS_INFO) << "unique id    : " << device_name.unique_id;
   return device_name;
 }
 
-std::string GetFriendlyName(const std::string& device_id,
+std::string GetFriendlyName(absl::string_view device_id,
                             EDataFlow data_flow,
                             ERole role) {
-  RTC_DLOG(INFO) << "GetFriendlyName";
+  RTC_DLOG(LS_INFO) << "GetFriendlyName";
   ComPtr<IMMDevice> audio_device = CreateDevice(device_id, data_flow, role);
   if (!audio_device.Get())
     return std::string();
@@ -665,7 +776,7 @@ std::string GetFriendlyName(const std::string& device_id,
 }
 
 EDataFlow GetDataFlow(IMMDevice* device) {
-  RTC_DLOG(INFO) << "GetDataFlow";
+  RTC_DLOG(LS_INFO) << "GetDataFlow";
   RTC_DCHECK(device);
   ComPtr<IMMEndpoint> endpoint;
   _com_error error = device->QueryInterface(endpoint.GetAddressOf());
@@ -686,30 +797,32 @@ EDataFlow GetDataFlow(IMMDevice* device) {
 }
 
 bool GetInputDeviceNames(webrtc::AudioDeviceNames* device_names) {
-  RTC_DLOG(INFO) << "GetInputDeviceNames";
+  RTC_DLOG(LS_INFO) << "GetInputDeviceNames";
   RTC_DCHECK(device_names);
+  RTC_DCHECK(device_names->empty());
   return GetDeviceNamesInternal(eCapture, device_names);
 }
 
 bool GetOutputDeviceNames(webrtc::AudioDeviceNames* device_names) {
-  RTC_DLOG(INFO) << "GetOutputDeviceNames";
+  RTC_DLOG(LS_INFO) << "GetOutputDeviceNames";
   RTC_DCHECK(device_names);
+  RTC_DCHECK(device_names->empty());
   return GetDeviceNamesInternal(eRender, device_names);
 }
 
 ComPtr<IAudioSessionManager2> CreateSessionManager2(IMMDevice* device) {
-  RTC_DLOG(INFO) << "CreateSessionManager2";
+  RTC_DLOG(LS_INFO) << "CreateSessionManager2";
   return CreateSessionManager2Internal(device);
 }
 
 Microsoft::WRL::ComPtr<IAudioSessionEnumerator> CreateSessionEnumerator(
     IMMDevice* device) {
-  RTC_DLOG(INFO) << "CreateSessionEnumerator";
+  RTC_DLOG(LS_INFO) << "CreateSessionEnumerator";
   return CreateSessionEnumeratorInternal(device);
 }
 
 int NumberOfActiveSessions(IMMDevice* device) {
-  RTC_DLOG(INFO) << "NumberOfActiveSessions";
+  RTC_DLOG(LS_INFO) << "NumberOfActiveSessions";
   ComPtr<IAudioSessionEnumerator> session_enumerator =
       CreateSessionEnumerator(device);
 
@@ -721,7 +834,7 @@ int NumberOfActiveSessions(IMMDevice* device) {
                       << ErrorToString(error);
     return 0;
   }
-  RTC_DLOG(INFO) << "Total number of audio sessions: " << session_count;
+  RTC_DLOG(LS_INFO) << "Total number of audio sessions: " << session_count;
 
   int num_active = 0;
   for (int session = 0; session < session_count; session++) {
@@ -737,8 +850,8 @@ int NumberOfActiveSessions(IMMDevice* device) {
     // Log the display name of the audio session for debugging purposes.
     LPWSTR display_name;
     if (SUCCEEDED(session_control->GetDisplayName(&display_name))) {
-      RTC_DLOG(INFO) << "display name: "
-                     << rtc::ToUtf8(display_name, wcslen(display_name));
+      RTC_DLOG(LS_INFO) << "display name: "
+                        << rtc::ToUtf8(display_name, wcslen(display_name));
       CoTaskMemFree(display_name);
     }
 
@@ -755,36 +868,36 @@ int NumberOfActiveSessions(IMMDevice* device) {
     }
   }
 
-  RTC_DLOG(INFO) << "Number of active audio sessions: " << num_active;
+  RTC_DLOG(LS_INFO) << "Number of active audio sessions: " << num_active;
   return num_active;
 }
 
-ComPtr<IAudioClient> CreateClient(const std::string& device_id,
+ComPtr<IAudioClient> CreateClient(absl::string_view device_id,
                                   EDataFlow data_flow,
                                   ERole role) {
-  RTC_DLOG(INFO) << "CreateClient";
+  RTC_DLOG(LS_INFO) << "CreateClient";
   ComPtr<IMMDevice> device(CreateDevice(device_id, data_flow, role));
   return CreateClientInternal(device.Get());
 }
 
-ComPtr<IAudioClient2> CreateClient2(const std::string& device_id,
+ComPtr<IAudioClient2> CreateClient2(absl::string_view device_id,
                                     EDataFlow data_flow,
                                     ERole role) {
-  RTC_DLOG(INFO) << "CreateClient2";
+  RTC_DLOG(LS_INFO) << "CreateClient2";
   ComPtr<IMMDevice> device(CreateDevice(device_id, data_flow, role));
   return CreateClient2Internal(device.Get());
 }
 
-ComPtr<IAudioClient3> CreateClient3(const std::string& device_id,
+ComPtr<IAudioClient3> CreateClient3(absl::string_view device_id,
                                     EDataFlow data_flow,
                                     ERole role) {
-  RTC_DLOG(INFO) << "CreateClient3";
+  RTC_DLOG(LS_INFO) << "CreateClient3";
   ComPtr<IMMDevice> device(CreateDevice(device_id, data_flow, role));
   return CreateClient3Internal(device.Get());
 }
 
 HRESULT SetClientProperties(IAudioClient2* client) {
-  RTC_DLOG(INFO) << "SetClientProperties";
+  RTC_DLOG(LS_INFO) << "SetClientProperties";
   RTC_DCHECK(client);
   if (GetAudioClientVersion() < 2) {
     RTC_LOG(LS_WARNING) << "Requires IAudioClient2 or higher";
@@ -797,7 +910,7 @@ HRESULT SetClientProperties(IAudioClient2* client) {
   props.eCategory = AudioCategory_Communications;
   // Hardware-offloaded audio processing allows the main audio processing tasks
   // to be performed outside the computer's main CPU. Check support and log the
-  // result but hard-code |bIsOffload| to FALSE for now.
+  // result but hard-code `bIsOffload` to FALSE for now.
   // TODO(henrika): evaluate hardware-offloading. Might complicate usage of
   // IAudioClient::GetMixFormat().
   BOOL supports_offload = FALSE;
@@ -807,8 +920,11 @@ HRESULT SetClientProperties(IAudioClient2* client) {
     RTC_LOG(LS_ERROR) << "IAudioClient2::IsOffloadCapable failed: "
                       << ErrorToString(error);
   }
-  RTC_DLOG(INFO) << "supports_offload: " << supports_offload;
+  RTC_DLOG(LS_INFO) << "supports_offload: " << supports_offload;
   props.bIsOffload = false;
+#if (NTDDI_VERSION < NTDDI_WINBLUE)
+  RTC_DLOG(LS_INFO) << "options: Not supported in this build";
+#else
   // TODO(henrika): pros and cons compared with AUDCLNT_STREAMOPTIONS_NONE?
   props.Options |= AUDCLNT_STREAMOPTIONS_NONE;
   // Requires System.Devices.AudioDevice.RawProcessingSupported.
@@ -824,7 +940,8 @@ HRESULT SetClientProperties(IAudioClient2* client) {
   // an appropriate interface to use for communications scenarios.
   // This interface is mainly meant for pro audio scenarios.
   // props.Options |= AUDCLNT_STREAMOPTIONS_MATCH_FORMAT;
-  RTC_DLOG(INFO) << "options: 0x" << rtc::ToHex(props.Options);
+  RTC_DLOG(LS_INFO) << "options: 0x" << rtc::ToHex(props.Options);
+#endif
   error = client->SetClientProperties(&props);
   if (FAILED(error.Error())) {
     RTC_LOG(LS_ERROR) << "IAudioClient2::SetClientProperties failed: "
@@ -837,7 +954,7 @@ HRESULT GetBufferSizeLimits(IAudioClient2* client,
                             const WAVEFORMATEXTENSIBLE* format,
                             REFERENCE_TIME* min_buffer_duration,
                             REFERENCE_TIME* max_buffer_duration) {
-  RTC_DLOG(INFO) << "GetBufferSizeLimits";
+  RTC_DLOG(LS_INFO) << "GetBufferSizeLimits";
   RTC_DCHECK(client);
   if (GetAudioClientVersion() < 2) {
     RTC_LOG(LS_WARNING) << "Requires IAudioClient2 or higher";
@@ -852,36 +969,69 @@ HRESULT GetBufferSizeLimits(IAudioClient2* client,
     // This API seems to be supported in off-load mode only but it is not
     // documented as a valid error code. Making a special note about it here.
     RTC_LOG(LS_ERROR) << "IAudioClient2::GetBufferSizeLimits failed: "
-                      << "AUDCLNT_E_OFFLOAD_MODE_ONLY";
+                         "AUDCLNT_E_OFFLOAD_MODE_ONLY";
   } else if (FAILED(error.Error())) {
     RTC_LOG(LS_ERROR) << "IAudioClient2::GetBufferSizeLimits failed: "
                       << ErrorToString(error);
   } else {
     *min_buffer_duration = min_duration;
     *max_buffer_duration = max_duration;
-    RTC_DLOG(INFO) << "min_buffer_duration: " << min_buffer_duration;
-    RTC_DLOG(INFO) << "max_buffer_duration: " << max_buffer_duration;
+    RTC_DLOG(LS_INFO) << "min_buffer_duration: " << min_buffer_duration;
+    RTC_DLOG(LS_INFO) << "max_buffer_duration: " << max_buffer_duration;
   }
   return error.Error();
 }
 
 HRESULT GetSharedModeMixFormat(IAudioClient* client,
                                WAVEFORMATEXTENSIBLE* format) {
-  RTC_DLOG(INFO) << "GetSharedModeMixFormat";
+  RTC_DLOG(LS_INFO) << "GetSharedModeMixFormat";
   RTC_DCHECK(client);
-  ScopedCoMem<WAVEFORMATEXTENSIBLE> format_ex;
+
+  // The GetMixFormat method retrieves the stream format that the audio engine
+  // uses for its internal processing of shared-mode streams. The method
+  // allocates the storage for the structure and this memory will be released
+  // when `mix_format` goes out of scope. The GetMixFormat method retrieves a
+  // format descriptor that is in the form of a WAVEFORMATEXTENSIBLE structure
+  // instead of a standalone WAVEFORMATEX structure. The method outputs a
+  // pointer to the WAVEFORMATEX structure that is embedded at the start of
+  // this WAVEFORMATEXTENSIBLE structure.
+  // Note that, crbug/803056 indicates that some devices can return a format
+  // where only the WAVEFORMATEX parts is initialized and we must be able to
+  // account for that.
+  ScopedCoMem<WAVEFORMATEXTENSIBLE> mix_format;
   _com_error error =
-      client->GetMixFormat(reinterpret_cast<WAVEFORMATEX**>(&format_ex));
+      client->GetMixFormat(reinterpret_cast<WAVEFORMATEX**>(&mix_format));
   if (FAILED(error.Error())) {
     RTC_LOG(LS_ERROR) << "IAudioClient::GetMixFormat failed: "
                       << ErrorToString(error);
     return error.Error();
   }
 
-  size_t bytes = sizeof(WAVEFORMATEX) + format_ex->Format.cbSize;
-  RTC_DCHECK_EQ(bytes, sizeof(WAVEFORMATEXTENSIBLE));
-  memcpy(format, format_ex, bytes);
-  RTC_DLOG(INFO) << WaveFormatExToString(format);
+  // Use a wave format wrapper to make things simpler.
+  WaveFormatWrapper wrapped_format(mix_format.Get());
+
+  // Verify that the reported format can be mixed by the audio engine in
+  // shared mode.
+  if (!wrapped_format.IsPcm() && !wrapped_format.IsFloat()) {
+    RTC_DLOG(LS_ERROR)
+        << "Only pure PCM or float audio streams can be mixed in shared mode";
+    return AUDCLNT_E_UNSUPPORTED_FORMAT;
+  }
+
+  // Log a warning for the rare case where `mix_format` only contains a
+  // stand-alone WAVEFORMATEX structure but don't return.
+  if (!wrapped_format.IsExtensible()) {
+    RTC_DLOG(LS_WARNING)
+        << "The returned format contains no extended information. "
+           "The size is "
+        << wrapped_format.size() << " bytes.";
+  }
+
+  // Copy the correct number of bytes into |*format| taking into account if
+  // the returned structure is correctly extended or not.
+  RTC_CHECK_LE(wrapped_format.size(), sizeof(WAVEFORMATEXTENSIBLE));
+  memcpy(format, wrapped_format.get(), wrapped_format.size());
+  RTC_DLOG(LS_INFO) << WaveFormatToString(format);
 
   return error.Error();
 }
@@ -889,9 +1039,9 @@ HRESULT GetSharedModeMixFormat(IAudioClient* client,
 bool IsFormatSupported(IAudioClient* client,
                        AUDCLNT_SHAREMODE share_mode,
                        const WAVEFORMATEXTENSIBLE* format) {
-  RTC_DLOG(INFO) << "IsFormatSupported";
+  RTC_DLOG(LS_INFO) << "IsFormatSupported";
   RTC_DCHECK(client);
-  ScopedCoMem<WAVEFORMATEXTENSIBLE> closest_match;
+  ScopedCoMem<WAVEFORMATEX> closest_match;
   // This method provides a way for a client to determine, before calling
   // IAudioClient::Initialize, whether the audio engine supports a particular
   // stream format or not. In shared mode, the audio engine always supports
@@ -899,22 +1049,24 @@ bool IsFormatSupported(IAudioClient* client,
   // TODO(henrika): verify support for exclusive mode as well?
   _com_error error = client->IsFormatSupported(
       share_mode, reinterpret_cast<const WAVEFORMATEX*>(format),
-      reinterpret_cast<WAVEFORMATEX**>(&closest_match));
+      &closest_match);
+  RTC_LOG(LS_INFO) << WaveFormatToString(
+      const_cast<WAVEFORMATEXTENSIBLE*>(format));
   if ((error.Error() == S_OK) && (closest_match == nullptr)) {
-    RTC_DLOG(INFO)
+    RTC_DLOG(LS_INFO)
         << "The audio endpoint device supports the specified stream format";
   } else if ((error.Error() == S_FALSE) && (closest_match != nullptr)) {
     // Call succeeded with a closest match to the specified format. This log can
     // only be triggered for shared mode.
     RTC_LOG(LS_WARNING)
         << "Exact format is not supported, but a closest match exists";
-    RTC_LOG(INFO) << WaveFormatExToString(closest_match);
+    RTC_LOG(LS_INFO) << WaveFormatToString(closest_match.Get());
   } else if ((error.Error() == AUDCLNT_E_UNSUPPORTED_FORMAT) &&
              (closest_match == nullptr)) {
     // The audio engine does not support the caller-specified format or any
     // similar format.
-    RTC_DLOG(INFO) << "The audio endpoint device does not support the "
-                      "specified stream format";
+    RTC_DLOG(LS_INFO) << "The audio endpoint device does not support the "
+                         "specified stream format";
   } else {
     RTC_LOG(LS_ERROR) << "IAudioClient::IsFormatSupported failed: "
                       << ErrorToString(error);
@@ -926,10 +1078,10 @@ bool IsFormatSupported(IAudioClient* client,
 HRESULT GetDevicePeriod(IAudioClient* client,
                         AUDCLNT_SHAREMODE share_mode,
                         REFERENCE_TIME* device_period) {
-  RTC_DLOG(INFO) << "GetDevicePeriod";
+  RTC_DLOG(LS_INFO) << "GetDevicePeriod";
   RTC_DCHECK(client);
-  // The |default_period| parameter specifies the default scheduling period
-  // for a shared-mode stream. The |minimum_period| parameter specifies the
+  // The `default_period` parameter specifies the default scheduling period
+  // for a shared-mode stream. The `minimum_period` parameter specifies the
   // minimum scheduling period for an exclusive-mode stream.
   // The time is expressed in 100-nanosecond units.
   REFERENCE_TIME default_period = 0;
@@ -943,10 +1095,10 @@ HRESULT GetDevicePeriod(IAudioClient* client,
 
   *device_period = (share_mode == AUDCLNT_SHAREMODE_SHARED) ? default_period
                                                             : minimum_period;
-  RTC_LOG(INFO) << "device_period: "
-                << ReferenceTimeToTimeDelta(*device_period).ms() << " [ms]";
-  RTC_LOG(INFO) << "minimum_period: "
-                << ReferenceTimeToTimeDelta(minimum_period).ms() << " [ms]";
+  RTC_LOG(LS_INFO) << "device_period: "
+                   << ReferenceTimeToTimeDelta(*device_period).ms() << " [ms]";
+  RTC_LOG(LS_INFO) << "minimum_period: "
+                   << ReferenceTimeToTimeDelta(minimum_period).ms() << " [ms]";
   return error.Error();
 }
 
@@ -956,7 +1108,7 @@ HRESULT GetSharedModeEnginePeriod(IAudioClient3* client3,
                                   uint32_t* fundamental_period_in_frames,
                                   uint32_t* min_period_in_frames,
                                   uint32_t* max_period_in_frames) {
-  RTC_DLOG(INFO) << "GetSharedModeEnginePeriod";
+  RTC_DLOG(LS_INFO) << "GetSharedModeEnginePeriod";
   RTC_DCHECK(client3);
 
   UINT32 default_period = 0;
@@ -974,15 +1126,17 @@ HRESULT GetSharedModeEnginePeriod(IAudioClient3* client3,
 
   WAVEFORMATEX format_ex = format->Format;
   const WORD sample_rate = format_ex.nSamplesPerSec;
-  RTC_LOG(INFO) << "default_period_in_frames: " << default_period << " ("
-                << FramesToMilliseconds(default_period, sample_rate) << " ms)";
-  RTC_LOG(INFO) << "fundamental_period_in_frames: " << fundamental_period
-                << " (" << FramesToMilliseconds(fundamental_period, sample_rate)
-                << " ms)";
-  RTC_LOG(INFO) << "min_period_in_frames: " << min_period << " ("
-                << FramesToMilliseconds(min_period, sample_rate) << " ms)";
-  RTC_LOG(INFO) << "max_period_in_frames: " << max_period << " ("
-                << FramesToMilliseconds(max_period, sample_rate) << " ms)";
+  RTC_LOG(LS_INFO) << "default_period_in_frames: " << default_period << " ("
+                   << FramesToMilliseconds(default_period, sample_rate)
+                   << " ms)";
+  RTC_LOG(LS_INFO) << "fundamental_period_in_frames: " << fundamental_period
+                   << " ("
+                   << FramesToMilliseconds(fundamental_period, sample_rate)
+                   << " ms)";
+  RTC_LOG(LS_INFO) << "min_period_in_frames: " << min_period << " ("
+                   << FramesToMilliseconds(min_period, sample_rate) << " ms)";
+  RTC_LOG(LS_INFO) << "max_period_in_frames: " << max_period << " ("
+                   << FramesToMilliseconds(max_period, sample_rate) << " ms)";
   *default_period_in_frames = default_period;
   *fundamental_period_in_frames = fundamental_period;
   *min_period_in_frames = min_period;
@@ -990,34 +1144,9 @@ HRESULT GetSharedModeEnginePeriod(IAudioClient3* client3,
   return error.Error();
 }
 
-HRESULT GetPreferredAudioParameters(const std::string& device_id,
-                                    bool is_output_device,
-                                    AudioParameters* params) {
-  RTC_DLOG(INFO) << "GetPreferredAudioParameters: " << is_output_device;
-  EDataFlow data_flow = is_output_device ? eRender : eCapture;
-  ComPtr<IMMDevice> device;
-  if (device_id == AudioDeviceName::kDefaultCommunicationsDeviceId) {
-    device = CreateDeviceInternal(AudioDeviceName::kDefaultDeviceId, data_flow,
-                                  eCommunications);
-  } else {
-    // If |device_id| equals AudioDeviceName::kDefaultDeviceId, a default
-    // device will be created.
-    device = CreateDeviceInternal(device_id, data_flow, eConsole);
-  }
-  if (!device.Get()) {
-    return E_FAIL;
-  }
-
-  ComPtr<IAudioClient> client(CreateClientInternal(device.Get()));
-  if (!client.Get())
-    return E_FAIL;
-
-  return GetPreferredAudioParametersInternal(client.Get(), params, -1);
-}
-
 HRESULT GetPreferredAudioParameters(IAudioClient* client,
                                     AudioParameters* params) {
-  RTC_DLOG(INFO) << "GetPreferredAudioParameters";
+  RTC_DLOG(LS_INFO) << "GetPreferredAudioParameters";
   RTC_DCHECK(client);
   return GetPreferredAudioParametersInternal(client, params, -1);
 }
@@ -1025,7 +1154,7 @@ HRESULT GetPreferredAudioParameters(IAudioClient* client,
 HRESULT GetPreferredAudioParameters(IAudioClient* client,
                                     webrtc::AudioParameters* params,
                                     uint32_t sample_rate) {
-  RTC_DLOG(INFO) << "GetPreferredAudioParameters: " << sample_rate;
+  RTC_DLOG(LS_INFO) << "GetPreferredAudioParameters: " << sample_rate;
   RTC_DCHECK(client);
   return GetPreferredAudioParametersInternal(client, params, sample_rate);
 }
@@ -1036,8 +1165,9 @@ HRESULT SharedModeInitialize(IAudioClient* client,
                              REFERENCE_TIME buffer_duration,
                              bool auto_convert_pcm,
                              uint32_t* endpoint_buffer_size) {
-  RTC_DLOG(INFO) << "SharedModeInitialize: buffer_duration=" << buffer_duration
-                 << ", auto_convert_pcm=" << auto_convert_pcm;
+  RTC_DLOG(LS_INFO) << "SharedModeInitialize: buffer_duration="
+                    << buffer_duration
+                    << ", auto_convert_pcm=" << auto_convert_pcm;
   RTC_DCHECK(client);
   RTC_DCHECK_GE(buffer_duration, 0);
   if (buffer_duration != 0) {
@@ -1062,7 +1192,7 @@ HRESULT SharedModeInitialize(IAudioClient* client,
       (event_handle != nullptr && event_handle != INVALID_HANDLE_VALUE);
   if (use_event) {
     stream_flags |= AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
-    RTC_DLOG(INFO) << "The stream is initialized to be event driven";
+    RTC_DLOG(LS_INFO) << "The stream is initialized to be event driven";
   }
 
   // Check if sample-rate conversion is requested.
@@ -1071,14 +1201,14 @@ HRESULT SharedModeInitialize(IAudioClient* client,
     // from our (the client's) format to the audio engine mix format.
     // Currently only supported for testing, i.e., not possible to enable using
     // public APIs.
-    RTC_DLOG(INFO) << "The stream is initialized to support rate conversion";
+    RTC_DLOG(LS_INFO) << "The stream is initialized to support rate conversion";
     stream_flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
     stream_flags |= AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
   }
-  RTC_DLOG(INFO) << "stream_flags: 0x" << rtc::ToHex(stream_flags);
+  RTC_DLOG(LS_INFO) << "stream_flags: 0x" << rtc::ToHex(stream_flags);
 
-  // Initialize the shared mode client for minimal delay if |buffer_duration|
-  // is 0 or possibly a higher delay (more robust) if |buffer_duration| is
+  // Initialize the shared mode client for minimal delay if `buffer_duration`
+  // is 0 or possibly a higher delay (more robust) if `buffer_duration` is
   // larger than 0. The actual size is given by IAudioClient::GetBufferSize().
   _com_error error = client->Initialize(
       AUDCLNT_SHAREMODE_SHARED, stream_flags, buffer_duration, 0,
@@ -1117,23 +1247,23 @@ HRESULT SharedModeInitialize(IAudioClient* client,
   }
 
   *endpoint_buffer_size = buffer_size_in_frames;
-  RTC_DLOG(INFO) << "endpoint buffer size: " << buffer_size_in_frames
-                 << " [audio frames]";
+  RTC_DLOG(LS_INFO) << "endpoint buffer size: " << buffer_size_in_frames
+                    << " [audio frames]";
   const double size_in_ms = static_cast<double>(buffer_size_in_frames) /
                             (format->Format.nSamplesPerSec / 1000.0);
-  RTC_DLOG(INFO) << "endpoint buffer size: "
-                 << static_cast<int>(size_in_ms + 0.5) << " [ms]";
-  RTC_DLOG(INFO) << "bytes per audio frame: " << format->Format.nBlockAlign;
-  RTC_DLOG(INFO) << "endpoint buffer size: "
-                 << buffer_size_in_frames * format->Format.nChannels *
-                        (format->Format.wBitsPerSample / 8)
-                 << " [bytes]";
+  RTC_DLOG(LS_INFO) << "endpoint buffer size: "
+                    << static_cast<int>(size_in_ms + 0.5) << " [ms]";
+  RTC_DLOG(LS_INFO) << "bytes per audio frame: " << format->Format.nBlockAlign;
+  RTC_DLOG(LS_INFO) << "endpoint buffer size: "
+                    << buffer_size_in_frames * format->Format.nChannels *
+                           (format->Format.wBitsPerSample / 8)
+                    << " [bytes]";
 
   // TODO(henrika): utilize when delay measurements are added.
   REFERENCE_TIME latency = 0;
   error = client->GetStreamLatency(&latency);
-  RTC_DLOG(INFO) << "stream latency: " << ReferenceTimeToTimeDelta(latency).ms()
-                 << " [ms]";
+  RTC_DLOG(LS_INFO) << "stream latency: "
+                    << ReferenceTimeToTimeDelta(latency).ms() << " [ms]";
   return error.Error();
 }
 
@@ -1143,9 +1273,9 @@ HRESULT SharedModeInitializeLowLatency(IAudioClient3* client,
                                        uint32_t period_in_frames,
                                        bool auto_convert_pcm,
                                        uint32_t* endpoint_buffer_size) {
-  RTC_DLOG(INFO) << "SharedModeInitializeLowLatency: period_in_frames="
-                 << period_in_frames
-                 << ", auto_convert_pcm=" << auto_convert_pcm;
+  RTC_DLOG(LS_INFO) << "SharedModeInitializeLowLatency: period_in_frames="
+                    << period_in_frames
+                    << ", auto_convert_pcm=" << auto_convert_pcm;
   RTC_DCHECK(client);
   RTC_DCHECK_GT(period_in_frames, 0);
   if (auto_convert_pcm) {
@@ -1158,17 +1288,17 @@ HRESULT SharedModeInitializeLowLatency(IAudioClient3* client,
       (event_handle != nullptr && event_handle != INVALID_HANDLE_VALUE);
   if (use_event) {
     stream_flags |= AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
-    RTC_DLOG(INFO) << "The stream is initialized to be event driven";
+    RTC_DLOG(LS_INFO) << "The stream is initialized to be event driven";
   }
   if (auto_convert_pcm) {
     stream_flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
     stream_flags |= AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
   }
-  RTC_DLOG(INFO) << "stream_flags: 0x" << rtc::ToHex(stream_flags);
+  RTC_DLOG(LS_INFO) << "stream_flags: 0x" << rtc::ToHex(stream_flags);
 
   // Initialize the shared mode client for lowest possible latency.
   // It is assumed that GetSharedModeEnginePeriod() has been used to query the
-  // smallest possible engine period and that it is given by |period_in_frames|.
+  // smallest possible engine period and that it is given by `period_in_frames`.
   _com_error error = client->InitializeSharedAudioStream(
       stream_flags, period_in_frames,
       reinterpret_cast<const WAVEFORMATEX*>(format), nullptr);
@@ -1198,17 +1328,17 @@ HRESULT SharedModeInitializeLowLatency(IAudioClient3* client,
   }
 
   *endpoint_buffer_size = buffer_size_in_frames;
-  RTC_DLOG(INFO) << "endpoint buffer size: " << buffer_size_in_frames
-                 << " [audio frames]";
+  RTC_DLOG(LS_INFO) << "endpoint buffer size: " << buffer_size_in_frames
+                    << " [audio frames]";
   const double size_in_ms = static_cast<double>(buffer_size_in_frames) /
                             (format->Format.nSamplesPerSec / 1000.0);
-  RTC_DLOG(INFO) << "endpoint buffer size: "
-                 << static_cast<int>(size_in_ms + 0.5) << " [ms]";
-  RTC_DLOG(INFO) << "bytes per audio frame: " << format->Format.nBlockAlign;
-  RTC_DLOG(INFO) << "endpoint buffer size: "
-                 << buffer_size_in_frames * format->Format.nChannels *
-                        (format->Format.wBitsPerSample / 8)
-                 << " [bytes]";
+  RTC_DLOG(LS_INFO) << "endpoint buffer size: "
+                    << static_cast<int>(size_in_ms + 0.5) << " [ms]";
+  RTC_DLOG(LS_INFO) << "bytes per audio frame: " << format->Format.nBlockAlign;
+  RTC_DLOG(LS_INFO) << "endpoint buffer size: "
+                    << buffer_size_in_frames * format->Format.nChannels *
+                           (format->Format.wBitsPerSample / 8)
+                    << " [bytes]";
 
   // TODO(henrika): utilize when delay measurements are added.
   REFERENCE_TIME latency = 0;
@@ -1217,14 +1347,14 @@ HRESULT SharedModeInitializeLowLatency(IAudioClient3* client,
     RTC_LOG(LS_WARNING) << "IAudioClient::GetStreamLatency failed: "
                         << ErrorToString(error);
   } else {
-    RTC_DLOG(INFO) << "stream latency: "
-                   << ReferenceTimeToTimeDelta(latency).ms() << " [ms]";
+    RTC_DLOG(LS_INFO) << "stream latency: "
+                      << ReferenceTimeToTimeDelta(latency).ms() << " [ms]";
   }
   return error.Error();
 }
 
 ComPtr<IAudioRenderClient> CreateRenderClient(IAudioClient* client) {
-  RTC_DLOG(INFO) << "CreateRenderClient";
+  RTC_DLOG(LS_INFO) << "CreateRenderClient";
   RTC_DCHECK(client);
   // Get access to the IAudioRenderClient interface. This interface
   // enables us to write output data to a rendering endpoint buffer.
@@ -1240,7 +1370,7 @@ ComPtr<IAudioRenderClient> CreateRenderClient(IAudioClient* client) {
 }
 
 ComPtr<IAudioCaptureClient> CreateCaptureClient(IAudioClient* client) {
-  RTC_DLOG(INFO) << "CreateCaptureClient";
+  RTC_DLOG(LS_INFO) << "CreateCaptureClient";
   RTC_DCHECK(client);
   // Get access to the IAudioCaptureClient interface. This interface
   // enables us to read input data from a capturing endpoint buffer.
@@ -1256,7 +1386,7 @@ ComPtr<IAudioCaptureClient> CreateCaptureClient(IAudioClient* client) {
 }
 
 ComPtr<IAudioClock> CreateAudioClock(IAudioClient* client) {
-  RTC_DLOG(INFO) << "CreateAudioClock";
+  RTC_DLOG(LS_INFO) << "CreateAudioClock";
   RTC_DCHECK(client);
   // Get access to the IAudioClock interface. This interface enables us to
   // monitor a stream's data rate and the current position in the stream.
@@ -1271,7 +1401,7 @@ ComPtr<IAudioClock> CreateAudioClock(IAudioClient* client) {
 }
 
 ComPtr<IAudioSessionControl> CreateAudioSessionControl(IAudioClient* client) {
-  RTC_DLOG(INFO) << "CreateAudioSessionControl";
+  RTC_DLOG(LS_INFO) << "CreateAudioSessionControl";
   RTC_DCHECK(client);
   ComPtr<IAudioSessionControl> audio_session_control;
   _com_error error = client->GetService(IID_PPV_ARGS(&audio_session_control));
@@ -1284,7 +1414,7 @@ ComPtr<IAudioSessionControl> CreateAudioSessionControl(IAudioClient* client) {
 }
 
 ComPtr<ISimpleAudioVolume> CreateSimpleAudioVolume(IAudioClient* client) {
-  RTC_DLOG(INFO) << "CreateSimpleAudioVolume";
+  RTC_DLOG(LS_INFO) << "CreateSimpleAudioVolume";
   RTC_DCHECK(client);
   // Get access to the ISimpleAudioVolume interface. This interface enables a
   // client to control the master volume level of an audio session.
@@ -1301,7 +1431,7 @@ ComPtr<ISimpleAudioVolume> CreateSimpleAudioVolume(IAudioClient* client) {
 
 bool FillRenderEndpointBufferWithSilence(IAudioClient* client,
                                          IAudioRenderClient* render_client) {
-  RTC_DLOG(INFO) << "FillRenderEndpointBufferWithSilence";
+  RTC_DLOG(LS_INFO) << "FillRenderEndpointBufferWithSilence";
   RTC_DCHECK(client);
   RTC_DCHECK(render_client);
   UINT32 endpoint_buffer_size = 0;
@@ -1321,11 +1451,11 @@ bool FillRenderEndpointBufferWithSilence(IAudioClient* client,
                       << ErrorToString(error);
     return false;
   }
-  RTC_DLOG(INFO) << "num_queued_frames: " << num_queued_frames;
+  RTC_DLOG(LS_INFO) << "num_queued_frames: " << num_queued_frames;
 
   BYTE* data = nullptr;
   int num_frames_to_fill = endpoint_buffer_size - num_queued_frames;
-  RTC_DLOG(INFO) << "num_frames_to_fill: " << num_frames_to_fill;
+  RTC_DLOG(LS_INFO) << "num_frames_to_fill: " << num_frames_to_fill;
   error = render_client->GetBuffer(num_frames_to_fill, &data);
   if (FAILED(error.Error())) {
     RTC_LOG(LS_ERROR) << "IAudioRenderClient::GetBuffer failed: "
@@ -1346,37 +1476,40 @@ bool FillRenderEndpointBufferWithSilence(IAudioClient* client,
   return true;
 }
 
-std::string WaveFormatExToString(const WAVEFORMATEXTENSIBLE* format) {
-  RTC_DCHECK_EQ(format->Format.wFormatTag, WAVE_FORMAT_EXTENSIBLE);
+std::string WaveFormatToString(const WaveFormatWrapper format) {
   char ss_buf[1024];
   rtc::SimpleStringBuilder ss(ss_buf);
-  ss.AppendFormat("wFormatTag: WAVE_FORMAT_EXTENSIBLE");
-  ss.AppendFormat(", nChannels: %d", format->Format.nChannels);
-  ss.AppendFormat(", nSamplesPerSec: %d", format->Format.nSamplesPerSec);
-  ss.AppendFormat(", nAvgBytesPerSec: %d", format->Format.nAvgBytesPerSec);
-  ss.AppendFormat(", nBlockAlign: %d", format->Format.nBlockAlign);
-  ss.AppendFormat(", wBitsPerSample: %d", format->Format.wBitsPerSample);
-  ss.AppendFormat(", cbSize: %d", format->Format.cbSize);
-  ss.AppendFormat(", wValidBitsPerSample: %d",
-                  format->Samples.wValidBitsPerSample);
-  ss.AppendFormat(", dwChannelMask: 0x%X", format->dwChannelMask);
-  if (format->SubFormat == KSDATAFORMAT_SUBTYPE_PCM) {
-    ss << ", SubFormat: KSDATAFORMAT_SUBTYPE_PCM";
-  } else if (format->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) {
-    ss << ", SubFormat: KSDATAFORMAT_SUBTYPE_IEEE_FLOAT";
+  // Start with the WAVEFORMATEX part (which always exists).
+  ss.AppendFormat("wFormatTag: %s (0x%X)",
+                  WaveFormatTagToString(format->wFormatTag),
+                  format->wFormatTag);
+  ss.AppendFormat(", nChannels: %d", format->nChannels);
+  ss.AppendFormat(", nSamplesPerSec: %d", format->nSamplesPerSec);
+  ss.AppendFormat(", nAvgBytesPerSec: %d", format->nAvgBytesPerSec);
+  ss.AppendFormat(", nBlockAlign: %d", format->nBlockAlign);
+  ss.AppendFormat(", wBitsPerSample: %d", format->wBitsPerSample);
+  ss.AppendFormat(", cbSize: %d", format->cbSize);
+  if (!format.IsExtensible())
+    return ss.str();
+
+  // Append the WAVEFORMATEXTENSIBLE part (which we know exists).
+  ss.AppendFormat(
+      " [+] wValidBitsPerSample: %d, dwChannelMask: %s",
+      format.GetExtensible()->Samples.wValidBitsPerSample,
+      ChannelMaskToString(format.GetExtensible()->dwChannelMask).c_str());
+  if (format.IsPcm()) {
+    ss.AppendFormat("%s", ", SubFormat: KSDATAFORMAT_SUBTYPE_PCM");
+  } else if (format.IsFloat()) {
+    ss.AppendFormat("%s", ", SubFormat: KSDATAFORMAT_SUBTYPE_IEEE_FLOAT");
   } else {
-    ss << ", SubFormat: NOT_SUPPORTED";
+    ss.AppendFormat("%s", ", SubFormat: NOT_SUPPORTED");
   }
-  ss.AppendFormat("\nChannel configuration: %s",
-                  ChannelMaskToString(format->dwChannelMask).c_str());
-  ss.AppendFormat("\nDirectSound configuration : %s",
-                  DirectSoundConfigToString(format->dwChannelMask));
   return ss.str();
 }
 
 webrtc::TimeDelta ReferenceTimeToTimeDelta(REFERENCE_TIME time) {
   // Each unit of reference time is 100 nanoseconds <=> 0.1 microsecond.
-  return webrtc::TimeDelta::us(0.1 * time + 0.5);
+  return webrtc::TimeDelta::Micros(0.1 * time + 0.5);
 }
 
 double FramesToMilliseconds(uint32_t num_frames, uint16_t sample_rate) {

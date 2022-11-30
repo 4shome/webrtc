@@ -10,8 +10,10 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <string>
 
+#include "rtc_base/message_digest.h"
 #include "rtc_base/ssl_certificate.h"
 #include "rtc_base/string_encode.h"
 
@@ -33,7 +35,7 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
   cert->CertificateExpirationTime();
 
   std::string algorithm;
-  cert->GetSignatureDigestAlgorithm(algorithm);
+  cert->GetSignatureDigestAlgorithm(&algorithm);
 
   unsigned char digest[rtc::MessageDigest::kMaxSize];
   size_t digest_len;

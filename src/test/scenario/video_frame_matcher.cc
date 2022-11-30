@@ -25,7 +25,8 @@ constexpr int kThumbHeight = 96;
 VideoFrameMatcher::VideoFrameMatcher(
     std::vector<std::function<void(const VideoFramePair&)> >
         frame_pair_handlers)
-    : frame_pair_handlers_(frame_pair_handlers), task_queue_("VideoAnalyzer") {}
+    : frame_pair_handlers_(std::move(frame_pair_handlers)),
+      task_queue_("VideoAnalyzer") {}
 
 VideoFrameMatcher::~VideoFrameMatcher() {
   task_queue_.SendTask([this] { Finalize(); });
@@ -46,7 +47,8 @@ void VideoFrameMatcher::OnCapturedFrame(const VideoFrame& frame,
   task_queue_.PostTask([this, captured]() {
     for (auto& layer : layers_) {
       CapturedFrame copy = captured;
-      if (layer.second.last_decode) {
+      if (layer.second.last_decode &&
+          layer.second.last_decode->frame->width() <= captured.frame->width()) {
         copy.best_score = I420SSE(*captured.thumb->GetI420(),
                                   *layer.second.last_decode->thumb->GetI420());
         copy.best_decode = layer.second.last_decode;
@@ -57,20 +59,26 @@ void VideoFrameMatcher::OnCapturedFrame(const VideoFrame& frame,
 }
 
 void VideoFrameMatcher::OnDecodedFrame(const VideoFrame& frame,
+                                       int layer_id,
                                        Timestamp render_time,
-                                       int layer_id) {
+                                       Timestamp at_time) {
   rtc::scoped_refptr<DecodedFrame> decoded(new DecodedFrame{});
+  decoded->decoded_time = at_time;
   decoded->render_time = render_time;
   decoded->frame = frame.video_frame_buffer();
   decoded->thumb = ScaleVideoFrameBuffer(*frame.video_frame_buffer()->ToI420(),
                                          kThumbWidth, kThumbHeight);
-  decoded->render_time = render_time;
 
   task_queue_.PostTask([this, decoded, layer_id] {
     auto& layer = layers_[layer_id];
     decoded->id = layer.next_decoded_id++;
     layer.last_decode = decoded;
     for (auto& captured : layer.captured_frames) {
+      // We can't match with a smaller capture.
+      if (captured.frame->width() < decoded->frame->width()) {
+        captured.matched = true;
+        continue;
+      }
       double score =
           I420SSE(*captured.thumb->GetI420(), *decoded->thumb->GetI420());
       if (score < captured.best_score) {
@@ -99,11 +107,14 @@ void VideoFrameMatcher::HandleMatch(VideoFrameMatcher::CapturedFrame captured,
   frame_pair.layer_id = layer_id;
   frame_pair.captured = captured.frame;
   frame_pair.capture_id = captured.id;
+  frame_pair.capture_time = captured.capture_time;
   if (captured.best_decode) {
     frame_pair.decode_id = captured.best_decode->id;
-    frame_pair.capture_time = captured.capture_time;
     frame_pair.decoded = captured.best_decode->frame;
-    frame_pair.render_time = captured.best_decode->render_time;
+    frame_pair.decoded_time = captured.best_decode->decoded_time;
+    // We can't render frames before they have been decoded.
+    frame_pair.render_time = std::max(captured.best_decode->render_time,
+                                      captured.best_decode->decoded_time);
     frame_pair.repeated = captured.best_decode->repeat_count++;
   }
   for (auto& handler : frame_pair_handlers_)
@@ -119,17 +130,25 @@ void VideoFrameMatcher::Finalize() {
   }
 }
 
+CapturedFrameTap::CapturedFrameTap(Clock* clock, VideoFrameMatcher* matcher)
+    : clock_(clock), matcher_(matcher) {}
+
+void CapturedFrameTap::OnFrame(const VideoFrame& frame) {
+  matcher_->OnCapturedFrame(frame, clock_->CurrentTime());
+}
+void CapturedFrameTap::OnDiscardedFrame() {
+  discarded_count_++;
+}
+
 ForwardingCapturedFrameTap::ForwardingCapturedFrameTap(
     Clock* clock,
     VideoFrameMatcher* matcher,
     rtc::VideoSourceInterface<VideoFrame>* source)
     : clock_(clock), matcher_(matcher), source_(source) {}
 
-ForwardingCapturedFrameTap::~ForwardingCapturedFrameTap() {}
-
 void ForwardingCapturedFrameTap::OnFrame(const VideoFrame& frame) {
   RTC_CHECK(sink_);
-  matcher_->OnCapturedFrame(frame, Timestamp::ms(clock_->TimeInMilliseconds()));
+  matcher_->OnCapturedFrame(frame, clock_->CurrentTime());
   sink_->OnFrame(frame);
 }
 void ForwardingCapturedFrameTap::OnDiscardedFrame() {
@@ -141,7 +160,9 @@ void ForwardingCapturedFrameTap::OnDiscardedFrame() {
 void ForwardingCapturedFrameTap::AddOrUpdateSink(
     VideoSinkInterface<VideoFrame>* sink,
     const rtc::VideoSinkWants& wants) {
-  sink_ = sink;
+  if (!sink_)
+    sink_ = sink;
+  RTC_DCHECK_EQ(sink_, sink);
   source_->AddOrUpdateSink(this, wants);
 }
 void ForwardingCapturedFrameTap::RemoveSink(
@@ -150,14 +171,17 @@ void ForwardingCapturedFrameTap::RemoveSink(
   sink_ = nullptr;
 }
 
-DecodedFrameTap::DecodedFrameTap(VideoFrameMatcher* matcher, int layer_id)
-    : matcher_(matcher), layer_id_(layer_id) {
+DecodedFrameTap::DecodedFrameTap(Clock* clock,
+                                 VideoFrameMatcher* matcher,
+                                 int layer_id)
+    : clock_(clock), matcher_(matcher), layer_id_(layer_id) {
   matcher_->RegisterLayer(layer_id_);
 }
 
 void DecodedFrameTap::OnFrame(const VideoFrame& frame) {
-  matcher_->OnDecodedFrame(frame, Timestamp::ms(frame.render_time_ms()),
-                           layer_id_);
+  matcher_->OnDecodedFrame(frame, layer_id_,
+                           Timestamp::Millis(frame.render_time_ms()),
+                           clock_->CurrentTime());
 }
 
 }  // namespace test

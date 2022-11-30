@@ -11,10 +11,12 @@
 #include "modules/audio_processing/transient/file_utils.h"
 
 #include <string.h>
+
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "rtc_base/system/file_wrapper.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
@@ -48,8 +50,8 @@ class TransientFileUtilsTest : public ::testing::Test {
 
   ~TransientFileUtilsTest() override { CleanupTempFiles(); }
 
-  std::string CreateTempFilename(const std::string& dir,
-                                 const std::string& prefix) {
+  std::string CreateTempFilename(absl::string_view dir,
+                                 absl::string_view prefix) {
     std::string filename = test::TempFilename(dir, prefix);
     temp_filenames_.push_back(filename);
     return filename;
@@ -158,7 +160,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_ConvertDoubleToByteArray) {
 TEST_F(TransientFileUtilsTest, MAYBE_ReadInt16BufferFromFile) {
   std::string test_filename = kTestFileName;
 
-  FileWrapper file = FileWrapper::OpenReadOnly(test_filename.c_str());
+  FileWrapper file = FileWrapper::OpenReadOnly(test_filename);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kTestFileName.c_str();
 
@@ -196,7 +198,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_ReadInt16BufferFromFile) {
 TEST_F(TransientFileUtilsTest, MAYBE_ReadInt16FromFileToFloatBuffer) {
   std::string test_filename = kTestFileName;
 
-  FileWrapper file = FileWrapper::OpenReadOnly(test_filename.c_str());
+  FileWrapper file = FileWrapper::OpenReadOnly(test_filename);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kTestFileName.c_str();
 
@@ -236,7 +238,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_ReadInt16FromFileToFloatBuffer) {
 TEST_F(TransientFileUtilsTest, MAYBE_ReadInt16FromFileToDoubleBuffer) {
   std::string test_filename = kTestFileName;
 
-  FileWrapper file = FileWrapper::OpenReadOnly(test_filename.c_str());
+  FileWrapper file = FileWrapper::OpenReadOnly(test_filename);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kTestFileName.c_str();
 
@@ -274,7 +276,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_ReadInt16FromFileToDoubleBuffer) {
 TEST_F(TransientFileUtilsTest, MAYBE_ReadFloatBufferFromFile) {
   std::string test_filename = kTestFileNamef;
 
-  FileWrapper file = FileWrapper::OpenReadOnly(test_filename.c_str());
+  FileWrapper file = FileWrapper::OpenReadOnly(test_filename);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kTestFileNamef.c_str();
 
@@ -310,7 +312,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_ReadFloatBufferFromFile) {
 TEST_F(TransientFileUtilsTest, MAYBE_ReadDoubleBufferFromFile) {
   std::string test_filename = kTestFileName;
 
-  FileWrapper file = FileWrapper::OpenReadOnly(test_filename.c_str());
+  FileWrapper file = FileWrapper::OpenReadOnly(test_filename);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kTestFileName.c_str();
 
@@ -347,7 +349,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_WriteInt16BufferToFile) {
   std::string kOutFileName =
       CreateTempFilename(test::OutputPath(), "utils_test");
 
-  FileWrapper file = FileWrapper::OpenWriteOnly(kOutFileName.c_str());
+  FileWrapper file = FileWrapper::OpenWriteOnly(kOutFileName);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kOutFileName.c_str();
 
@@ -364,7 +366,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_WriteInt16BufferToFile) {
 
   file.Close();
 
-  file = FileWrapper::OpenReadOnly(kOutFileName.c_str());
+  file = FileWrapper::OpenReadOnly(kOutFileName);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kOutFileName.c_str();
 
@@ -383,7 +385,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_WriteFloatBufferToFile) {
   std::string kOutFileName =
       CreateTempFilename(test::OutputPath(), "utils_test");
 
-  FileWrapper file = FileWrapper::OpenWriteOnly(kOutFileName.c_str());
+  FileWrapper file = FileWrapper::OpenWriteOnly(kOutFileName);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kOutFileName.c_str();
 
@@ -400,7 +402,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_WriteFloatBufferToFile) {
 
   file.Close();
 
-  file = FileWrapper::OpenReadOnly(kOutFileName.c_str());
+  file = FileWrapper::OpenReadOnly(kOutFileName);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kOutFileName.c_str();
 
@@ -419,7 +421,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_WriteDoubleBufferToFile) {
   std::string kOutFileName =
       CreateTempFilename(test::OutputPath(), "utils_test");
 
-  FileWrapper file = FileWrapper::OpenWriteOnly(kOutFileName.c_str());
+  FileWrapper file = FileWrapper::OpenWriteOnly(kOutFileName);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kOutFileName.c_str();
 
@@ -436,7 +438,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_WriteDoubleBufferToFile) {
 
   file.Close();
 
-  file = FileWrapper::OpenReadOnly(kOutFileName.c_str());
+  file = FileWrapper::OpenReadOnly(kOutFileName);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kOutFileName.c_str();
 
@@ -471,7 +473,7 @@ TEST_F(TransientFileUtilsTest, MAYBE_ExpectedErrorReturnValues) {
   EXPECT_EQ(0u, WriteInt16BufferToFile(&file, 1, int16_buffer.get()));
   EXPECT_EQ(0u, WriteDoubleBufferToFile(&file, 1, double_buffer.get()));
 
-  file = FileWrapper::OpenReadOnly(test_filename.c_str());
+  file = FileWrapper::OpenReadOnly(test_filename);
   ASSERT_TRUE(file.is_open()) << "File could not be opened:\n"
                               << kTestFileName.c_str();
 

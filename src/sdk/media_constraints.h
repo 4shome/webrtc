@@ -59,17 +59,13 @@ class MediaConstraints {
   // These keys are google specific.
   static const char kGoogEchoCancellation[];  // googEchoCancellation
 
-  static const char kExtendedFilterEchoCancellation[];  // googEchoCancellation2
-  static const char kDAEchoCancellation[];            // googDAEchoCancellation
-  static const char kAutoGainControl[];               // googAutoGainControl
-  static const char kExperimentalAutoGainControl[];   // googAutoGainControl2
-  static const char kNoiseSuppression[];              // googNoiseSuppression
-  static const char kExperimentalNoiseSuppression[];  // googNoiseSuppression2
-  static const char kHighpassFilter[];                // googHighpassFilter
-  static const char kTypingNoiseDetection[];  // googTypingNoiseDetection
+  static const char kAutoGainControl[];       // googAutoGainControl
+  static const char kNoiseSuppression[];      // googNoiseSuppression
+  static const char kHighpassFilter[];        // googHighpassFilter
   static const char kAudioMirroring[];        // googAudioMirroring
   static const char
-      kAudioNetworkAdaptorConfig[];  // goodAudioNetworkAdaptorConfig
+      kAudioNetworkAdaptorConfig[];  // googAudioNetworkAdaptorConfig
+  static const char kInitAudioRecordingOnSend[];  // InitAudioRecordingOnSend;
 
   // Constraint keys for CreateOffer / CreateAnswer
   // Specified by the W3C PeerConnection spec
@@ -85,10 +81,6 @@ class MediaConstraints {
   static const char kValueFalse[];  // false
 
   // PeerConnection constraint keys.
-  // Temporary pseudo-constraints used to enable DTLS-SRTP
-  static const char kEnableDtlsSrtp[];  // Enable DTLS-SRTP
-  // Temporary pseudo-constraints used to enable DataChannels
-  static const char kEnableRtpDataChannels[];  // Enable RTP DataChannels
   // Google-specific constraint keys.
   // Temporary pseudo-constraint for enabling DSCP through JS.
   static const char kEnableDscp[];  // googDscp
@@ -101,6 +93,10 @@ class MediaConstraints {
   static const char kCombinedAudioVideoBwe[];  // googCombinedAudioVideoBwe
   static const char kScreencastMinBitrate[];   // googScreencastMinBitrate
   static const char kCpuOveruseDetection[];    // googCpuOveruseDetection
+
+  // Constraint to enable negotiating raw RTP packetization using attribute
+  // "a=packetization:<payload_type> raw" in the SDP for all video payload.
+  static const char kRawPacketizationForVideoEnabled[];
 
   // Specifies number of simulcast layers for all video tracks
   // with a Plan B offer/answer

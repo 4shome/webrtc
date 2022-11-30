@@ -10,8 +10,9 @@
 
 #include "modules/audio_coding/neteq/tools/rtp_file_source.h"
 
-#include <assert.h>
 #include <string.h>
+
+#include "absl/strings/string_view.h"
 #ifndef WIN32
 #include <netinet/in.h>
 #endif
@@ -19,27 +20,26 @@
 #include <memory>
 
 #include "modules/audio_coding/neteq/tools/packet.h"
-#include "modules/rtp_rtcp/include/rtp_header_parser.h"
 #include "rtc_base/checks.h"
 #include "test/rtp_file_reader.h"
 
 namespace webrtc {
 namespace test {
 
-RtpFileSource* RtpFileSource::Create(const std::string& file_name,
+RtpFileSource* RtpFileSource::Create(absl::string_view file_name,
                                      absl::optional<uint32_t> ssrc_filter) {
   RtpFileSource* source = new RtpFileSource(ssrc_filter);
   RTC_CHECK(source->OpenFile(file_name));
   return source;
 }
 
-bool RtpFileSource::ValidRtpDump(const std::string& file_name) {
+bool RtpFileSource::ValidRtpDump(absl::string_view file_name) {
   std::unique_ptr<RtpFileReader> temp_file(
       RtpFileReader::Create(RtpFileReader::kRtpDump, file_name));
   return !!temp_file;
 }
 
-bool RtpFileSource::ValidPcap(const std::string& file_name) {
+bool RtpFileSource::ValidPcap(absl::string_view file_name) {
   std::unique_ptr<RtpFileReader> temp_file(
       RtpFileReader::Create(RtpFileReader::kPcap, file_name));
   return !!temp_file;
@@ -49,8 +49,7 @@ RtpFileSource::~RtpFileSource() {}
 
 bool RtpFileSource::RegisterRtpHeaderExtension(RTPExtensionType type,
                                                uint8_t id) {
-  assert(parser_.get());
-  return parser_->RegisterRtpHeaderExtension(type, id);
+  return rtp_header_extension_map_.RegisterByType(id, type);
 }
 
 std::unique_ptr<Packet> RtpFileSource::NextPacket() {
@@ -64,11 +63,10 @@ std::unique_ptr<Packet> RtpFileSource::NextPacket() {
       // Read the next one.
       continue;
     }
-    std::unique_ptr<uint8_t[]> packet_memory(new uint8_t[temp_packet.length]);
-    memcpy(packet_memory.get(), temp_packet.data, temp_packet.length);
-    std::unique_ptr<Packet> packet(new Packet(
-        packet_memory.release(), temp_packet.length,
-        temp_packet.original_length, temp_packet.time_ms, *parser_.get()));
+    auto packet = std::make_unique<Packet>(
+        rtc::CopyOnWriteBuffer(temp_packet.data, temp_packet.length),
+        temp_packet.original_length, temp_packet.time_ms,
+        &rtp_header_extension_map_);
     if (!packet->valid_header()) {
       continue;
     }
@@ -83,17 +81,17 @@ std::unique_ptr<Packet> RtpFileSource::NextPacket() {
 
 RtpFileSource::RtpFileSource(absl::optional<uint32_t> ssrc_filter)
     : PacketSource(),
-      parser_(RtpHeaderParser::Create()),
       ssrc_filter_(ssrc_filter) {}
 
-bool RtpFileSource::OpenFile(const std::string& file_name) {
+bool RtpFileSource::OpenFile(absl::string_view file_name) {
   rtp_reader_.reset(RtpFileReader::Create(RtpFileReader::kRtpDump, file_name));
   if (rtp_reader_)
     return true;
   rtp_reader_.reset(RtpFileReader::Create(RtpFileReader::kPcap, file_name));
   if (!rtp_reader_) {
-    FATAL() << "Couldn't open input file as either a rtpdump or .pcap. Note "
-               "that .pcapng is not supported.";
+    RTC_FATAL()
+        << "Couldn't open input file as either a rtpdump or .pcap. Note "
+        << "that .pcapng is not supported.";
   }
   return true;
 }

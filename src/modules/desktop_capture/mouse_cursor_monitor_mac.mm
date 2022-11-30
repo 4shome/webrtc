@@ -10,7 +10,6 @@
 
 #include "modules/desktop_capture/mouse_cursor_monitor.h"
 
-#include <assert.h>
 
 #include <memory>
 
@@ -24,10 +23,9 @@
 #include "modules/desktop_capture/desktop_frame.h"
 #include "modules/desktop_capture/mac/desktop_configuration.h"
 #include "modules/desktop_capture/mac/desktop_configuration_monitor.h"
-#include "modules/desktop_capture/mac/full_screen_chrome_window_detector.h"
 #include "modules/desktop_capture/mac/window_list_utils.h"
 #include "modules/desktop_capture/mouse_cursor.h"
-#include "rtc_base/mac_utils.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -77,39 +75,33 @@ class MouseCursorMonitorMac : public MouseCursorMonitor {
   rtc::scoped_refptr<DesktopConfigurationMonitor> configuration_monitor_;
   CGWindowID window_id_;
   ScreenId screen_id_;
-  Callback* callback_;
+  Callback* callback_ = NULL;
   Mode mode_;
-  __strong NSImage* last_cursor_;
-  rtc::scoped_refptr<FullScreenChromeWindowDetector>
-      full_screen_chrome_window_detector_;
+  __strong NSImage* last_cursor_ = NULL;
 };
 
-MouseCursorMonitorMac::MouseCursorMonitorMac(
-    const DesktopCaptureOptions& options,
-    CGWindowID window_id,
-    ScreenId screen_id)
+MouseCursorMonitorMac::MouseCursorMonitorMac(const DesktopCaptureOptions& options,
+                                             CGWindowID window_id,
+                                             ScreenId screen_id)
     : configuration_monitor_(options.configuration_monitor()),
       window_id_(window_id),
       screen_id_(screen_id),
-      callback_(NULL),
-      mode_(SHAPE_AND_POSITION),
-      full_screen_chrome_window_detector_(
-          options.full_screen_chrome_window_detector()) {
-  assert(window_id == kCGNullWindowID || screen_id == kInvalidScreenId);
+      mode_(SHAPE_AND_POSITION) {
+  RTC_DCHECK(window_id == kCGNullWindowID || screen_id == kInvalidScreenId);
 }
 
 MouseCursorMonitorMac::~MouseCursorMonitorMac() {}
 
 void MouseCursorMonitorMac::Init(Callback* callback, Mode mode) {
-  assert(!callback_);
-  assert(callback);
+  RTC_DCHECK(!callback_);
+  RTC_DCHECK(callback);
 
   callback_ = callback;
   mode_ = mode;
 }
 
 void MouseCursorMonitorMac::Capture() {
-  assert(callback_);
+  RTC_DCHECK(callback_);
 
   CGEventRef event = CGEventCreate(NULL);
   CGPoint gc_position = CGEventGetLocation(event);

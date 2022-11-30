@@ -10,12 +10,10 @@
 
 #include "modules/video_coding/frame_buffer.h"
 
-#include <assert.h>
 #include <string.h>
 
 #include "api/video/encoded_image.h"
 #include "api/video/video_timing.h"
-#include "modules/rtp_rtcp/source/rtp_video_header.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/packet.h"
 #include "rtc_base/checks.h"
@@ -71,18 +69,12 @@ void VCMFrameBuffer::SetGofInfo(const GofInfoVP9& gof_info, size_t idx) {
       gof_info.temporal_up_switch[idx];
 }
 
-bool VCMFrameBuffer::IsSessionComplete() const {
-  TRACE_EVENT0("webrtc", "VCMFrameBuffer::IsSessionComplete");
-  return _sessionInfo.complete();
-}
-
 // Insert packet
-VCMFrameBufferEnum VCMFrameBuffer::InsertPacket(
-    const VCMPacket& packet,
-    int64_t timeInMs,
-    const FrameData& frame_data) {
+VCMFrameBufferEnum VCMFrameBuffer::InsertPacket(const VCMPacket& packet,
+                                                int64_t timeInMs,
+                                                const FrameData& frame_data) {
   TRACE_EVENT0("webrtc", "VCMFrameBuffer::InsertPacket");
-  assert(!(NULL == packet.dataPtr && packet.sizeBytes > 0));
+  RTC_DCHECK(!(NULL == packet.dataPtr && packet.sizeBytes > 0));
   if (packet.dataPtr != NULL) {
     _payloadType = packet.payloadType;
   }
@@ -94,27 +86,36 @@ VCMFrameBufferEnum VCMFrameBuffer::InsertPacket(
     // We only take the ntp timestamp of the first packet of a frame.
     ntp_time_ms_ = packet.ntp_time_ms_;
     _codec = packet.codec();
-    if (packet.frameType != VideoFrameType::kEmptyFrame) {
+    if (packet.video_header.frame_type != VideoFrameType::kEmptyFrame) {
       // first media packet
       SetState(kStateIncomplete);
     }
   }
 
+  size_t oldSize = encoded_image_buffer_ ? encoded_image_buffer_->size() : 0;
   uint32_t requiredSizeBytes =
       size() + packet.sizeBytes +
       (packet.insertStartCode ? kH264StartCodeLengthBytes : 0);
-  if (requiredSizeBytes >= capacity()) {
+  if (requiredSizeBytes > oldSize) {
     const uint8_t* prevBuffer = data();
     const uint32_t increments =
         requiredSizeBytes / kBufferIncStepSizeBytes +
         (requiredSizeBytes % kBufferIncStepSizeBytes > 0);
-    const uint32_t newSize = capacity() + increments * kBufferIncStepSizeBytes;
+    const uint32_t newSize = oldSize + increments * kBufferIncStepSizeBytes;
     if (newSize > kMaxJBFrameSizeBytes) {
       RTC_LOG(LS_ERROR) << "Failed to insert packet due to frame being too "
                            "big.";
       return kSizeError;
     }
-    VerifyAndAllocate(newSize);
+    if (data() == nullptr) {
+      encoded_image_buffer_ = EncodedImageBuffer::Create(newSize);
+      SetEncodedData(encoded_image_buffer_);
+      set_size(0);
+    } else {
+      RTC_CHECK(encoded_image_buffer_ != nullptr);
+      RTC_DCHECK_EQ(encoded_image_buffer_->data(), data());
+      encoded_image_buffer_->Realloc(newSize);
+    }
     _sessionInfo.UpdateDataPointers(prevBuffer, data());
   }
 
@@ -127,7 +128,9 @@ VCMFrameBufferEnum VCMFrameBuffer::InsertPacket(
   if (packet.sizeBytes > 0)
     CopyCodecSpecific(&packet.video_header);
 
-  int retVal = _sessionInfo.InsertPacket(packet, data(), frame_data);
+  int retVal = _sessionInfo.InsertPacket(
+      packet, encoded_image_buffer_ ? encoded_image_buffer_->data() : nullptr,
+      frame_data);
   if (retVal == -1) {
     return kSizeError;
   } else if (retVal == -2) {
@@ -147,9 +150,7 @@ VCMFrameBufferEnum VCMFrameBuffer::InsertPacket(
   // frame (I-frame or IDR frame in H.264 (AVC), or an IRAP picture in H.265
   // (HEVC)).
   if (packet.markerBit) {
-    RTC_DCHECK(!_rotation_set);
     rotation_ = packet.video_header.rotation;
-    _rotation_set = true;
     content_type_ = packet.video_header.content_type;
     if (packet.video_header.video_timing.flags != VideoSendTiming::kInvalid) {
       timing_.encode_start_ms =
@@ -228,19 +229,19 @@ void VCMFrameBuffer::SetState(VCMFrameBufferStateEnum state) {
   switch (state) {
     case kStateIncomplete:
       // we can go to this state from state kStateEmpty
-      assert(_state == kStateEmpty);
+      RTC_DCHECK_EQ(_state, kStateEmpty);
 
       // Do nothing, we received a packet
       break;
 
     case kStateComplete:
-      assert(_state == kStateEmpty || _state == kStateIncomplete);
+      RTC_DCHECK(_state == kStateEmpty || _state == kStateIncomplete);
 
       break;
 
     case kStateEmpty:
       // Should only be set to empty through Reset().
-      assert(false);
+      RTC_DCHECK_NOTREACHED();
       break;
   }
   _state = state;
@@ -258,7 +259,6 @@ void VCMFrameBuffer::PrepareForDecode(bool continuous) {
   // Transfer frame information to EncodedFrame and create any codec
   // specific information.
   _frameType = _sessionInfo.FrameType();
-  _completeFrame = _sessionInfo.complete();
   _missingFrame = !continuous;
 }
 

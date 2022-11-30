@@ -21,9 +21,6 @@ namespace webrtc {
 
 namespace {
 
-using Packet = ForwardErrorCorrection::Packet;
-using ReceivedPacket = ForwardErrorCorrection::ReceivedPacket;
-
 // Minimum header size (in bytes) of a well-formed non-singular FlexFEC packet.
 constexpr size_t kMinFlexfecHeaderSize = 20;
 
@@ -65,13 +62,14 @@ void FlexfecReceiver::OnRtpPacket(const RtpPacketReceived& packet) {
 
   // If this packet was recovered, it might be originating from
   // ProcessReceivedPacket in this object. To avoid lifetime issues with
-  // |recovered_packets_|, we therefore break the cycle here.
+  // `recovered_packets_`, we therefore break the cycle here.
   // This might reduce decoding efficiency a bit, since we can't disambiguate
   // recovered packets by RTX from recovered packets by FlexFEC.
   if (packet.recovered())
     return;
 
-  std::unique_ptr<ReceivedPacket> received_packet = AddReceivedPacket(packet);
+  std::unique_ptr<ForwardErrorCorrection::ReceivedPacket> received_packet =
+      AddReceivedPacket(packet);
   if (!received_packet)
     return;
 
@@ -85,8 +83,8 @@ FecPacketCounter FlexfecReceiver::GetPacketCounter() const {
 
 // TODO(eladalon): Consider using packet.recovered() to avoid processing
 // recovered packets here.
-std::unique_ptr<ReceivedPacket> FlexfecReceiver::AddReceivedPacket(
-    const RtpPacketReceived& packet) {
+std::unique_ptr<ForwardErrorCorrection::ReceivedPacket>
+FlexfecReceiver::AddReceivedPacket(const RtpPacketReceived& packet) {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
 
   // RTP packets with a full base header (12 bytes), but without payload,
@@ -95,7 +93,8 @@ std::unique_ptr<ReceivedPacket> FlexfecReceiver::AddReceivedPacket(
   RTC_DCHECK_GE(packet.size(), kRtpHeaderSize);
 
   // Demultiplex based on SSRC, and insert into erasure code decoder.
-  std::unique_ptr<ReceivedPacket> received_packet(new ReceivedPacket());
+  std::unique_ptr<ForwardErrorCorrection::ReceivedPacket> received_packet(
+      new ForwardErrorCorrection::ReceivedPacket());
   received_packet->seq_num = packet.SequenceNumber();
   received_packet->ssrc = packet.Ssrc();
   if (received_packet->ssrc == ssrc_) {
@@ -108,12 +107,10 @@ std::unique_ptr<ReceivedPacket> FlexfecReceiver::AddReceivedPacket(
     ++packet_counter_.num_fec_packets;
 
     // Insert packet payload into erasure code.
-    // TODO(brandtr): Remove this memcpy when the FEC packet classes
-    // are using COW buffers internally.
-    received_packet->pkt = rtc::scoped_refptr<Packet>(new Packet());
-    auto payload = packet.payload();
-    memcpy(received_packet->pkt->data, payload.data(), payload.size());
-    received_packet->pkt->length = payload.size();
+    received_packet->pkt = rtc::scoped_refptr<ForwardErrorCorrection::Packet>(
+        new ForwardErrorCorrection::Packet());
+    received_packet->pkt->data =
+        packet.Buffer().Slice(packet.headers_size(), packet.payload_size());
   } else {
     // This is a media packet, or a FlexFEC packet belonging to some
     // other FlexFEC stream.
@@ -123,10 +120,12 @@ std::unique_ptr<ReceivedPacket> FlexfecReceiver::AddReceivedPacket(
     received_packet->is_fec = false;
 
     // Insert entire packet into erasure code.
-    // TODO(brandtr): Remove this memcpy too.
-    received_packet->pkt = rtc::scoped_refptr<Packet>(new Packet());
-    memcpy(received_packet->pkt->data, packet.data(), packet.size());
-    received_packet->pkt->length = packet.size();
+    // Create a copy and fill with zeros all mutable extensions.
+    received_packet->pkt = rtc::scoped_refptr<ForwardErrorCorrection::Packet>(
+        new ForwardErrorCorrection::Packet());
+    RtpPacketReceived packet_copy(packet);
+    packet_copy.ZeroMutableExtensions();
+    received_packet->pkt->data = packet_copy.Buffer();
   }
 
   ++packet_counter_.num_packets;
@@ -144,7 +143,7 @@ std::unique_ptr<ReceivedPacket> FlexfecReceiver::AddReceivedPacket(
 // FlexFEC decoder, and we therefore do not interfere with the reception
 // of non-recovered media packets.
 void FlexfecReceiver::ProcessReceivedPacket(
-    const ReceivedPacket& received_packet) {
+    const ForwardErrorCorrection::ReceivedPacket& received_packet) {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
 
   // Decode.
@@ -160,17 +159,28 @@ void FlexfecReceiver::ProcessReceivedPacket(
     // Set this flag first, since OnRecoveredPacket may end up here
     // again, with the same packet.
     recovered_packet->returned = true;
-    RTC_CHECK(recovered_packet->pkt);
+    RTC_CHECK_GE(recovered_packet->pkt->data.size(), kRtpHeaderSize);
     recovered_packet_receiver_->OnRecoveredPacket(
-        recovered_packet->pkt->data, recovered_packet->pkt->length);
-    // Periodically log the incoming packets.
+        recovered_packet->pkt->data.cdata(),
+        recovered_packet->pkt->data.size());
+    uint32_t media_ssrc =
+        ForwardErrorCorrection::ParseSsrc(recovered_packet->pkt->data.data());
+    uint16_t media_seq_num = ForwardErrorCorrection::ParseSequenceNumber(
+        recovered_packet->pkt->data.data());
+    // Periodically log the incoming packets at LS_INFO.
     int64_t now_ms = clock_->TimeInMilliseconds();
-    if (now_ms - last_recovered_packet_ms_ > kPacketLogIntervalMs) {
-      uint32_t media_ssrc =
-          ForwardErrorCorrection::ParseSsrc(recovered_packet->pkt->data);
-      RTC_LOG(LS_VERBOSE) << "Recovered media packet with SSRC: " << media_ssrc
-                          << " from FlexFEC stream with SSRC: " << ssrc_ << ".";
-      last_recovered_packet_ms_ = now_ms;
+    bool should_log_periodically =
+        now_ms - last_recovered_packet_ms_ > kPacketLogIntervalMs;
+    if (RTC_LOG_CHECK_LEVEL(LS_VERBOSE) || should_log_periodically) {
+      rtc::LoggingSeverity level =
+          should_log_periodically ? rtc::LS_INFO : rtc::LS_VERBOSE;
+      RTC_LOG_V(level) << "Recovered media packet with SSRC: " << media_ssrc
+                       << " seq " << media_seq_num << " recovered length "
+                       << recovered_packet->pkt->data.size()
+                       << " from FlexFEC stream with SSRC: " << ssrc_;
+      if (should_log_periodically) {
+        last_recovered_packet_ms_ = now_ms;
+      }
     }
   }
 }

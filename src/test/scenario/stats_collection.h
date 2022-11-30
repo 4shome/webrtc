@@ -15,6 +15,7 @@
 
 #include "absl/types/optional.h"
 #include "call/call.h"
+#include "rtc_base/thread.h"
 #include "test/logging/log_writer.h"
 #include "test/scenario/performance_stats.h"
 
@@ -23,13 +24,16 @@ namespace test {
 
 struct VideoQualityAnalyzerConfig {
   double psnr_coverage = 1;
+  rtc::Thread* thread = nullptr;
 };
 
 class VideoLayerAnalyzer {
  public:
   void HandleCapturedFrame(const VideoFramePair& sample);
   void HandleRenderedFrame(const VideoFramePair& sample);
-  void HandleFramePair(VideoFramePair sample, RtcEventLogOutput* writer);
+  void HandleFramePair(VideoFramePair sample,
+                       double psnr,
+                       RtcEventLogOutput* writer);
   VideoQualityStats stats_;
   Timestamp last_capture_time_ = Timestamp::MinusInfinity();
   Timestamp last_render_time_ = Timestamp::MinusInfinity();
@@ -51,6 +55,7 @@ class VideoQualityAnalyzer {
   std::function<void(const VideoFramePair&)> Handler();
 
  private:
+  void HandleFramePair(VideoFramePair sample, double psnr);
   const VideoQualityAnalyzerConfig config_;
   std::map<int, VideoLayerAnalyzer> layer_analyzers_;
   const std::unique_ptr<RtcEventLogOutput> writer_;
@@ -67,7 +72,7 @@ class CallStatsCollector {
 };
 class AudioReceiveStatsCollector {
  public:
-  void AddStats(AudioReceiveStream::Stats sample);
+  void AddStats(AudioReceiveStreamInterface::Stats sample);
   CollectedAudioReceiveStats& stats() { return stats_; }
 
  private:
@@ -85,7 +90,7 @@ class VideoSendStatsCollector {
 };
 class VideoReceiveStatsCollector {
  public:
-  void AddStats(VideoReceiveStream::Stats sample);
+  void AddStats(VideoReceiveStreamInterface::Stats sample);
   CollectedVideoReceiveStats& stats() { return stats_; }
 
  private:

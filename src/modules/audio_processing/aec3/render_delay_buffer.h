@@ -12,9 +12,11 @@
 #define MODULES_AUDIO_PROCESSING_AEC3_RENDER_DELAY_BUFFER_H_
 
 #include <stddef.h>
+
 #include <vector>
 
 #include "api/audio/echo_canceller3_config.h"
+#include "modules/audio_processing/aec3/block.h"
 #include "modules/audio_processing/aec3/downsampled_render_buffer.h"
 #include "modules/audio_processing/aec3/render_buffer.h"
 
@@ -32,19 +34,22 @@ class RenderDelayBuffer {
   };
 
   static RenderDelayBuffer* Create(const EchoCanceller3Config& config,
-                                   size_t num_bands);
+                                   int sample_rate_hz,
+                                   size_t num_render_channels);
   virtual ~RenderDelayBuffer() = default;
 
   // Resets the buffer alignment.
   virtual void Reset() = 0;
 
   // Inserts a block into the buffer.
-  virtual BufferingEvent Insert(
-      const std::vector<std::vector<float>>& block) = 0;
+  virtual BufferingEvent Insert(const Block& block) = 0;
 
   // Updates the buffers one step based on the specified buffer delay. Returns
   // an enum indicating whether there was a special event that occurred.
   virtual BufferingEvent PrepareCaptureProcessing() = 0;
+
+  // Called on capture blocks where PrepareCaptureProcessing is not called.
+  virtual void HandleSkippedCaptureProcessing() = 0;
 
   // Sets the buffer delay and returns a bool indicating whether the delay
   // changed.
@@ -69,7 +74,7 @@ class RenderDelayBuffer {
   static int DelayEstimatorOffset(const EchoCanceller3Config& config);
 
   // Provides an optional external estimate of the audio buffer delay.
-  virtual void SetAudioBufferDelay(size_t delay_ms) = 0;
+  virtual void SetAudioBufferDelay(int delay_ms) = 0;
 
   // Returns whether an external delay estimate has been reported via
   // SetAudioBufferDelay.

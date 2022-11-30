@@ -10,10 +10,9 @@
 
 #include "modules/audio_coding/test/Channel.h"
 
-#include <assert.h>
 #include <iostream>
 
-#include "rtc_base/format_macros.h"
+#include "rtc_base/strings/string_builder.h"
 #include "rtc_base/time_utils.h"
 
 namespace webrtc {
@@ -23,7 +22,7 @@ int32_t Channel::SendData(AudioFrameType frameType,
                           uint32_t timeStamp,
                           const uint8_t* payloadData,
                           size_t payloadSize,
-                          const RTPFragmentationHeader* fragmentation) {
+                          int64_t absolute_capture_timestamp_ms) {
   RTPHeader rtp_header;
   int32_t status;
   size_t payloadDataSize = payloadSize;
@@ -46,50 +45,18 @@ int32_t Channel::SendData(AudioFrameType frameType,
     return 0;
   }
 
-  // Treat fragmentation separately
-  if (fragmentation != NULL) {
-    // If silence for too long, send only new data.
-    if ((fragmentation->fragmentationVectorSize == 2) &&
-        (fragmentation->fragmentationTimeDiff[1] <= 0x3fff)) {
-      // only 0x80 if we have multiple blocks
-      _payloadData[0] = 0x80 + fragmentation->fragmentationPlType[1];
-      size_t REDheader = (fragmentation->fragmentationTimeDiff[1] << 10) +
-                         fragmentation->fragmentationLength[1];
-      _payloadData[1] = uint8_t((REDheader >> 16) & 0x000000FF);
-      _payloadData[2] = uint8_t((REDheader >> 8) & 0x000000FF);
-      _payloadData[3] = uint8_t(REDheader & 0x000000FF);
-
-      _payloadData[4] = fragmentation->fragmentationPlType[0];
-      // copy the RED data
-      memcpy(_payloadData + 5,
-             payloadData + fragmentation->fragmentationOffset[1],
-             fragmentation->fragmentationLength[1]);
-      // copy the normal data
-      memcpy(_payloadData + 5 + fragmentation->fragmentationLength[1],
-             payloadData + fragmentation->fragmentationOffset[0],
-             fragmentation->fragmentationLength[0]);
-      payloadDataSize += 5;
+  memcpy(_payloadData, payloadData, payloadDataSize);
+  if (_isStereo) {
+    if (_leftChannel) {
+      _rtp_header = rtp_header;
+      _leftChannel = false;
     } else {
-      // single block (newest one)
-      memcpy(_payloadData, payloadData + fragmentation->fragmentationOffset[0],
-             fragmentation->fragmentationLength[0]);
-      payloadDataSize = fragmentation->fragmentationLength[0];
-      rtp_header.payloadType = fragmentation->fragmentationPlType[0];
-    }
-  } else {
-    memcpy(_payloadData, payloadData, payloadDataSize);
-    if (_isStereo) {
-      if (_leftChannel) {
-        _rtp_header = rtp_header;
-        _leftChannel = false;
-      } else {
-        rtp_header = _rtp_header;
-        _leftChannel = true;
-      }
+      rtp_header = _rtp_header;
+      _leftChannel = true;
     }
   }
 
-  _channelCritSect.Enter();
+  _channelCritSect.Lock();
   if (_saveBitStream) {
     // fwrite(payloadData, sizeof(uint8_t), payloadSize, _bitStreamFile);
   }
@@ -100,7 +67,7 @@ int32_t Channel::SendData(AudioFrameType frameType,
   _useLastFrameSize = false;
   _lastInTimestamp = timeStamp;
   _totalBytes += payloadDataSize;
-  _channelCritSect.Leave();
+  _channelCritSect.Unlock();
 
   if (_useFECTestWithPacketLoss) {
     _packetLoss += 1;
@@ -156,7 +123,7 @@ void Channel::CalcStatistics(const RTPHeader& rtp_header, size_t payloadSize) {
             (uint32_t)((uint32_t)rtp_header.timestamp -
                        (uint32_t)currentPayloadStr->lastTimestamp);
       }
-      assert(_lastFrameSizeSample > 0);
+      RTC_DCHECK_GT(_lastFrameSizeSample, 0);
       int k = 0;
       for (; k < MAX_NUM_FRAMESIZES; ++k) {
         if ((currentPayloadStr->frameSizeStats[k].frameSizeSample ==
@@ -251,9 +218,9 @@ Channel::Channel(int16_t chID)
   }
   if (chID >= 0) {
     _saveBitStream = true;
-    char bitStreamFileName[500];
-    sprintf(bitStreamFileName, "bitStream_%d.dat", chID);
-    _bitStreamFile = fopen(bitStreamFileName, "wb");
+    rtc::StringBuilder ss;
+    ss.AppendFormat("bitStream_%d.dat", chID);
+    _bitStreamFile = fopen(ss.str().c_str(), "wb");
   } else {
     _saveBitStream = false;
   }
@@ -269,7 +236,7 @@ void Channel::RegisterReceiverACM(AudioCodingModule* acm) {
 void Channel::ResetStats() {
   int n;
   int k;
-  _channelCritSect.Enter();
+  _channelCritSect.Lock();
   _lastPayloadType = -1;
   for (n = 0; n < MAX_NUM_PAYLOADS; n++) {
     _payloadStats[n].payloadType = -1;
@@ -284,23 +251,23 @@ void Channel::ResetStats() {
   }
   _beginTime = rtc::TimeMillis();
   _totalBytes = 0;
-  _channelCritSect.Leave();
+  _channelCritSect.Unlock();
 }
 
 uint32_t Channel::LastInTimestamp() {
   uint32_t timestamp;
-  _channelCritSect.Enter();
+  _channelCritSect.Lock();
   timestamp = _lastInTimestamp;
-  _channelCritSect.Leave();
+  _channelCritSect.Unlock();
   return timestamp;
 }
 
 double Channel::BitRate() {
   double rate;
   uint64_t currTime = rtc::TimeMillis();
-  _channelCritSect.Enter();
+  _channelCritSect.Lock();
   rate = ((double)_totalBytes * 8.0) / (double)(currTime - _beginTime);
-  _channelCritSect.Leave();
+  _channelCritSect.Unlock();
   return rate;
 }
 

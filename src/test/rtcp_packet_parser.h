@@ -19,7 +19,6 @@
 #include "modules/rtp_rtcp/source/rtcp_packet/app.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/bye.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/common_header.h"
-#include "modules/rtp_rtcp/source/rtcp_packet/extended_jitter_report.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/extended_reports.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/fir.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/loss_notification.h"
@@ -84,7 +83,6 @@ class RtcpPacketParser {
 
   PacketCounter<rtcp::App>* app() { return &app_; }
   PacketCounter<rtcp::Bye>* bye() { return &bye_; }
-  PacketCounter<rtcp::ExtendedJitterReport>* ij() { return &ij_; }
   PacketCounter<rtcp::ExtendedReports>* xr() { return &xr_; }
   PacketCounter<rtcp::Fir>* fir() { return &fir_; }
   PacketCounter<rtcp::Nack>* nack() { return &nack_; }
@@ -105,11 +103,11 @@ class RtcpPacketParser {
     return &transport_feedback_;
   }
   uint32_t sender_ssrc() const { return sender_ssrc_; }
+  size_t processed_rtcp_packets() const { return processed_rtcp_packets_; }
 
  private:
   PacketCounter<rtcp::App> app_;
   PacketCounter<rtcp::Bye> bye_;
-  PacketCounter<rtcp::ExtendedJitterReport> ij_;
   PacketCounter<rtcp::ExtendedReports> xr_;
   PacketCounter<rtcp::Fir> fir_;
   PacketCounter<rtcp::Nack> nack_;
@@ -124,6 +122,7 @@ class RtcpPacketParser {
   PacketCounter<rtcp::Tmmbr> tmmbr_;
   PacketCounter<rtcp::TransportFeedback> transport_feedback_;
   uint32_t sender_ssrc_ = 0;
+  size_t processed_rtcp_packets_ = 0;
 };
 
 }  // namespace test

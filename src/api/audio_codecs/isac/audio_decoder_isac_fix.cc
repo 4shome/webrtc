@@ -10,7 +10,8 @@
 
 #include "api/audio_codecs/isac/audio_decoder_isac_fix.h"
 
-#include "absl/memory/memory.h"
+#include <memory>
+
 #include "absl/strings/match.h"
 #include "modules/audio_coding/codecs/isac/fix/include/audio_decoder_isacfix.h"
 
@@ -18,10 +19,11 @@ namespace webrtc {
 
 absl::optional<AudioDecoderIsacFix::Config> AudioDecoderIsacFix::SdpToConfig(
     const SdpAudioFormat& format) {
-  return absl::EqualsIgnoreCase(format.name, "ISAC") &&
-                 format.clockrate_hz == 16000 && format.num_channels == 1
-             ? absl::optional<Config>(Config())
-             : absl::nullopt;
+  if (absl::EqualsIgnoreCase(format.name, "ISAC") &&
+      format.clockrate_hz == 16000 && format.num_channels == 1) {
+    return Config();
+  }
+  return absl::nullopt;
 }
 
 void AudioDecoderIsacFix::AppendSupportedDecoders(
@@ -31,8 +33,11 @@ void AudioDecoderIsacFix::AppendSupportedDecoders(
 
 std::unique_ptr<AudioDecoder> AudioDecoderIsacFix::MakeAudioDecoder(
     Config config,
-    absl::optional<AudioCodecPairId> /*codec_pair_id*/) {
-  return absl::make_unique<AudioDecoderIsacFixImpl>(16000);
+    absl::optional<AudioCodecPairId> /*codec_pair_id*/,
+    const FieldTrialsView* field_trials) {
+  AudioDecoderIsacFixImpl::Config c;
+  c.sample_rate_hz = 16000;
+  return std::make_unique<AudioDecoderIsacFixImpl>(c);
 }
 
 }  // namespace webrtc

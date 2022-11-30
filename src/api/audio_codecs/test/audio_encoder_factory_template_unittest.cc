@@ -9,7 +9,9 @@
  */
 
 #include "api/audio_codecs/audio_encoder_factory_template.h"
-#include "absl/memory/memory.h"
+
+#include <memory>
+
 #include "api/audio_codecs/L16/audio_encoder_L16.h"
 #include "api/audio_codecs/g711/audio_encoder_g711.h"
 #include "api/audio_codecs/g722/audio_encoder_g722.h"
@@ -20,6 +22,7 @@
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/mock_audio_encoder.h"
+#include "test/scoped_key_value_config.h"
 
 namespace webrtc {
 
@@ -65,7 +68,7 @@ struct AudioEncoderFakeApi {
       const Config&,
       int payload_type,
       absl::optional<AudioCodecPairId> /*codec_pair_id*/ = absl::nullopt) {
-    auto enc = absl::make_unique<testing::StrictMock<MockAudioEncoder>>();
+    auto enc = std::make_unique<testing::StrictMock<MockAudioEncoder>>();
     EXPECT_CALL(*enc, SampleRateHz())
         .WillOnce(::testing::Return(Params::CodecInfo().sample_rate_hz));
     return std::move(enc);
@@ -75,9 +78,11 @@ struct AudioEncoderFakeApi {
 }  // namespace
 
 TEST(AudioEncoderFactoryTemplateTest, NoEncoderTypes) {
+  test::ScopedKeyValueConfig field_trials;
   rtc::scoped_refptr<AudioEncoderFactory> factory(
-      new rtc::RefCountedObject<
-          audio_encoder_factory_template_impl::AudioEncoderFactoryT<>>());
+      rtc::make_ref_counted<
+          audio_encoder_factory_template_impl::AudioEncoderFactoryT<>>(
+          &field_trials));
   EXPECT_THAT(factory->GetSupportedEncoders(), ::testing::IsEmpty());
   EXPECT_EQ(absl::nullopt, factory->QueryAudioEncoder({"foo", 8000, 1}));
   EXPECT_EQ(nullptr,

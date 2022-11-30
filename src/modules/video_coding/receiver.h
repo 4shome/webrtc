@@ -14,13 +14,13 @@
 #include <memory>
 #include <vector>
 
+#include "api/field_trials_view.h"
+#include "modules/video_coding/event_wrapper.h"
 #include "modules/video_coding/include/video_coding.h"
 #include "modules/video_coding/include/video_coding_defines.h"
 #include "modules/video_coding/jitter_buffer.h"
 #include "modules/video_coding/packet.h"
-#include "modules/video_coding/timing.h"
-#include "rtc_base/critical_section.h"
-#include "system_wrappers/include/event_wrapper.h"
+#include "modules/video_coding/timing/timing.h"
 
 namespace webrtc {
 
@@ -29,7 +29,9 @@ class VCMEncodedFrame;
 
 class VCMReceiver {
  public:
-  VCMReceiver(VCMTiming* timing, Clock* clock);
+  VCMReceiver(VCMTiming* timing,
+              Clock* clock,
+              const FieldTrialsView& field_trials);
 
   // Using this constructor, you can specify a different event implemetation for
   // the jitter buffer. Useful for unit tests when you want to simulate incoming
@@ -38,11 +40,11 @@ class VCMReceiver {
   VCMReceiver(VCMTiming* timing,
               Clock* clock,
               std::unique_ptr<EventWrapper> receiver_event,
-              std::unique_ptr<EventWrapper> jitter_buffer_event);
+              std::unique_ptr<EventWrapper> jitter_buffer_event,
+              const FieldTrialsView& field_trials);
 
   ~VCMReceiver();
 
-  void Reset();
   int32_t InsertPacket(const VCMPacket& packet);
   VCMEncodedFrame* FrameForDecoding(uint16_t max_wait_time_ms,
                                     bool prefer_late_decoding);
@@ -54,10 +56,7 @@ class VCMReceiver {
                        int max_incomplete_time_ms);
   std::vector<uint16_t> NackList(bool* request_key_frame);
 
-  void TriggerDecoderShutdown();
-
  private:
-  rtc::CriticalSection crit_sect_;
   Clock* const clock_;
   VCMJitterBuffer jitter_buffer_;
   VCMTiming* timing_;

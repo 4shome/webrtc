@@ -11,17 +11,18 @@
 #include "pc/rtp_transport.h"
 
 #include <errno.h>
-#include <string>
+
+#include <cstdint>
 #include <utility>
 
-#include "api/rtp_headers.h"
-#include "api/rtp_parameters.h"
+#include "absl/strings/string_view.h"
+#include "api/array_view.h"
+#include "api/units/timestamp.h"
 #include "media/base/rtp_utils.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/copy_on_write_buffer.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/trace_event.h"
 
 namespace webrtc {
@@ -29,6 +30,21 @@ namespace webrtc {
 void RtpTransport::SetRtcpMuxEnabled(bool enable) {
   rtcp_mux_enabled_ = enable;
   MaybeSignalReadyToSend();
+}
+
+const std::string& RtpTransport::transport_name() const {
+  return rtp_packet_transport_->transport_name();
+}
+
+int RtpTransport::SetRtpOption(rtc::Socket::Option opt, int value) {
+  return rtp_packet_transport_->SetOption(opt, value);
+}
+
+int RtpTransport::SetRtcpOption(rtc::Socket::Option opt, int value) {
+  if (rtcp_packet_transport_) {
+    return rtcp_packet_transport_->SetOption(opt, value);
+  }
+  return -1;
 }
 
 void RtpTransport::SetRtpPacketTransport(
@@ -164,38 +180,18 @@ bool RtpTransport::UnregisterRtpDemuxerSink(RtpPacketSinkInterface* sink) {
   return true;
 }
 
-RTCError RtpTransport::SetParameters(const RtpTransportParameters& parameters) {
-  if (parameters_.rtcp.mux && !parameters.rtcp.mux) {
-    LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_STATE,
-                         "Disabling RTCP muxing is not allowed.");
-  }
-
-  RtpTransportParameters new_parameters = parameters;
-
-  if (new_parameters.rtcp.cname.empty()) {
-    new_parameters.rtcp.cname = parameters_.rtcp.cname;
-  }
-
-  parameters_ = new_parameters;
-  return RTCError::OK();
-}
-
-RtpTransportParameters RtpTransport::GetParameters() const {
-  return parameters_;
-}
-
 void RtpTransport::DemuxPacket(rtc::CopyOnWriteBuffer packet,
                                int64_t packet_time_us) {
-  webrtc::RtpPacketReceived parsed_packet(&header_extension_map_);
+  webrtc::RtpPacketReceived parsed_packet(
+      &header_extension_map_, packet_time_us == -1
+                                  ? Timestamp::MinusInfinity()
+                                  : Timestamp::Micros(packet_time_us));
   if (!parsed_packet.Parse(std::move(packet))) {
     RTC_LOG(LS_ERROR)
         << "Failed to parse the incoming RTP packet before demuxing. Drop it.";
     return;
   }
 
-  if (packet_time_us != -1) {
-    parsed_packet.set_arrival_time_ms((packet_time_us + 500) / 1000);
-  }
   if (!rtp_demuxer_.OnRtpPacket(parsed_packet)) {
     RTC_LOG(LS_WARNING) << "Failed to demux RTP packet: "
                         << RtpDemuxer::DescribePacket(parsed_packet);

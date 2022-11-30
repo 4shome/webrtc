@@ -42,7 +42,8 @@ Vp8FrameConfig::Vp8FrameConfig(BufferFlags last,
       layer_sync(false),
       freeze_entropy(freeze_entropy),
       first_reference(Vp8BufferReference::kNone),
-      second_reference(Vp8BufferReference::kNone) {}
+      second_reference(Vp8BufferReference::kNone),
+      retransmission_allowed(true) {}
 
 bool Vp8FrameConfig::References(Buffer buffer) const {
   switch (buffer) {
@@ -55,7 +56,7 @@ bool Vp8FrameConfig::References(Buffer buffer) const {
     case Buffer::kCount:
       break;
   }
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return false;
 }
 
@@ -70,7 +71,7 @@ bool Vp8FrameConfig::Updates(Buffer buffer) const {
     case Buffer::kCount:
       break;
   }
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return false;
 }
 

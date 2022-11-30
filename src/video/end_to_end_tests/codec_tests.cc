@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "absl/memory/memory.h"
+#include <memory>
 #include "absl/types/optional.h"
 #include "api/test/video/function_video_encoder_factory.h"
 #include "api/video/color_space.h"
@@ -34,18 +34,14 @@ enum : int {  // The first valid value is 1.
 };
 }  // namespace
 
-class CodecEndToEndTest : public test::CallTest,
-                          public ::testing::WithParamInterface<std::string> {
+class CodecEndToEndTest : public test::CallTest {
  public:
-  CodecEndToEndTest() : field_trial_(GetParam()) {
+  CodecEndToEndTest() {
     RegisterRtpExtension(
         RtpExtension(RtpExtension::kColorSpaceUri, kColorSpaceExtensionId));
     RegisterRtpExtension(RtpExtension(RtpExtension::kVideoRotationUri,
                                       kVideoRotationExtensionId));
   }
-
- private:
-  test::ScopedFieldTrials field_trial_;
 };
 
 class CodecObserver : public test::EndToEndTest,
@@ -57,7 +53,7 @@ class CodecObserver : public test::EndToEndTest,
                 const std::string& payload_name,
                 VideoEncoderFactory* encoder_factory,
                 VideoDecoderFactory* decoder_factory)
-      : EndToEndTest(4 * CodecEndToEndTest::kDefaultTimeoutMs),
+      : EndToEndTest(4 * CodecEndToEndTest::kDefaultTimeout),
         // TODO(hta): This timeout (120 seconds) is excessive.
         // https://bugs.webrtc.org/6830
         no_frames_to_wait_for_(no_frames_to_wait_for),
@@ -75,7 +71,7 @@ class CodecObserver : public test::EndToEndTest,
 
   void ModifyVideoConfigs(
       VideoSendStream::Config* send_config,
-      std::vector<VideoReceiveStream::Config>* receive_configs,
+      std::vector<VideoReceiveStreamInterface::Config>* receive_configs,
       VideoEncoderConfig* encoder_config) override {
     encoder_config->codec_type = PayloadStringToCodecType(payload_name_);
     send_config->encoder_settings.encoder_factory = encoder_factory_;
@@ -88,7 +84,7 @@ class CodecObserver : public test::EndToEndTest,
         send_config->rtp.payload_type;
     (*receive_configs)[0].decoders[0].video_format =
         SdpVideoFormat(send_config->rtp.payload_name);
-    (*receive_configs)[0].decoders[0].decoder_factory = decoder_factory_;
+    (*receive_configs)[0].decoder_factory = decoder_factory_;
   }
 
   void OnFrame(const VideoFrame& video_frame) override {
@@ -121,13 +117,7 @@ class CodecObserver : public test::EndToEndTest,
   int frame_counter_;
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    GenericDescriptor,
-    CodecEndToEndTest,
-    ::testing::Values("WebRTC-GenericDescriptor/Disabled/",
-                      "WebRTC-GenericDescriptor/Enabled/"));
-
-TEST_P(CodecEndToEndTest, SendsAndReceivesVP8) {
+TEST_F(CodecEndToEndTest, SendsAndReceivesVP8) {
   test::FunctionVideoEncoderFactory encoder_factory(
       []() { return VP8Encoder::Create(); });
   test::FunctionVideoDecoderFactory decoder_factory(
@@ -137,7 +127,7 @@ TEST_P(CodecEndToEndTest, SendsAndReceivesVP8) {
   RunBaseTest(&test);
 }
 
-TEST_P(CodecEndToEndTest, SendsAndReceivesVP8Rotation90) {
+TEST_F(CodecEndToEndTest, SendsAndReceivesVP8Rotation90) {
   test::FunctionVideoEncoderFactory encoder_factory(
       []() { return VP8Encoder::Create(); });
   test::FunctionVideoDecoderFactory decoder_factory(
@@ -148,7 +138,7 @@ TEST_P(CodecEndToEndTest, SendsAndReceivesVP8Rotation90) {
 }
 
 #if defined(RTC_ENABLE_VP9)
-TEST_P(CodecEndToEndTest, SendsAndReceivesVP9) {
+TEST_F(CodecEndToEndTest, SendsAndReceivesVP9) {
   test::FunctionVideoEncoderFactory encoder_factory(
       []() { return VP9Encoder::Create(); });
   test::FunctionVideoDecoderFactory decoder_factory(
@@ -158,7 +148,7 @@ TEST_P(CodecEndToEndTest, SendsAndReceivesVP9) {
   RunBaseTest(&test);
 }
 
-TEST_P(CodecEndToEndTest, SendsAndReceivesVP9VideoRotation90) {
+TEST_F(CodecEndToEndTest, SendsAndReceivesVP9VideoRotation90) {
   test::FunctionVideoEncoderFactory encoder_factory(
       []() { return VP9Encoder::Create(); });
   test::FunctionVideoDecoderFactory decoder_factory(
@@ -168,7 +158,7 @@ TEST_P(CodecEndToEndTest, SendsAndReceivesVP9VideoRotation90) {
   RunBaseTest(&test);
 }
 
-TEST_P(CodecEndToEndTest, SendsAndReceivesVP9ExplicitColorSpace) {
+TEST_F(CodecEndToEndTest, SendsAndReceivesVP9ExplicitColorSpace) {
   test::FunctionVideoEncoderFactory encoder_factory(
       []() { return VP9Encoder::Create(); });
   test::FunctionVideoDecoderFactory decoder_factory(
@@ -179,7 +169,7 @@ TEST_P(CodecEndToEndTest, SendsAndReceivesVP9ExplicitColorSpace) {
   RunBaseTest(&test);
 }
 
-TEST_P(CodecEndToEndTest,
+TEST_F(CodecEndToEndTest,
        SendsAndReceivesVP9ExplicitColorSpaceWithHdrMetadata) {
   test::FunctionVideoEncoderFactory encoder_factory(
       []() { return VP9Encoder::Create(); });
@@ -192,17 +182,17 @@ TEST_P(CodecEndToEndTest,
 }
 
 // Mutiplex tests are using VP9 as the underlying implementation.
-TEST_P(CodecEndToEndTest, SendsAndReceivesMultiplex) {
+TEST_F(CodecEndToEndTest, SendsAndReceivesMultiplex) {
   InternalEncoderFactory internal_encoder_factory;
   InternalDecoderFactory internal_decoder_factory;
   test::FunctionVideoEncoderFactory encoder_factory(
       [&internal_encoder_factory]() {
-        return absl::make_unique<MultiplexEncoderAdapter>(
+        return std::make_unique<MultiplexEncoderAdapter>(
             &internal_encoder_factory, SdpVideoFormat(cricket::kVp9CodecName));
       });
   test::FunctionVideoDecoderFactory decoder_factory(
       [&internal_decoder_factory]() {
-        return absl::make_unique<MultiplexDecoderAdapter>(
+        return std::make_unique<MultiplexDecoderAdapter>(
             &internal_decoder_factory, SdpVideoFormat(cricket::kVp9CodecName));
       });
 
@@ -211,17 +201,17 @@ TEST_P(CodecEndToEndTest, SendsAndReceivesMultiplex) {
   RunBaseTest(&test);
 }
 
-TEST_P(CodecEndToEndTest, SendsAndReceivesMultiplexVideoRotation90) {
+TEST_F(CodecEndToEndTest, SendsAndReceivesMultiplexVideoRotation90) {
   InternalEncoderFactory internal_encoder_factory;
   InternalDecoderFactory internal_decoder_factory;
   test::FunctionVideoEncoderFactory encoder_factory(
       [&internal_encoder_factory]() {
-        return absl::make_unique<MultiplexEncoderAdapter>(
+        return std::make_unique<MultiplexEncoderAdapter>(
             &internal_encoder_factory, SdpVideoFormat(cricket::kVp9CodecName));
       });
   test::FunctionVideoDecoderFactory decoder_factory(
       [&internal_decoder_factory]() {
-        return absl::make_unique<MultiplexDecoderAdapter>(
+        return std::make_unique<MultiplexDecoderAdapter>(
             &internal_decoder_factory, SdpVideoFormat(cricket::kVp9CodecName));
       });
   CodecObserver test(5, kVideoRotation_90, absl::nullopt, "multiplex",

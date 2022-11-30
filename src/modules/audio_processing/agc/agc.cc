@@ -21,9 +21,11 @@
 namespace webrtc {
 namespace {
 
-const int kDefaultLevelDbfs = -18;
-const int kNumAnalysisFrames = 100;
-const double kActivityThreshold = 0.3;
+constexpr int kDefaultLevelDbfs = -18;
+constexpr int kNumAnalysisFrames = 100;
+constexpr double kActivityThreshold = 0.3;
+constexpr int kNum10msFramesInOneSecond = 100;
+constexpr int kMaxSampleRateHz = 384000;
 
 }  // namespace
 
@@ -33,20 +35,12 @@ Agc::Agc()
       histogram_(LoudnessHistogram::Create(kNumAnalysisFrames)),
       inactive_histogram_(LoudnessHistogram::Create()) {}
 
-Agc::~Agc() {}
+Agc::~Agc() = default;
 
-float Agc::AnalyzePreproc(const int16_t* audio, size_t length) {
-  RTC_DCHECK_GT(length, 0);
-  size_t num_clipped = 0;
-  for (size_t i = 0; i < length; ++i) {
-    if (audio[i] == 32767 || audio[i] == -32768)
-      ++num_clipped;
-  }
-  return 1.0f * num_clipped / length;
-}
-
-void Agc::Process(const int16_t* audio, size_t length, int sample_rate_hz) {
-  vad_.ProcessChunk(audio, length, sample_rate_hz);
+void Agc::Process(rtc::ArrayView<const int16_t> audio) {
+  const int sample_rate_hz = audio.size() * kNum10msFramesInOneSecond;
+  RTC_DCHECK_LE(sample_rate_hz, kMaxSampleRateHz);
+  vad_.ProcessChunk(audio.data(), audio.size(), sample_rate_hz);
   const std::vector<double>& rms = vad_.chunkwise_rms();
   const std::vector<double>& probabilities =
       vad_.chunkwise_voice_probabilities();
@@ -58,7 +52,7 @@ void Agc::Process(const int16_t* audio, size_t length, int sample_rate_hz) {
 
 bool Agc::GetRmsErrorDb(int* error) {
   if (!error) {
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
     return false;
   }
 

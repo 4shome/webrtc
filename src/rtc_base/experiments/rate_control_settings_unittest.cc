@@ -20,7 +20,7 @@ namespace webrtc {
 namespace {
 
 TEST(RateControlSettingsTest, CongestionWindow) {
-  EXPECT_FALSE(
+  EXPECT_TRUE(
       RateControlSettings::ParseFromFieldTrials().UseCongestionWindow());
 
   test::ScopedFieldTrials field_trials(
@@ -32,8 +32,8 @@ TEST(RateControlSettingsTest, CongestionWindow) {
 }
 
 TEST(RateControlSettingsTest, CongestionWindowPushback) {
-  EXPECT_FALSE(RateControlSettings::ParseFromFieldTrials()
-                   .UseCongestionWindowPushback());
+  EXPECT_TRUE(RateControlSettings::ParseFromFieldTrials()
+                  .UseCongestionWindowPushback());
 
   test::ScopedFieldTrials field_trials(
       "WebRTC-CongestionWindow/QueueSize:100,MinBitrate:100000/");
@@ -42,6 +42,29 @@ TEST(RateControlSettingsTest, CongestionWindowPushback) {
   EXPECT_TRUE(settings_after.UseCongestionWindowPushback());
   EXPECT_EQ(settings_after.CongestionWindowMinPushbackTargetBitrateBps(),
             100000u);
+}
+
+TEST(RateControlSettingsTest, CongestionWindowPushbackDropframe) {
+  EXPECT_TRUE(RateControlSettings::ParseFromFieldTrials()
+                  .UseCongestionWindowPushback());
+
+  test::ScopedFieldTrials field_trials(
+      "WebRTC-CongestionWindow/"
+      "QueueSize:100,MinBitrate:100000,DropFrame:true/");
+  const RateControlSettings settings_after =
+      RateControlSettings::ParseFromFieldTrials();
+  EXPECT_TRUE(settings_after.UseCongestionWindowPushback());
+  EXPECT_EQ(settings_after.CongestionWindowMinPushbackTargetBitrateBps(),
+            100000u);
+  EXPECT_TRUE(settings_after.UseCongestionWindowDropFrameOnly());
+}
+
+TEST(RateControlSettingsTest, CongestionWindowPushbackDefaultConfig) {
+  const RateControlSettings settings =
+      RateControlSettings::ParseFromFieldTrials();
+  EXPECT_TRUE(settings.UseCongestionWindowPushback());
+  EXPECT_EQ(settings.CongestionWindowMinPushbackTargetBitrateBps(), 30000u);
+  EXPECT_TRUE(settings.UseCongestionWindowDropFrameOnly());
 }
 
 TEST(RateControlSettingsTest, PacingFactor) {
@@ -65,54 +88,88 @@ TEST(RateControlSettingsTest, AlrProbing) {
   EXPECT_TRUE(RateControlSettings::ParseFromFieldTrials().UseAlrProbing());
 }
 
+TEST(RateControlSettingsTest, LibvpxVp8QpMax) {
+  EXPECT_FALSE(RateControlSettings::ParseFromFieldTrials().LibvpxVp8QpMax());
+
+  test::ScopedFieldTrials field_trials(
+      "WebRTC-VideoRateControl/vp8_qp_max:50/");
+  EXPECT_EQ(RateControlSettings::ParseFromFieldTrials().LibvpxVp8QpMax(), 50);
+}
+
+TEST(RateControlSettingsTest, DoesNotGetTooLargeLibvpxVp8QpMaxValue) {
+  test::ScopedFieldTrials field_trials(
+      "WebRTC-VideoRateControl/vp8_qp_max:70/");
+  EXPECT_FALSE(RateControlSettings::ParseFromFieldTrials().LibvpxVp8QpMax());
+}
+
+TEST(RateControlSettingsTest, LibvpxVp8MinPixels) {
+  EXPECT_FALSE(
+      RateControlSettings::ParseFromFieldTrials().LibvpxVp8MinPixels());
+
+  test::ScopedFieldTrials field_trials(
+      "WebRTC-VideoRateControl/vp8_min_pixels:50000/");
+  EXPECT_EQ(RateControlSettings::ParseFromFieldTrials().LibvpxVp8MinPixels(),
+            50000);
+}
+
+TEST(RateControlSettingsTest, DoesNotGetTooSmallLibvpxVp8MinPixelValue) {
+  test::ScopedFieldTrials field_trials(
+      "WebRTC-VideoRateControl/vp8_min_pixels:0/");
+  EXPECT_FALSE(
+      RateControlSettings::ParseFromFieldTrials().LibvpxVp8MinPixels());
+}
+
 TEST(RateControlSettingsTest, LibvpxTrustedRateController) {
   const RateControlSettings settings_before =
       RateControlSettings::ParseFromFieldTrials();
-  EXPECT_FALSE(settings_before.LibvpxVp8TrustedRateController());
-  EXPECT_FALSE(settings_before.LibvpxVp9TrustedRateController());
+  EXPECT_TRUE(settings_before.LibvpxVp8TrustedRateController());
+  EXPECT_TRUE(settings_before.LibvpxVp9TrustedRateController());
 
   test::ScopedFieldTrials field_trials(
-      "WebRTC-VideoRateControl/trust_vp8:1,trust_vp9:1/");
+      "WebRTC-VideoRateControl/trust_vp8:0,trust_vp9:0/");
   const RateControlSettings settings_after =
       RateControlSettings::ParseFromFieldTrials();
-  EXPECT_TRUE(settings_after.LibvpxVp8TrustedRateController());
-  EXPECT_TRUE(settings_after.LibvpxVp9TrustedRateController());
+  EXPECT_FALSE(settings_after.LibvpxVp8TrustedRateController());
+  EXPECT_FALSE(settings_after.LibvpxVp9TrustedRateController());
 }
 
-TEST(RateControlSettingsTest, GetSimulcastHysteresisFactor) {
+TEST(RateControlSettingsTest, Vp8BaseHeavyTl3RateAllocationLegacyKey) {
   const RateControlSettings settings_before =
       RateControlSettings::ParseFromFieldTrials();
-  EXPECT_DOUBLE_EQ(settings_before.GetSimulcastHysteresisFactor(
-                       VideoCodecMode::kRealtimeVideo),
-                   1.0);
-  EXPECT_DOUBLE_EQ(settings_before.GetSimulcastHysteresisFactor(
-                       VideoEncoderConfig::ContentType::kRealtimeVideo),
-                   1.0);
-  EXPECT_DOUBLE_EQ(settings_before.GetSimulcastHysteresisFactor(
-                       VideoCodecMode::kScreensharing),
-                   1.35);
-  EXPECT_DOUBLE_EQ(settings_before.GetSimulcastHysteresisFactor(
-                       VideoEncoderConfig::ContentType::kScreen),
-                   1.35);
+  EXPECT_FALSE(settings_before.Vp8BaseHeavyTl3RateAllocation());
 
   test::ScopedFieldTrials field_trials(
-      "WebRTC-VideoRateControl/"
-      "video_hysteresis:1.2,screenshare_hysteresis:1.4/");
+      "WebRTC-UseBaseHeavyVP8TL3RateAllocation/Enabled/");
   const RateControlSettings settings_after =
       RateControlSettings::ParseFromFieldTrials();
+  EXPECT_TRUE(settings_after.Vp8BaseHeavyTl3RateAllocation());
+}
 
-  EXPECT_DOUBLE_EQ(settings_after.GetSimulcastHysteresisFactor(
-                       VideoCodecMode::kRealtimeVideo),
-                   1.2);
-  EXPECT_DOUBLE_EQ(settings_after.GetSimulcastHysteresisFactor(
-                       VideoEncoderConfig::ContentType::kRealtimeVideo),
-                   1.2);
-  EXPECT_DOUBLE_EQ(settings_after.GetSimulcastHysteresisFactor(
-                       VideoCodecMode::kScreensharing),
-                   1.4);
-  EXPECT_DOUBLE_EQ(settings_after.GetSimulcastHysteresisFactor(
-                       VideoEncoderConfig::ContentType::kScreen),
-                   1.4);
+TEST(RateControlSettingsTest,
+     Vp8BaseHeavyTl3RateAllocationVideoRateControlKey) {
+  const RateControlSettings settings_before =
+      RateControlSettings::ParseFromFieldTrials();
+  EXPECT_FALSE(settings_before.Vp8BaseHeavyTl3RateAllocation());
+
+  test::ScopedFieldTrials field_trials(
+      "WebRTC-VideoRateControl/vp8_base_heavy_tl3_alloc:1/");
+  const RateControlSettings settings_after =
+      RateControlSettings::ParseFromFieldTrials();
+  EXPECT_TRUE(settings_after.Vp8BaseHeavyTl3RateAllocation());
+}
+
+TEST(RateControlSettingsTest,
+     Vp8BaseHeavyTl3RateAllocationVideoRateControlKeyOverridesLegacyKey) {
+  const RateControlSettings settings_before =
+      RateControlSettings::ParseFromFieldTrials();
+  EXPECT_FALSE(settings_before.Vp8BaseHeavyTl3RateAllocation());
+
+  test::ScopedFieldTrials field_trials(
+      "WebRTC-UseBaseHeavyVP8TL3RateAllocation/Enabled/WebRTC-VideoRateControl/"
+      "vp8_base_heavy_tl3_alloc:0/");
+  const RateControlSettings settings_after =
+      RateControlSettings::ParseFromFieldTrials();
+  EXPECT_FALSE(settings_after.Vp8BaseHeavyTl3RateAllocation());
 }
 
 TEST(RateControlSettingsTest, TriggerProbeOnMaxAllocatedBitrateChange) {
@@ -126,16 +183,16 @@ TEST(RateControlSettingsTest, TriggerProbeOnMaxAllocatedBitrateChange) {
 }
 
 TEST(RateControlSettingsTest, UseEncoderBitrateAdjuster) {
-  // Should be off by default.
-  EXPECT_FALSE(
+  // Should be on by default.
+  EXPECT_TRUE(
       RateControlSettings::ParseFromFieldTrials().UseEncoderBitrateAdjuster());
 
   {
-    // Can be turned on via field trial.
+    // Can be turned off via field trial.
     test::ScopedFieldTrials field_trials(
-        "WebRTC-VideoRateControl/bitrate_adjuster:true/");
-    EXPECT_TRUE(RateControlSettings::ParseFromFieldTrials()
-                    .UseEncoderBitrateAdjuster());
+        "WebRTC-VideoRateControl/bitrate_adjuster:false/");
+    EXPECT_FALSE(RateControlSettings::ParseFromFieldTrials()
+                     .UseEncoderBitrateAdjuster());
   }
 }
 

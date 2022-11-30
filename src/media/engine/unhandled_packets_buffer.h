@@ -12,6 +12,7 @@
 #define MEDIA_ENGINE_UNHANDLED_PACKETS_BUFFER_H_
 
 #include <stdint.h>
+
 #include <functional>
 #include <tuple>
 #include <utility>
@@ -34,7 +35,7 @@ class UnhandledPacketsBuffer {
                  int64_t packet_time_us,
                  rtc::CopyOnWriteBuffer packet);
 
-  // Feed all packets with |ssrcs| into |consumer|.
+  // Feed all packets with `ssrcs` into `consumer`.
   void BackfillPackets(
       rtc::ArrayView<const uint32_t> ssrcs,
       std::function<void(uint32_t, int64_t, rtc::CopyOnWriteBuffer)> consumer);

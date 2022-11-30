@@ -22,13 +22,11 @@
 #endif
 #endif
 
-#include <ctype.h>
 #include <math.h>
 
 /* include API */
 #include "modules/audio_coding/codecs/isac/main/include/isac.h"
 #include "modules/audio_coding/codecs/isac/main/util/utility.h"
-#include "rtc_base/format_macros.h"
 
 /* max number of samples per frame (= 60 ms frame) */
 #define MAX_FRAMESAMPLES_SWB 1920
@@ -110,9 +108,6 @@ int main(int argc, char* argv[]) {
 
   /* handling wrong input arguments in the command line */
   if (argc < 5) {
-    int size;
-    WebRtcIsac_AssignSize(&size);
-
     printf("\n\nWrong number of arguments or flag values.\n\n");
 
     printf("Usage:\n\n");
@@ -140,7 +135,6 @@ int main(int argc, char* argv[]) {
     printf("-dec............ the input file is a bit-stream, decode it.\n\n");
     printf("Example usage:\n\n");
     printf("%s speechIn.pcm speechOut.pcm -B 40000 -fs 32\n\n", argv[0]);
-    printf("structure size %d bytes\n", size);
 
     exit(0);
   }
@@ -424,7 +418,7 @@ int main(int argc, char* argv[]) {
   printf("\n");
   printf("Measured bit-rate........... %0.3f kbps\n", rate);
   printf("Measured RCU bit-ratre...... %0.3f kbps\n", rateRCU);
-  printf("Maximum bit-rate/payloadsize %0.3f / %" PRIuS "\n",
+  printf("Maximum bit-rate/payloadsize %0.3f / %zu\n",
          maxStreamLen * 8 / 0.03, maxStreamLen);
   printf("Measured packet-loss........ %0.1f%% \n",
          100.0f * (float)lostPacketCntr / (float)packetCntr);

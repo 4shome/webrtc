@@ -13,20 +13,16 @@ if (rtc_enable_protobuf) {
 
 if (rtc_enable_protobuf) {
   proto_library("network_tester_config_proto") {
-    sources = [
-      "network_tester_config.proto",
-    ]
+    sources = [ "network_tester_config.proto" ]
     proto_out_dir = "rtc_tools/network_tester"
   }
 
   proto_library("network_tester_packet_proto") {
-    sources = [
-      "network_tester_packet.proto",
-    ]
+    sources = [ "network_tester_packet.proto" ]
     proto_out_dir = "rtc_tools/network_tester"
   }
 
-  rtc_static_library("network_tester") {
+  rtc_library("network_tester") {
     sources = [
       "config_reader.cc",
       "config_reader.h",
@@ -43,17 +39,28 @@ if (rtc_enable_protobuf) {
     deps = [
       ":network_tester_config_proto",
       ":network_tester_packet_proto",
+      "../../api:sequence_checker",
       "../../api/task_queue",
       "../../api/task_queue:default_task_queue_factory",
-      "../../p2p",
+      "../../api/task_queue:pending_task_safety_flag",
+      "../../p2p:rtc_p2p",
       "../../rtc_base",
       "../../rtc_base:checks",
+      "../../rtc_base:ignore_wundef",
+      "../../rtc_base:ip_address",
+      "../../rtc_base:logging",
+      "../../rtc_base:macromagic",
       "../../rtc_base:protobuf_utils",
-      "../../rtc_base:rtc_base_approved",
       "../../rtc_base:rtc_task_queue",
-      "../../rtc_base/synchronization:sequence_checker",
+      "../../rtc_base:socket_address",
+      "../../rtc_base:threading",
+      "../../rtc_base:timeutils",
+      "../../rtc_base/synchronization:mutex",
+      "../../rtc_base/system:no_unique_address",
       "../../rtc_base/third_party/sigslot",
-      "//third_party/abseil-cpp/absl/memory",
+    ]
+    absl_deps = [
+      "//third_party/abseil-cpp/absl/functional:any_invocable",
       "//third_party/abseil-cpp/absl/types:optional",
     ]
   }
@@ -67,22 +74,19 @@ if (rtc_enable_protobuf) {
     bundle_data("network_tester_unittests_bundle_data") {
       testonly = true
       sources = network_tester_unittests_resources
-      outputs = [
-        "{{bundle_resources_dir}}/{{source_file_part}}",
-      ]
+      outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
     }
   }
 
-  rtc_source_set("network_tester_unittests") {
+  rtc_library("network_tester_unittests") {
     testonly = true
 
-    sources = [
-      "network_tester_unittest.cc",
-    ]
+    sources = [ "network_tester_unittest.cc" ]
 
     deps = [
       ":network_tester",
       "../../rtc_base:gunit_helpers",
+      "../../rtc_base:threading",
       "../../test:fileutils",
       "../../test:test_support",
       "//testing/gtest",
@@ -98,21 +102,23 @@ if (rtc_enable_protobuf) {
   }
 
   rtc_executable("network_tester_server") {
-    sources = [
-      "server.cc",
-    ]
+    sources = [ "server.cc" ]
 
     deps = [
       ":network_tester",
+      "../../rtc_base:null_socket_server",
+      "../../rtc_base:threading",
     ]
   }
 }
 
 if (is_android) {
-  android_apk("NetworkTesterMobile") {
+  rtc_android_apk("NetworkTesterMobile") {
     testonly = true
     apk_name = "NetworkTesterMobile"
     android_manifest = "androidapp/AndroidManifest.xml"
+    min_sdk_version = 21
+    target_sdk_version = 24
 
     deps = [
       ":NetworkTesterMobile_javalib",
@@ -123,15 +129,16 @@ if (is_android) {
     shared_libraries = [ "../../rtc_tools/network_tester:network_tester_so" ]
   }
 
-  android_library("NetworkTesterMobile_javalib") {
+  rtc_android_library("NetworkTesterMobile_javalib") {
     testonly = true
-    android_manifest_for_lint = "androidapp/AndroidManifest.xml"
+    android_manifest = "androidapp/AndroidManifest.xml"
 
-    java_files = [
+    sources = [
       "androidapp/src/com/google/media/networktester/MainActivity.java",
       "androidapp/src/com/google/media/networktester/NetworkTester.java",
     ]
 
+    resources_package = "com.google.media.networktester"
     deps = [
       ":NetworkTesterMobile_resources",
       "../../rtc_base:base_java",
@@ -140,17 +147,33 @@ if (is_android) {
 
   android_resources("NetworkTesterMobile_resources") {
     testonly = true
-    resource_dirs = [ "androidapp/res" ]
     custom_package = "com.google.media.networktester"
+    sources = [
+      "androidapp/res/layout/activity_main.xml",
+      "androidapp/res/mipmap-hdpi/ic_launcher.png",
+      "androidapp/res/mipmap-mdpi/ic_launcher.png",
+      "androidapp/res/mipmap-xhdpi/ic_launcher.png",
+      "androidapp/res/mipmap-xxhdpi/ic_launcher.png",
+      "androidapp/res/mipmap-xxxhdpi/ic_launcher.png",
+      "androidapp/res/values-v17/styles.xml",
+      "androidapp/res/values-w820dp/dimens.xml",
+      "androidapp/res/values/colors.xml",
+      "androidapp/res/values/dimens.xml",
+      "androidapp/res/values/strings.xml",
+    ]
+
+    # Needed for Bazel converter.
+    resource_dirs = [ "androidapp/res" ]
+    assert(resource_dirs != [])  # Mark as used.
   }
 
   rtc_shared_library("network_tester_so") {
-    sources = [
-      "jni.cpp",
-    ]
+    sources = [ "jni.cc" ]
 
     deps = [
       ":network_tester",
+      "../../rtc_base:logging",
+      "../../rtc_base:threading",
     ]
 
     suppressed_configs += [ "//build/config/android:hide_all_but_jni_onload" ]

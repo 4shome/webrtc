@@ -18,8 +18,8 @@
 
 namespace webrtc {
 
-RenderBuffer::RenderBuffer(MatrixBuffer* block_buffer,
-                           VectorBuffer* spectrum_buffer,
+RenderBuffer::RenderBuffer(BlockBuffer* block_buffer,
+                           SpectrumBuffer* spectrum_buffer,
                            FftBuffer* fft_buffer)
     : block_buffer_(block_buffer),
       spectrum_buffer_(spectrum_buffer),
@@ -41,9 +41,11 @@ void RenderBuffer::SpectralSum(
   X2->fill(0.f);
   int position = spectrum_buffer_->read;
   for (size_t j = 0; j < num_spectra; ++j) {
-    std::transform(X2->begin(), X2->end(),
-                   spectrum_buffer_->buffer[position].begin(), X2->begin(),
-                   std::plus<float>());
+    for (const auto& channel_spectrum : spectrum_buffer_->buffer[position]) {
+      for (size_t k = 0; k < X2->size(); ++k) {
+        (*X2)[k] += channel_spectrum[k];
+      }
+    }
     position = spectrum_buffer_->IncIndex(position);
   }
 }
@@ -58,16 +60,20 @@ void RenderBuffer::SpectralSums(
   int position = spectrum_buffer_->read;
   size_t j = 0;
   for (; j < num_spectra_shorter; ++j) {
-    std::transform(X2_shorter->begin(), X2_shorter->end(),
-                   spectrum_buffer_->buffer[position].begin(),
-                   X2_shorter->begin(), std::plus<float>());
+    for (const auto& channel_spectrum : spectrum_buffer_->buffer[position]) {
+      for (size_t k = 0; k < X2_shorter->size(); ++k) {
+        (*X2_shorter)[k] += channel_spectrum[k];
+      }
+    }
     position = spectrum_buffer_->IncIndex(position);
   }
   std::copy(X2_shorter->begin(), X2_shorter->end(), X2_longer->begin());
   for (; j < num_spectra_longer; ++j) {
-    std::transform(X2_longer->begin(), X2_longer->end(),
-                   spectrum_buffer_->buffer[position].begin(),
-                   X2_longer->begin(), std::plus<float>());
+    for (const auto& channel_spectrum : spectrum_buffer_->buffer[position]) {
+      for (size_t k = 0; k < X2_longer->size(); ++k) {
+        (*X2_longer)[k] += channel_spectrum[k];
+      }
+    }
     position = spectrum_buffer_->IncIndex(position);
   }
 }

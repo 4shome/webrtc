@@ -11,8 +11,8 @@
 #include "modules/video_coding/codecs/vp8/default_temporal_layers.h"
 
 #include <cstdint>
+#include <memory>
 
-#include "absl/memory/memory.h"
 #include "api/video/video_bitrate_allocation.h"
 #include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/vp8_frame_config.h"
@@ -20,12 +20,18 @@
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/utility/simulcast_rate_allocator.h"
 #include "test/field_trial.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
 #include "vpx/vp8cx.h"
+
+// TODO(bugs.webrtc.org/10582): Test the behavior of UpdateConfiguration().
 
 namespace webrtc {
 namespace test {
 namespace {
+
+using ::testing::Each;
+
 enum {
   kTemporalUpdateLast = VP8_EFLAG_NO_UPD_GF | VP8_EFLAG_NO_UPD_ARF |
                         VP8_EFLAG_NO_REF_GF | VP8_EFLAG_NO_REF_ARF,
@@ -65,6 +71,7 @@ constexpr uint8_t kNone = static_cast<uint8_t>(Vp8BufferReference::kNone);
 constexpr uint8_t kLast = static_cast<uint8_t>(Vp8BufferReference::kLast);
 constexpr uint8_t kGolden = static_cast<uint8_t>(Vp8BufferReference::kGolden);
 constexpr uint8_t kAltref = static_cast<uint8_t>(Vp8BufferReference::kAltref);
+constexpr uint8_t kAll = kLast | kGolden | kAltref;
 
 constexpr int ToVp8CodecFlags(uint8_t referenced_buffers,
                               uint8_t updated_buffers,
@@ -77,6 +84,8 @@ constexpr int ToVp8CodecFlags(uint8_t referenced_buffers,
          (((updated_buffers & kAltref) == 0) ? VP8_EFLAG_NO_UPD_ARF : 0) |
          (update_entropy ? 0 : VP8_EFLAG_NO_UPD_ENTROPY);
 }
+
+constexpr int kKeyFrameFlags = ToVp8CodecFlags(kNone, kAll, true);
 
 std::vector<uint32_t> GetTemporalLayerRates(int target_bitrate_kbps,
                                             int framerate_fps,
@@ -91,7 +100,9 @@ std::vector<uint32_t> GetTemporalLayerRates(int target_bitrate_kbps,
   codec.simulcastStream[0].numberOfTemporalLayers = num_temporal_layers;
   codec.simulcastStream[0].active = true;
   SimulcastRateAllocator allocator(codec);
-  return allocator.GetAllocation(target_bitrate_kbps, framerate_fps)
+  return allocator
+      .Allocate(
+          VideoBitrateAllocationParameters(target_bitrate_kbps, framerate_fps))
       .GetTemporalLayerAllocation(0);
 }
 
@@ -107,7 +118,7 @@ class TemporalLayersTest : public ::testing::Test {
   ~TemporalLayersTest() override = default;
 
   CodecSpecificInfo* IgnoredCodecSpecificInfo() {
-    codec_specific_info_ = absl::make_unique<CodecSpecificInfo>();
+    codec_specific_info_ = std::make_unique<CodecSpecificInfo>();
     return codec_specific_info_.get();
   }
 
@@ -119,12 +130,11 @@ TEST_F(TemporalLayersTest, 2Layers) {
   constexpr int kNumLayers = 2;
   DefaultTemporalLayers tl(kNumLayers);
   DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(0,
                     GetTemporalLayerRates(kDefaultBytesPerFrame,
                                           kDefaultFramerate, kNumLayers),
                     kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   constexpr size_t kPatternSize = 4;
   constexpr size_t kRepetitions = 4;
@@ -141,17 +151,19 @@ TEST_F(TemporalLayersTest, 2Layers) {
   uint32_t timestamp = 0;
   for (size_t i = 0; i < kPatternSize * kRepetitions; ++i) {
     const size_t ind = i % kPatternSize;
+    const bool is_keyframe = (i == 0);
     CodecSpecificInfo info;
     Vp8FrameConfig tl_config = tl.NextFrameConfig(0, timestamp);
-    EXPECT_EQ(expected_flags[ind], LibvpxVp8Encoder::EncodeFlags(tl_config))
+    EXPECT_EQ(is_keyframe ? kKeyFrameFlags : expected_flags[ind],
+              LibvpxVp8Encoder::EncodeFlags(tl_config))
         << i;
-    tl.OnEncodeDone(0, timestamp, kDefaultBytesPerFrame, i == 0, kDefaultQp,
-                    &info);
-    EXPECT_TRUE(checker.CheckTemporalConfig(i == 0, tl_config));
+    tl.OnEncodeDone(0, timestamp, kDefaultBytesPerFrame, is_keyframe,
+                    kDefaultQp, &info);
+    EXPECT_TRUE(checker.CheckTemporalConfig(is_keyframe, tl_config));
     EXPECT_EQ(expected_temporal_idx[ind], info.codecSpecific.VP8.temporalIdx);
     EXPECT_EQ(expected_temporal_idx[ind], tl_config.packetizer_temporal_idx);
     EXPECT_EQ(expected_temporal_idx[ind], tl_config.encoder_layer_id);
-    EXPECT_EQ(i == 0 || expected_layer_sync[ind],
+    EXPECT_EQ(is_keyframe || expected_layer_sync[ind],
               info.codecSpecific.VP8.layerSync);
     EXPECT_EQ(expected_layer_sync[ind], tl_config.layer_sync);
     timestamp += 3000;
@@ -162,12 +174,11 @@ TEST_F(TemporalLayersTest, 3Layers) {
   constexpr int kNumLayers = 3;
   DefaultTemporalLayers tl(kNumLayers);
   DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(0,
                     GetTemporalLayerRates(kDefaultBytesPerFrame,
                                           kDefaultFramerate, kNumLayers),
                     kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   int expected_flags[16] = {
       kTemporalUpdateLast,
@@ -196,16 +207,19 @@ TEST_F(TemporalLayersTest, 3Layers) {
 
   unsigned int timestamp = 0;
   for (int i = 0; i < 16; ++i) {
+    const bool is_keyframe = (i == 0);
     CodecSpecificInfo info;
     Vp8FrameConfig tl_config = tl.NextFrameConfig(0, timestamp);
-    EXPECT_EQ(expected_flags[i], LibvpxVp8Encoder::EncodeFlags(tl_config)) << i;
-    tl.OnEncodeDone(0, timestamp, kDefaultBytesPerFrame, i == 0, kDefaultQp,
-                    &info);
-    EXPECT_TRUE(checker.CheckTemporalConfig(i == 0, tl_config));
+    EXPECT_EQ(is_keyframe ? kKeyFrameFlags : expected_flags[i],
+              LibvpxVp8Encoder::EncodeFlags(tl_config))
+        << i;
+    tl.OnEncodeDone(0, timestamp, kDefaultBytesPerFrame, is_keyframe,
+                    kDefaultQp, &info);
+    EXPECT_TRUE(checker.CheckTemporalConfig(is_keyframe, tl_config));
     EXPECT_EQ(expected_temporal_idx[i], info.codecSpecific.VP8.temporalIdx);
     EXPECT_EQ(expected_temporal_idx[i], tl_config.packetizer_temporal_idx);
     EXPECT_EQ(expected_temporal_idx[i], tl_config.encoder_layer_id);
-    EXPECT_EQ(i == 0 || expected_layer_sync[i],
+    EXPECT_EQ(is_keyframe || expected_layer_sync[i],
               info.codecSpecific.VP8.layerSync);
     EXPECT_EQ(expected_layer_sync[i], tl_config.layer_sync);
     timestamp += 3000;
@@ -217,12 +231,11 @@ TEST_F(TemporalLayersTest, Alternative3Layers) {
   ScopedFieldTrials field_trial("WebRTC-UseShortVP8TL3Pattern/Enabled/");
   DefaultTemporalLayers tl(kNumLayers);
   DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(0,
                     GetTemporalLayerRates(kDefaultBytesPerFrame,
                                           kDefaultFramerate, kNumLayers),
                     kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   int expected_flags[8] = {kTemporalUpdateLast,
                            kTemporalUpdateAltrefWithoutDependency,
@@ -239,16 +252,19 @@ TEST_F(TemporalLayersTest, Alternative3Layers) {
 
   unsigned int timestamp = 0;
   for (int i = 0; i < 8; ++i) {
+    const bool is_keyframe = (i == 0);
     CodecSpecificInfo info;
     Vp8FrameConfig tl_config = tl.NextFrameConfig(0, timestamp);
-    EXPECT_EQ(expected_flags[i], LibvpxVp8Encoder::EncodeFlags(tl_config)) << i;
-    tl.OnEncodeDone(0, timestamp, kDefaultBytesPerFrame, i == 0, kDefaultQp,
-                    &info);
-    EXPECT_TRUE(checker.CheckTemporalConfig(i == 0, tl_config));
+    EXPECT_EQ(is_keyframe ? kKeyFrameFlags : expected_flags[i],
+              LibvpxVp8Encoder::EncodeFlags(tl_config))
+        << i;
+    tl.OnEncodeDone(0, timestamp, kDefaultBytesPerFrame, is_keyframe,
+                    kDefaultQp, &info);
+    EXPECT_TRUE(checker.CheckTemporalConfig(is_keyframe, tl_config));
     EXPECT_EQ(expected_temporal_idx[i], info.codecSpecific.VP8.temporalIdx);
     EXPECT_EQ(expected_temporal_idx[i], tl_config.packetizer_temporal_idx);
     EXPECT_EQ(expected_temporal_idx[i], tl_config.encoder_layer_id);
-    EXPECT_EQ(i == 0 || expected_layer_sync[i],
+    EXPECT_EQ(is_keyframe || expected_layer_sync[i],
               info.codecSpecific.VP8.layerSync);
     EXPECT_EQ(expected_layer_sync[i], tl_config.layer_sync);
     timestamp += 3000;
@@ -260,12 +276,11 @@ TEST_F(TemporalLayersTest, SearchOrder) {
   ScopedFieldTrials field_trial("WebRTC-UseShortVP8TL3Pattern/Enabled/");
   DefaultTemporalLayers tl(kNumLayers);
   DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(0,
                     GetTemporalLayerRates(kDefaultBytesPerFrame,
                                           kDefaultFramerate, kNumLayers),
                     kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   // Use a repeating pattern of tl 0, 2, 1, 2.
   // Tl 0, 1, 2 update last, golden, altref respectively.
@@ -304,12 +319,11 @@ TEST_F(TemporalLayersTest, SearchOrderWithDrop) {
   ScopedFieldTrials field_trial("WebRTC-UseShortVP8TL3Pattern/Enabled/");
   DefaultTemporalLayers tl(kNumLayers);
   DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(0,
                     GetTemporalLayerRates(kDefaultBytesPerFrame,
                                           kDefaultFramerate, kNumLayers),
                     kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   // Use a repeating pattern of tl 0, 2, 1, 2.
   // Tl 0, 1, 2 update last, golden, altref respectively.
@@ -340,59 +354,6 @@ TEST_F(TemporalLayersTest, SearchOrderWithDrop) {
   EXPECT_EQ(tl_config.second_reference, Vp8BufferReference::kLast);
 }
 
-TEST_F(TemporalLayersTest, 4Layers) {
-  constexpr int kNumLayers = 4;
-  DefaultTemporalLayers tl(kNumLayers);
-  DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
-  tl.OnRatesUpdated(0,
-                    GetTemporalLayerRates(kDefaultBytesPerFrame,
-                                          kDefaultFramerate, kNumLayers),
-                    kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
-  int expected_flags[16] = {
-      kTemporalUpdateLast,
-      kTemporalUpdateNoneNoRefGoldenAltRef,
-      kTemporalUpdateAltrefWithoutDependency,
-      kTemporalUpdateNoneNoRefGolden,
-      kTemporalUpdateGoldenWithoutDependency,
-      kTemporalUpdateNone,
-      kTemporalUpdateAltref,
-      kTemporalUpdateNone,
-      kTemporalUpdateLast,
-      kTemporalUpdateNone,
-      kTemporalUpdateAltref,
-      kTemporalUpdateNone,
-      kTemporalUpdateGolden,
-      kTemporalUpdateNone,
-      kTemporalUpdateAltref,
-      kTemporalUpdateNone,
-  };
-  int expected_temporal_idx[16] = {0, 3, 2, 3, 1, 3, 2, 3,
-                                   0, 3, 2, 3, 1, 3, 2, 3};
-
-  bool expected_layer_sync[16] = {false, true,  true,  false, true,  false,
-                                  false, false, false, false, false, false,
-                                  false, false, false, false};
-
-  uint32_t timestamp = 0;
-  for (int i = 0; i < 16; ++i) {
-    CodecSpecificInfo info;
-    Vp8FrameConfig tl_config = tl.NextFrameConfig(0, timestamp);
-    EXPECT_EQ(expected_flags[i], LibvpxVp8Encoder::EncodeFlags(tl_config)) << i;
-    tl.OnEncodeDone(0, timestamp, kDefaultBytesPerFrame, i == 0, kDefaultQp,
-                    &info);
-    EXPECT_TRUE(checker.CheckTemporalConfig(i == 0, tl_config));
-    EXPECT_EQ(expected_temporal_idx[i], info.codecSpecific.VP8.temporalIdx);
-    EXPECT_EQ(expected_temporal_idx[i], tl_config.packetizer_temporal_idx);
-    EXPECT_EQ(expected_temporal_idx[i], tl_config.encoder_layer_id);
-    EXPECT_EQ(i == 0 || expected_layer_sync[i],
-              info.codecSpecific.VP8.layerSync);
-    EXPECT_EQ(expected_layer_sync[i], tl_config.layer_sync);
-    timestamp += 3000;
-  }
-}
-
 TEST_F(TemporalLayersTest, DoesNotReferenceDroppedFrames) {
   constexpr int kNumLayers = 3;
   // Use a repeating pattern of tl 0, 2, 1, 2.
@@ -400,12 +361,11 @@ TEST_F(TemporalLayersTest, DoesNotReferenceDroppedFrames) {
   ScopedFieldTrials field_trial("WebRTC-UseShortVP8TL3Pattern/Enabled/");
   DefaultTemporalLayers tl(kNumLayers);
   DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(0,
                     GetTemporalLayerRates(kDefaultBytesPerFrame,
                                           kDefaultFramerate, kNumLayers),
                     kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   // Start with a keyframe.
   uint32_t timestamp = 0;
@@ -487,12 +447,11 @@ TEST_F(TemporalLayersTest, DoesNotReferenceUnlessGuaranteedToExist) {
   // Tl 0, 1 updates last, golden respectively. Altref is always last keyframe.
   DefaultTemporalLayers tl(kNumLayers);
   DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(0,
                     GetTemporalLayerRates(kDefaultBytesPerFrame,
                                           kDefaultFramerate, kNumLayers),
                     kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   // Start with a keyframe.
   uint32_t timestamp = 0;
@@ -557,12 +516,11 @@ TEST_F(TemporalLayersTest, DoesNotReferenceUnlessGuaranteedToExistLongDelay) {
   ScopedFieldTrials field_trial("WebRTC-UseShortVP8TL3Pattern/Enabled/");
   DefaultTemporalLayers tl(kNumLayers);
   DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(0,
                     GetTemporalLayerRates(kDefaultBytesPerFrame,
                                           kDefaultFramerate, kNumLayers),
                     kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   // Start with a keyframe.
   uint32_t timestamp = 0;
@@ -618,12 +576,11 @@ TEST_F(TemporalLayersTest, KeyFrame) {
   constexpr int kNumLayers = 3;
   DefaultTemporalLayers tl(kNumLayers);
   DefaultTemporalLayersChecker checker(kNumLayers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(0,
                     GetTemporalLayerRates(kDefaultBytesPerFrame,
                                           kDefaultFramerate, kNumLayers),
                     kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   int expected_flags[8] = {
       kTemporalUpdateLastRefAltRef,
@@ -641,8 +598,8 @@ TEST_F(TemporalLayersTest, KeyFrame) {
 
   uint32_t timestamp = 0;
   for (int i = 0; i < 7; ++i) {
-    // Temporal pattern starts from 0 after key frame. Let the first |i| - 1
-    // frames be delta frames, and the |i|th one key frame.
+    // Temporal pattern starts from 0 after key frame. Let the first `i` - 1
+    // frames be delta frames, and the `i`th one key frame.
     for (int j = 1; j <= i; ++j) {
       // Since last frame was always a keyframe and thus index 0 in the pattern,
       // this loop starts at index 1.
@@ -666,8 +623,32 @@ TEST_F(TemporalLayersTest, KeyFrame) {
         << "Key frame should be marked layer sync.";
     EXPECT_EQ(0, info.codecSpecific.VP8.temporalIdx)
         << "Key frame should always be packetized as layer 0";
+    EXPECT_EQ(0, info.generic_frame_info->temporal_id)
+        << "Key frame should always be packetized as layer 0";
+    EXPECT_THAT(info.generic_frame_info->decode_target_indications,
+                Each(DecodeTargetIndication::kSwitch))
+        << "Key frame is universal switch";
     EXPECT_TRUE(checker.CheckTemporalConfig(true, tl_config));
   }
+}
+
+TEST_F(TemporalLayersTest, SetsTlCountOnFirstConfigUpdate) {
+  // Create an instance and fetch config update without setting any rate.
+  constexpr int kNumLayers = 2;
+  DefaultTemporalLayers tl(kNumLayers);
+  Vp8EncoderConfig config = tl.UpdateConfiguration(0);
+
+  // Config should indicate correct number of temporal layers, but zero bitrate.
+  ASSERT_TRUE(config.temporal_layer_config.has_value());
+  EXPECT_EQ(config.temporal_layer_config->ts_number_layers,
+            uint32_t{kNumLayers});
+  std::array<uint32_t, Vp8EncoderConfig::TemporalLayerConfig::kMaxLayers>
+      kZeroRate = {};
+  EXPECT_EQ(config.temporal_layer_config->ts_target_bitrate, kZeroRate);
+
+  // On second call, no new update.
+  config = tl.UpdateConfiguration(0);
+  EXPECT_FALSE(config.temporal_layer_config.has_value());
 }
 
 class TemporalLayersReferenceTest : public TemporalLayersTest,
@@ -735,17 +716,16 @@ INSTANTIATE_TEST_SUITE_P(DefaultTemporalLayersTest,
 TEST_P(TemporalLayersReferenceTest, ValidFrameConfigs) {
   const int num_layers = GetParam();
   DefaultTemporalLayers tl(num_layers);
-  Vp8EncoderConfig cfg;
   tl.OnRatesUpdated(
       0, GetTemporalLayerRates(kDefaultBytesPerFrame, kDefaultFramerate, 1),
       kDefaultFramerate);
-  tl.UpdateConfiguration(0, &cfg);
+  tl.UpdateConfiguration(0);
 
   // Run through the pattern and store the frame dependencies, plus keep track
   // of the buffer state; which buffers references which temporal layers (if
   // (any). If a given buffer is never updated, it is legal to reference it
   // even for sync frames. In order to be general, don't assume TL0 always
-  // updates |last|.
+  // updates `last`.
   std::vector<Vp8FrameConfig> tl_configs(kMaxPatternLength);
   for (int i = 0; i < kMaxPatternLength; ++i) {
     Vp8FrameConfig tl_config = tl.NextFrameConfig(0, timestamp_);

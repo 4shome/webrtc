@@ -59,11 +59,11 @@ class VideoCodecTestFixtureImpl : public VideoCodecTestFixture {
  private:
   class CpuProcessTime;
 
-  void CreateEncoderAndDecoder();
+  bool CreateEncoderAndDecoder();
   void DestroyEncoderAndDecoder();
-  void SetUpAndInitObjects(TaskQueueForTest* task_queue,
-                           int initial_bitrate_kbps,
-                           int initial_framerate_fps);
+  bool SetUpAndInitObjects(TaskQueueForTest* task_queue,
+                           size_t initial_bitrate_kbps,
+                           double initial_framerate_fps);
   void ReleaseAndCloseObjects(TaskQueueForTest* task_queue);
 
   void ProcessAllFrames(TaskQueueForTest* task_queue,
@@ -80,8 +80,9 @@ class VideoCodecTestFixtureImpl : public VideoCodecTestFixture {
       const QualityThresholds* quality_thresholds,
       const BitstreamThresholds* bs_thresholds,
       size_t target_bitrate_kbps,
-      float input_framerate_fps);
+      double input_framerate_fps);
 
+  std::string GetCodecName(TaskQueueForTest* task_queue, bool is_encoder) const;
   void PrintSettings(TaskQueueForTest* task_queue) const;
 
   // Codecs.

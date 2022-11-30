@@ -13,7 +13,6 @@
 #include <memory>
 #include <vector>
 
-#include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "modules/audio_coding/codecs/g711/audio_encoder_pcm.h"
 #include "rtc_base/numerics/safe_conversions.h"
@@ -39,7 +38,10 @@ absl::optional<AudioEncoderG711::Config> AudioEncoderG711::SdpToConfig(
         config.frame_size_ms = rtc::SafeClamp(10 * (*ptime / 10), 10, 60);
       }
     }
-    RTC_DCHECK(config.IsOk());
+    if (!config.IsOk()) {
+      RTC_DCHECK_NOTREACHED();
+      return absl::nullopt;
+    }
     return config;
   } else {
     return absl::nullopt;
@@ -62,24 +64,31 @@ AudioCodecInfo AudioEncoderG711::QueryAudioEncoder(const Config& config) {
 std::unique_ptr<AudioEncoder> AudioEncoderG711::MakeAudioEncoder(
     const Config& config,
     int payload_type,
-    absl::optional<AudioCodecPairId> /*codec_pair_id*/) {
-  RTC_DCHECK(config.IsOk());
+    absl::optional<AudioCodecPairId> /*codec_pair_id*/,
+    const FieldTrialsView* field_trials) {
+  if (!config.IsOk()) {
+    RTC_DCHECK_NOTREACHED();
+    return nullptr;
+  }
   switch (config.type) {
     case Config::Type::kPcmU: {
       AudioEncoderPcmU::Config impl_config;
       impl_config.num_channels = config.num_channels;
       impl_config.frame_size_ms = config.frame_size_ms;
       impl_config.payload_type = payload_type;
-      return absl::make_unique<AudioEncoderPcmU>(impl_config);
+      return std::make_unique<AudioEncoderPcmU>(impl_config);
     }
     case Config::Type::kPcmA: {
       AudioEncoderPcmA::Config impl_config;
       impl_config.num_channels = config.num_channels;
       impl_config.frame_size_ms = config.frame_size_ms;
       impl_config.payload_type = payload_type;
-      return absl::make_unique<AudioEncoderPcmA>(impl_config);
+      return std::make_unique<AudioEncoderPcmA>(impl_config);
     }
-    default: { return nullptr; }
+    default: {
+      RTC_DCHECK_NOTREACHED();
+      return nullptr;
+    }
   }
 }
 

@@ -11,9 +11,10 @@
 #include <algorithm>
 
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
-#include "modules/rtp_rtcp/include/ulpfec_receiver.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
+#include "modules/rtp_rtcp/source/ulpfec_receiver.h"
+#include "test/fuzzers/fuzz_data_helper.h"
 
 namespace webrtc {
 
@@ -35,44 +36,37 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
   uint16_t media_seq_num = ByteReader<uint16_t>::ReadLittleEndian(data + 10);
 
   DummyCallback callback;
-  std::unique_ptr<UlpfecReceiver> receiver(
-      UlpfecReceiver::Create(ulpfec_ssrc, &callback));
+  UlpfecReceiver receiver(ulpfec_ssrc, 0, &callback, {},
+                          Clock::GetRealTimeClock());
 
-  std::unique_ptr<uint8_t[]> packet;
-  size_t packet_length;
-  size_t i = kMinDataNeeded;
-  while (i < size) {
-    packet_length = kRtpHeaderSize + data[i++];
-    packet = std::unique_ptr<uint8_t[]>(new uint8_t[packet_length]);
-    if (i + packet_length >= size) {
-      break;
-    }
-    memcpy(packet.get(), data + i, packet_length);
-    i += packet_length;
-    // Overwrite the RTPHeader fields for the sequence number and SSRC with
+  test::FuzzDataHelper fuzz_data(rtc::MakeArrayView(data, size));
+  while (fuzz_data.CanReadBytes(kMinDataNeeded)) {
+    size_t packet_length = kRtpHeaderSize + fuzz_data.Read<uint8_t>();
+    auto raw_packet = fuzz_data.ReadByteArray(packet_length);
+
+    RtpPacketReceived parsed_packet;
+    if (!parsed_packet.Parse(raw_packet))
+      continue;
+
+    // Overwrite the fields for the sequence number and SSRC with
     // consistent values for either a received UlpFEC packet or received media
     // packet. (We're still relying on libfuzzer to manage to generate packet
     // headers that interact together; this just ensures that we have two
     // consistent streams).
-    if (i < size && data[i++] % 2 == 0) {
+    if (fuzz_data.ReadOrDefaultValue<uint8_t>(0) % 2 == 0) {
       // Simulate UlpFEC packet.
-      ByteWriter<uint16_t>::WriteBigEndian(packet.get() + 2, ulpfec_seq_num++);
-      ByteWriter<uint32_t>::WriteBigEndian(packet.get() + 8, ulpfec_ssrc);
+      parsed_packet.SetSequenceNumber(ulpfec_seq_num++);
+      parsed_packet.SetSsrc(ulpfec_ssrc);
     } else {
       // Simulate media packet.
-      ByteWriter<uint16_t>::WriteBigEndian(packet.get() + 2, media_seq_num++);
-      ByteWriter<uint32_t>::WriteBigEndian(packet.get() + 8, media_ssrc);
+      parsed_packet.SetSequenceNumber(media_seq_num++);
+      parsed_packet.SetSsrc(media_ssrc);
     }
-    RtpPacketReceived parsed_packet;
-    RTPHeader parsed_header;
-    if (parsed_packet.Parse(packet.get(), packet_length)) {
-      parsed_packet.GetHeader(&parsed_header);
-      receiver->AddReceivedRedPacket(parsed_header, packet.get(), packet_length,
-                                     0);
-    }
+
+    receiver.AddReceivedRedPacket(parsed_packet);
   }
 
-  receiver->ProcessReceivedFec();
+  receiver.ProcessReceivedFec();
 }
 
 }  // namespace webrtc

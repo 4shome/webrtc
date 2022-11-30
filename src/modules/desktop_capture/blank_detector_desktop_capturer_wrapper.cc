@@ -11,6 +11,7 @@
 #include "modules/desktop_capture/blank_detector_desktop_capturer_wrapper.h"
 
 #include <stdint.h>
+
 #include <utility>
 
 #include "modules/desktop_capture/desktop_geometry.h"
@@ -22,8 +23,11 @@ namespace webrtc {
 
 BlankDetectorDesktopCapturerWrapper::BlankDetectorDesktopCapturerWrapper(
     std::unique_ptr<DesktopCapturer> capturer,
-    RgbaColor blank_pixel)
-    : capturer_(std::move(capturer)), blank_pixel_(blank_pixel) {
+    RgbaColor blank_pixel,
+    bool check_per_capture)
+    : capturer_(std::move(capturer)),
+      blank_pixel_(blank_pixel),
+      check_per_capture_(check_per_capture) {
   RTC_DCHECK(capturer_);
 }
 
@@ -55,11 +59,22 @@ bool BlankDetectorDesktopCapturerWrapper::GetSourceList(SourceList* sources) {
 }
 
 bool BlankDetectorDesktopCapturerWrapper::SelectSource(SourceId id) {
+  if (check_per_capture_) {
+    // If we start capturing a new source, we must reset these members
+    // so we don't short circuit the blank detection logic.
+    is_first_frame_ = true;
+    non_blank_frame_received_ = false;
+  }
+
   return capturer_->SelectSource(id);
 }
 
 bool BlankDetectorDesktopCapturerWrapper::FocusOnSelectedSource() {
   return capturer_->FocusOnSelectedSource();
+}
+
+bool BlankDetectorDesktopCapturerWrapper::IsOccluded(const DesktopVector& pos) {
+  return capturer_->IsOccluded(pos);
 }
 
 void BlankDetectorDesktopCapturerWrapper::OnCaptureResult(
@@ -71,7 +86,13 @@ void BlankDetectorDesktopCapturerWrapper::OnCaptureResult(
     return;
   }
 
-  RTC_DCHECK(frame);
+  if (!frame) {
+    // Capturer can call the blank detector with empty frame. Blank
+    // detector regards it as a blank frame.
+    callback_->OnCaptureResult(Result::ERROR_TEMPORARY,
+                               std::unique_ptr<DesktopFrame>());
+    return;
+  }
 
   // If nothing has been changed in current frame, we do not need to check it
   // again.

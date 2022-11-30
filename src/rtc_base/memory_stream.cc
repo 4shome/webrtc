@@ -8,12 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "rtc_base/memory_stream.h"
+
 #include <errno.h>
 #include <string.h>
+
 #include <algorithm>
 
 #include "rtc_base/checks.h"
-#include "rtc_base/memory_stream.h"
 
 namespace rtc {
 
@@ -109,14 +111,6 @@ bool MemoryStream::ReserveSize(size_t size) {
 
 MemoryStream::MemoryStream() {}
 
-MemoryStream::MemoryStream(const char* data) {
-  SetData(data, strlen(data));
-}
-
-MemoryStream::MemoryStream(const void* data, size_t length) {
-  SetData(data, length);
-}
-
 MemoryStream::~MemoryStream() {
   delete[] buffer_;
 }
@@ -134,7 +128,9 @@ StreamResult MemoryStream::DoReserve(size_t size, int* error) {
     return SR_SUCCESS;
 
   if (char* new_buffer = new char[size]) {
-    memcpy(new_buffer, buffer_, data_length_);
+    if (buffer_ != nullptr && data_length_ > 0) {
+      memcpy(new_buffer, buffer_, data_length_);
+    }
     delete[] buffer_;
     buffer_ = new_buffer;
     buffer_length_ = size;

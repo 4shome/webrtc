@@ -10,13 +10,19 @@
 
 #include "rtc_base/ssl_certificate.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "absl/algorithm/container.h"
-#include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/openssl_certificate.h"
+#include "rtc_base/openssl.h"
+#ifdef OPENSSL_IS_BORINGSSL
+#include "rtc_base/boringssl_identity.h"
+#else
+#include "rtc_base/openssl_identity.h"
+#endif
 #include "rtc_base/ssl_fingerprint.h"
 #include "rtc_base/third_party/base64/base64.h"
 
@@ -44,15 +50,15 @@ SSLCertificateStats::~SSLCertificateStats() {}
 
 std::unique_ptr<SSLCertificateStats> SSLCertificate::GetStats() const {
   // TODO(bemasc): Move this computation to a helper class that caches these
-  // values to reduce CPU use in |StatsCollector::GetStats|. This will require
-  // adding a fast |SSLCertificate::Equals| to detect certificate changes.
+  // values to reduce CPU use in `StatsCollector::GetStats`. This will require
+  // adding a fast `SSLCertificate::Equals` to detect certificate changes.
   std::string digest_algorithm;
   if (!GetSignatureDigestAlgorithm(&digest_algorithm))
     return nullptr;
 
-  // |SSLFingerprint::Create| can fail if the algorithm returned by
-  // |SSLCertificate::GetSignatureDigestAlgorithm| is not supported by the
-  // implementation of |SSLCertificate::ComputeDigest|. This currently happens
+  // `SSLFingerprint::Create` can fail if the algorithm returned by
+  // `SSLCertificate::GetSignatureDigestAlgorithm` is not supported by the
+  // implementation of `SSLCertificate::ComputeDigest`. This currently happens
   // with MD5- and SHA-224-signed certificates when linked to libNSS.
   std::unique_ptr<SSLFingerprint> ssl_fingerprint =
       SSLFingerprint::Create(digest_algorithm, *this);
@@ -65,9 +71,9 @@ std::unique_ptr<SSLCertificateStats> SSLCertificate::GetStats() const {
   std::string der_base64;
   Base64::EncodeFromArray(der_buffer.data(), der_buffer.size(), &der_base64);
 
-  return absl::make_unique<SSLCertificateStats>(std::move(fingerprint),
-                                                std::move(digest_algorithm),
-                                                std::move(der_base64), nullptr);
+  return std::make_unique<SSLCertificateStats>(std::move(fingerprint),
+                                               std::move(digest_algorithm),
+                                               std::move(der_base64), nullptr);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -93,17 +99,17 @@ std::unique_ptr<SSLCertChain> SSLCertChain::Clone() const {
       certs_, new_certs.begin(),
       [](const std::unique_ptr<SSLCertificate>& cert)
           -> std::unique_ptr<SSLCertificate> { return cert->Clone(); });
-  return absl::make_unique<SSLCertChain>(std::move(new_certs));
+  return std::make_unique<SSLCertChain>(std::move(new_certs));
 }
 
 std::unique_ptr<SSLCertificateStats> SSLCertChain::GetStats() const {
   // We have a linked list of certificates, starting with the first element of
-  // |certs_| and ending with the last element of |certs_|. The "issuer" of a
+  // `certs_` and ending with the last element of `certs_`. The "issuer" of a
   // certificate is the next certificate in the chain. Stats are produced for
   // each certificate in the list. Here, the "issuer" is the issuer's stats.
   std::unique_ptr<SSLCertificateStats> issuer;
-  // The loop runs in reverse so that the |issuer| is known before the
-  // certificate issued by |issuer|.
+  // The loop runs in reverse so that the `issuer` is known before the
+  // certificate issued by `issuer`.
   for (ptrdiff_t i = certs_.size() - 1; i >= 0; --i) {
     std::unique_ptr<SSLCertificateStats> new_stats = certs_[i]->GetStats();
     if (new_stats) {
@@ -116,8 +122,12 @@ std::unique_ptr<SSLCertificateStats> SSLCertChain::GetStats() const {
 
 // static
 std::unique_ptr<SSLCertificate> SSLCertificate::FromPEMString(
-    const std::string& pem_string) {
+    absl::string_view pem_string) {
+#ifdef OPENSSL_IS_BORINGSSL
+  return BoringSSLCertificate::FromPEMString(pem_string);
+#else
   return OpenSSLCertificate::FromPEMString(pem_string);
+#endif
 }
 
 }  // namespace rtc

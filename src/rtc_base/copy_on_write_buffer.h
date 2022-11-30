@@ -12,20 +12,24 @@
 #define RTC_BASE_COPY_ON_WRITE_BUFFER_H_
 
 #include <stdint.h>
+
 #include <algorithm>
 #include <cstring>
 #include <string>
 #include <type_traits>
 #include <utility>
 
+#include "absl/strings/string_view.h"
 #include "api/scoped_refptr.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/ref_counted_object.h"
+#include "rtc_base/system/rtc_export.h"
+#include "rtc_base/type_traits.h"
 
 namespace rtc {
 
-class CopyOnWriteBuffer {
+class RTC_EXPORT CopyOnWriteBuffer {
  public:
   // An empty buffer.
   CopyOnWriteBuffer();
@@ -35,7 +39,7 @@ class CopyOnWriteBuffer {
   CopyOnWriteBuffer(CopyOnWriteBuffer&& buf);
 
   // Construct a buffer from a string, convenient for unittests.
-  CopyOnWriteBuffer(const std::string& s);
+  explicit CopyOnWriteBuffer(absl::string_view s);
 
   // Construct a buffer with the specified number of uninitialized bytes.
   explicit CopyOnWriteBuffer(size_t size);
@@ -55,6 +59,8 @@ class CopyOnWriteBuffer {
       : CopyOnWriteBuffer(size, capacity) {
     if (buffer_) {
       std::memcpy(buffer_->data(), data, size);
+      offset_ = 0;
+      size_ = size;
     }
   }
 
@@ -65,6 +71,17 @@ class CopyOnWriteBuffer {
                 internal::BufferCompat<uint8_t, T>::value>::type* = nullptr>
   CopyOnWriteBuffer(const T (&array)[N])  // NOLINT: runtime/explicit
       : CopyOnWriteBuffer(array, N) {}
+
+  // Construct a buffer from a vector like type.
+  template <typename VecT,
+            typename ElemT = typename std::remove_pointer_t<
+                decltype(std::declval<VecT>().data())>,
+            typename std::enable_if_t<
+                !std::is_same<VecT, CopyOnWriteBuffer>::value &&
+                HasDataAndSize<VecT, ElemT>::value &&
+                internal::BufferCompat<uint8_t, ElemT>::value>* = nullptr>
+  explicit CopyOnWriteBuffer(const VecT& v)
+      : CopyOnWriteBuffer(v.data(), v.size()) {}
 
   ~CopyOnWriteBuffer();
 
@@ -82,13 +99,13 @@ class CopyOnWriteBuffer {
   template <typename T = uint8_t,
             typename std::enable_if<
                 internal::BufferCompat<uint8_t, T>::value>::type* = nullptr>
-  T* data() {
+  T* MutableData() {
     RTC_DCHECK(IsConsistent());
     if (!buffer_) {
       return nullptr;
     }
-    CloneDataIfReferenced(buffer_->capacity());
-    return buffer_->data<T>();
+    UnshareAndEnsureCapacity(capacity());
+    return buffer_->data<T>() + offset_;
   }
 
   // Get const pointer to the data. This will not create a copy of the
@@ -101,17 +118,17 @@ class CopyOnWriteBuffer {
     if (!buffer_) {
       return nullptr;
     }
-    return buffer_->data<T>();
+    return buffer_->data<T>() + offset_;
   }
 
   size_t size() const {
     RTC_DCHECK(IsConsistent());
-    return buffer_ ? buffer_->size() : 0;
+    return size_;
   }
 
   size_t capacity() const {
     RTC_DCHECK(IsConsistent());
-    return buffer_ ? buffer_->capacity() : 0;
+    return buffer_ ? buffer_->capacity() - offset_ : 0;
   }
 
   CopyOnWriteBuffer& operator=(const CopyOnWriteBuffer& buf) {
@@ -119,6 +136,8 @@ class CopyOnWriteBuffer {
     RTC_DCHECK(buf.IsConsistent());
     if (&buf != this) {
       buffer_ = buf.buffer_;
+      offset_ = buf.offset_;
+      size_ = buf.size_;
     }
     return *this;
   }
@@ -127,6 +146,10 @@ class CopyOnWriteBuffer {
     RTC_DCHECK(IsConsistent());
     RTC_DCHECK(buf.IsConsistent());
     buffer_ = std::move(buf.buffer_);
+    offset_ = buf.offset_;
+    size_ = buf.size_;
+    buf.offset_ = 0;
+    buf.size_ = 0;
     return *this;
   }
 
@@ -134,11 +157,6 @@ class CopyOnWriteBuffer {
 
   bool operator!=(const CopyOnWriteBuffer& buf) const {
     return !(*this == buf);
-  }
-
-  uint8_t& operator[](size_t index) {
-    RTC_DCHECK_LT(index, size());
-    return data()[index];
   }
 
   uint8_t operator[](size_t index) const {
@@ -154,12 +172,15 @@ class CopyOnWriteBuffer {
   void SetData(const T* data, size_t size) {
     RTC_DCHECK(IsConsistent());
     if (!buffer_) {
-      buffer_ = size > 0 ? new RefCountedObject<Buffer>(data, size) : nullptr;
+      buffer_ = size > 0 ? new RefCountedBuffer(data, size) : nullptr;
     } else if (!buffer_->HasOneRef()) {
-      buffer_ = new RefCountedObject<Buffer>(data, size, buffer_->capacity());
+      buffer_ = new RefCountedBuffer(data, size, capacity());
     } else {
       buffer_->SetData(data, size);
     }
+    offset_ = 0;
+    size_ = size;
+
     RTC_DCHECK(IsConsistent());
   }
 
@@ -176,6 +197,8 @@ class CopyOnWriteBuffer {
     RTC_DCHECK(buf.IsConsistent());
     if (&buf != this) {
       buffer_ = buf.buffer_;
+      offset_ = buf.offset_;
+      size_ = buf.size_;
     }
   }
 
@@ -186,14 +209,20 @@ class CopyOnWriteBuffer {
   void AppendData(const T* data, size_t size) {
     RTC_DCHECK(IsConsistent());
     if (!buffer_) {
-      buffer_ = new RefCountedObject<Buffer>(data, size);
+      buffer_ = new RefCountedBuffer(data, size);
+      offset_ = 0;
+      size_ = size;
       RTC_DCHECK(IsConsistent());
       return;
     }
 
-    CloneDataIfReferenced(
-        std::max(buffer_->capacity(), buffer_->size() + size));
+    UnshareAndEnsureCapacity(std::max(capacity(), size_ + size));
+
+    buffer_->SetSize(offset_ +
+                     size_);  // Remove data to the right of the slice.
     buffer_->AppendData(data, size);
+    size_ += size;
+
     RTC_DCHECK(IsConsistent());
   }
 
@@ -205,8 +234,14 @@ class CopyOnWriteBuffer {
     AppendData(array, N);
   }
 
-  void AppendData(const CopyOnWriteBuffer& buf) {
-    AppendData(buf.data(), buf.size());
+  template <typename VecT,
+            typename ElemT = typename std::remove_pointer_t<
+                decltype(std::declval<VecT>().data())>,
+            typename std::enable_if_t<
+                HasDataAndSize<VecT, ElemT>::value &&
+                internal::BufferCompat<uint8_t, ElemT>::value>* = nullptr>
+  void AppendData(const VecT& v) {
+    AppendData(v.data(), v.size());
   }
 
   // Sets the size of the buffer. If the new size is smaller than the old, the
@@ -226,19 +261,43 @@ class CopyOnWriteBuffer {
 
   // Swaps two buffers.
   friend void swap(CopyOnWriteBuffer& a, CopyOnWriteBuffer& b) {
-    std::swap(a.buffer_, b.buffer_);
+    a.buffer_.swap(b.buffer_);
+    std::swap(a.offset_, b.offset_);
+    std::swap(a.size_, b.size_);
+  }
+
+  CopyOnWriteBuffer Slice(size_t offset, size_t length) const {
+    CopyOnWriteBuffer slice(*this);
+    RTC_DCHECK_LE(offset, size_);
+    RTC_DCHECK_LE(length + offset, size_);
+    slice.offset_ += offset;
+    slice.size_ = length;
+    return slice;
   }
 
  private:
+  using RefCountedBuffer = FinalRefCountedObject<Buffer>;
   // Create a copy of the underlying data if it is referenced from other Buffer
-  // objects.
-  void CloneDataIfReferenced(size_t new_capacity);
+  // objects or there is not enough capacity.
+  void UnshareAndEnsureCapacity(size_t new_capacity);
 
   // Pre- and postcondition of all methods.
-  bool IsConsistent() const { return (!buffer_ || buffer_->capacity() > 0); }
+  bool IsConsistent() const {
+    if (buffer_) {
+      return buffer_->capacity() > 0 && offset_ <= buffer_->size() &&
+             offset_ + size_ <= buffer_->size();
+    } else {
+      return size_ == 0 && offset_ == 0;
+    }
+  }
 
   // buffer_ is either null, or points to an rtc::Buffer with capacity > 0.
-  scoped_refptr<RefCountedObject<Buffer>> buffer_;
+  scoped_refptr<RefCountedBuffer> buffer_;
+  // This buffer may represent a slice of a original data.
+  size_t offset_;  // Offset of a current slice in the original data in buffer_.
+                   // Should be 0 if the buffer_ is empty.
+  size_t size_;    // Size of a current slice in the original data in buffer_.
+                   // Should be 0 if the buffer_ is empty.
 };
 
 }  // namespace rtc

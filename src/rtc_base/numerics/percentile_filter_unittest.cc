@@ -8,15 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "rtc_base/numerics/percentile_filter.h"
+
 #include <stdlib.h>
+
 #include <array>
 #include <climits>
 #include <cstdint>
 #include <random>
 
 #include "absl/algorithm/container.h"
-#include "rtc_base/constructor_magic.h"
-#include "rtc_base/numerics/percentile_filter.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -28,11 +29,11 @@ class PercentileFilterTest : public ::testing::TestWithParam<float> {
     srand(42);
   }
 
+  PercentileFilterTest(const PercentileFilterTest&) = delete;
+  PercentileFilterTest& operator=(const PercentileFilterTest&) = delete;
+
  protected:
   PercentileFilter<int64_t> filter_;
-
- private:
-  RTC_DISALLOW_COPY_AND_ASSIGN(PercentileFilterTest);
 };
 
 INSTANTIATE_TEST_SUITE_P(PercentileFilterTests,
@@ -115,17 +116,17 @@ TEST_P(PercentileFilterTest, InsertAndEraseTenValuesInRandomOrder) {
   // The percentile value of the ten values above.
   const int64_t expected_value = static_cast<int64_t>(GetParam() * 9);
 
-  // Insert two sets of |zero_to_nine| in random order.
+  // Insert two sets of `zero_to_nine` in random order.
   for (int i = 0; i < 2; ++i) {
     absl::c_shuffle(zero_to_nine, std::mt19937(std::random_device()()));
     for (int64_t value : zero_to_nine)
       filter_.Insert(value);
-    // After inserting a full set of |zero_to_nine|, the percentile should
+    // After inserting a full set of `zero_to_nine`, the percentile should
     // stay constant.
     EXPECT_EQ(expected_value, filter_.GetPercentileValue());
   }
 
-  // Insert and erase sets of |zero_to_nine| in random order a few times.
+  // Insert and erase sets of `zero_to_nine` in random order a few times.
   for (int i = 0; i < 3; ++i) {
     absl::c_shuffle(zero_to_nine, std::mt19937(std::random_device()()));
     for (int64_t value : zero_to_nine)
