@@ -628,7 +628,9 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
   if (!send_result)
     return Result(Result::ERROR_SEND_FAILED);
 
-  return Result(Result::OK, rtp_timestamp);
+  StreamDataCounters rtp_counters, rtx_counters;
+  rtp_streams_[stream_index].rtp_rtcp->GetSendStreamDataCounters(&rtp_counters, &rtx_counters);
+  return Result(Result::OK, rtp_timestamp, rtp_counters.transmitted.packets);
 }
 
 void RtpVideoSender::OnBitrateAllocationUpdated(

@@ -425,6 +425,7 @@ class WebRtcVideoChannel : public VideoMediaChannel,
     webrtc::DegradationPreference GetDegradationPreference() const
         RTC_EXCLUSIVE_LOCKS_REQUIRED(&thread_checker_);
 
+    const std::string id_;
     RTC_NO_UNIQUE_ADDRESS webrtc::SequenceChecker thread_checker_;
     webrtc::TaskQueueBase* const worker_thread_;
     const std::vector<uint32_t> ssrcs_ RTC_GUARDED_BY(&thread_checker_);

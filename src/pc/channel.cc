@@ -18,6 +18,7 @@
 
 #include "absl/strings/string_view.h"
 #include "api/rtp_parameters.h"
+#include "api/rtp_transceiver_interface.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/units/timestamp.h"
@@ -863,30 +864,33 @@ bool VoiceChannel::SetLocalContent_w(const MediaContentDescription* content,
   bool update_header_extensions = true;
   media_channel()->SetExtmapAllowMixed(content->extmap_allow_mixed());
 
-  AudioRecvParameters recv_params = last_recv_params_;
-  RtpParametersFromMediaDescription(
-      content->as_audio(), header_extensions,
-      webrtc::RtpTransceiverDirectionHasRecv(content->direction()),
-      &recv_params);
-
-  if (!media_channel()->SetRecvParameters(recv_params)) {
-    error_desc = StringFormat(
-        "Failed to set local audio description recv parameters for m-section "
-        "with mid='%s'.",
-        mid().c_str());
-    return false;
-  }
-
   bool criteria_modified = false;
-  if (webrtc::RtpTransceiverDirectionHasRecv(content->direction())) {
-    for (const AudioCodec& codec : content->as_audio()->codecs()) {
-      if (MaybeAddHandledPayloadType(codec.id)) {
-        criteria_modified = true;
+  if (content->direction() == webrtc::RtpTransceiverDirection::kSendRecv ||
+      content->direction() == webrtc::RtpTransceiverDirection::kRecvOnly) {
+    AudioRecvParameters recv_params = last_recv_params_;
+    RtpParametersFromMediaDescription(
+        content->as_audio(), header_extensions,
+        webrtc::RtpTransceiverDirectionHasRecv(content->direction()),
+        &recv_params);
+
+    if (!media_channel()->SetRecvParameters(recv_params)) {
+      error_desc = StringFormat(
+          "Failed to set local audio description recv parameters for m-section "
+          "with mid='%s'.",
+          mid().c_str());
+      return false;
+    }
+
+    if (webrtc::RtpTransceiverDirectionHasRecv(content->direction())) {
+      for (const AudioCodec& codec : content->as_audio()->codecs()) {
+        if (MaybeAddHandledPayloadType(codec.id)) {
+          criteria_modified = true;
+        }
       }
     }
-  }
 
-  last_recv_params_ = recv_params;
+    last_recv_params_ = recv_params;
+  }
 
   if (!UpdateLocalStreams_w(content->as_audio()->streams(), type, error_desc)) {
     RTC_DCHECK(!error_desc.empty());

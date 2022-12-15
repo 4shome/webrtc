@@ -172,6 +172,8 @@ class RTC_EXPORT BasicPortAllocatorSession : public PortAllocatorSession {
       std::vector<const rtc::Network*>& all_ipv6_networks,
       int max_ipv6_networks);
 
+  bool HasUDPTurnPort() const;
+
  protected:
   void UpdateIceParametersInternal() override;
 
@@ -388,7 +390,9 @@ class AllocationSequence : public sigslot::has_slots<> {
 
  protected:
   // For testing.
-  void CreateTurnPort(const RelayServerConfig& config);
+  void CreateTurnPort(const RelayServerConfig& config,
+                      ProtocolType transport,
+                      ProtocolType peer_transport);
 
  private:
   typedef std::vector<ProtocolType> ProtocolList;
@@ -398,7 +402,7 @@ class AllocationSequence : public sigslot::has_slots<> {
   void CreateUDPPorts();
   void CreateTCPPorts();
   void CreateStunPorts();
-  void CreateRelayPorts();
+  void CreateRelayPorts(ProtocolType transport, ProtocolType peer_transport);
 
   void OnReadPacket(rtc::AsyncPacketSocket* socket,
                     const char* data,
@@ -416,7 +420,6 @@ class AllocationSequence : public sigslot::has_slots<> {
   PortConfiguration* config_;
   State state_;
   uint32_t flags_;
-  ProtocolList protocols_;
   std::unique_ptr<rtc::AsyncPacketSocket> udp_socket_;
   // There will be only one udp port per AllocationSequence.
   UDPPort* udp_port_;

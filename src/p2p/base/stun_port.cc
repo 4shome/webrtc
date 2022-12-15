@@ -511,7 +511,7 @@ void UDPPort::SendStunBindingRequest(const rtc::SocketAddress& stun_addr) {
       // Since we can't send stun messages to the server, we should mark this
       // port ready.
       const char* reason = "STUN server address is incompatible.";
-      RTC_LOG(LS_WARNING) << reason;
+      RTC_LOG(LS_WARNING) << reason << " " << stun_addr.ToString();
       OnStunBindingOrResolveRequestFailed(stun_addr, SERVER_NOT_REACHABLE_ERROR,
                                           reason);
     }

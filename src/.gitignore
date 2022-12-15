@@ -70,4 +70,3 @@
 /x86-generic_out/
 /xcodebuild
 /.vscode
-!webrtc/*

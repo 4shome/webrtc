@@ -97,7 +97,7 @@ class VideoEncoderFactory {
 
   // Creates a VideoEncoder for the specified format.
   virtual std::unique_ptr<VideoEncoder> CreateVideoEncoder(
-      const SdpVideoFormat& format) = 0;
+      const std::string& id, const SdpVideoFormat& format) = 0;
 
   // This method creates a EncoderSelector to use for a VideoSendStream.
   // (and hence should probably been called CreateEncoderSelector()).

@@ -141,6 +141,8 @@ class VideoEncoderConfig {
   ~VideoEncoderConfig();
   std::string ToString() const;
 
+  std::string id;
+
   // TODO(bugs.webrtc.org/6883): Consolidate on one of these.
   VideoCodecType codec_type;
   SdpVideoFormat video_format;

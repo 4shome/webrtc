@@ -20,7 +20,7 @@ namespace cricket {
 
 TurnPortFactory::~TurnPortFactory() {}
 
-std::unique_ptr<Port> TurnPortFactory::Create(
+std::unique_ptr<TurnPort> TurnPortFactory::Create(
     const CreateRelayPortArgs& args,
     rtc::AsyncPacketSocket* udp_socket) {
   auto port = TurnPort::Create(args, udp_socket);
@@ -31,9 +31,9 @@ std::unique_ptr<Port> TurnPortFactory::Create(
   return std::move(port);
 }
 
-std::unique_ptr<Port> TurnPortFactory::Create(const CreateRelayPortArgs& args,
-                                              int min_port,
-                                              int max_port) {
+std::unique_ptr<TurnPort> TurnPortFactory::Create(const CreateRelayPortArgs& args,
+                                                  int min_port,
+                                                  int max_port) {
   auto port = TurnPort::Create(args, min_port, max_port);
   if (!port)
     return nullptr;

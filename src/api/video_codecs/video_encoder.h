@@ -48,7 +48,8 @@ class RTC_EXPORT EncodedImageCallback {
     };
 
     explicit Result(Error error) : error(error) {}
-    Result(Error error, uint32_t frame_id) : error(error), frame_id(frame_id) {}
+    Result(Error error, uint32_t frame_id, uint32_t packets_sent)
+        : error(error), frame_id(frame_id), packets_sent(packets_sent) {}
 
     Error error;
 
@@ -57,6 +58,7 @@ class RTC_EXPORT EncodedImageCallback {
     // as frame ID when RTP is used to send video. Must be used only when
     // error=OK.
     uint32_t frame_id = 0;
+    uint32_t packets_sent = 0;
 
     // Tells the encoder that the next frame is should be dropped.
     bool drop_next_frame = false;
@@ -421,6 +423,8 @@ class RTC_EXPORT VideoEncoder {
   // hardware encoder fails, it may fall back to doing software encoding using
   // an implementation with different characteristics.
   virtual EncoderInfo GetEncoderInfo() const;
+
+  virtual int MaxBitrate() const { return 0; }
 };
 }  // namespace webrtc
 #endif  // API_VIDEO_CODECS_VIDEO_ENCODER_H_

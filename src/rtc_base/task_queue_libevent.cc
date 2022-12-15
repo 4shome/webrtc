@@ -23,6 +23,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <event.h>
+
 #include "absl/container/inlined_vector.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
@@ -36,7 +38,6 @@
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/time_utils.h"
-#include "third_party/libevent/event.h"
 
 namespace webrtc {
 namespace {

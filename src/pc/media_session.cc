@@ -1519,9 +1519,10 @@ static bool IsDtlsActive(const ContentInfo* content,
 
 void MediaDescriptionOptions::AddAudioSender(
     const std::string& track_id,
-    const std::vector<std::string>& stream_ids) {
+    const std::vector<std::string>& stream_ids,
+    const AudioCodecs& codecs) {
   RTC_DCHECK(type == MEDIA_TYPE_AUDIO);
-  AddSenderInternal(track_id, stream_ids, {}, SimulcastLayerList(), 1);
+  AddSenderInternal(track_id, stream_ids, {}, SimulcastLayerList(), 1, codecs, {});
 }
 
 void MediaDescriptionOptions::AddVideoSender(
@@ -1529,13 +1530,14 @@ void MediaDescriptionOptions::AddVideoSender(
     const std::vector<std::string>& stream_ids,
     const std::vector<RidDescription>& rids,
     const SimulcastLayerList& simulcast_layers,
-    int num_sim_layers) {
+    int num_sim_layers,
+    const VideoCodecs& codecs) {
   RTC_DCHECK(type == MEDIA_TYPE_VIDEO);
   RTC_DCHECK(rids.empty() || num_sim_layers == 0)
       << "RIDs are the compliant way to indicate simulcast.";
   RTC_DCHECK(ValidateSimulcastLayers(rids, simulcast_layers));
   AddSenderInternal(track_id, stream_ids, rids, simulcast_layers,
-                    num_sim_layers);
+                    num_sim_layers, {}, codecs);
 }
 
 void MediaDescriptionOptions::AddSenderInternal(
@@ -1543,7 +1545,8 @@ void MediaDescriptionOptions::AddSenderInternal(
     const std::vector<std::string>& stream_ids,
     const std::vector<RidDescription>& rids,
     const SimulcastLayerList& simulcast_layers,
-    int num_sim_layers) {
+    int num_sim_layers,
+    const AudioCodecs& audio_codecs, const VideoCodecs& video_codecs) {
   // TODO(steveanton): Support any number of stream ids.
   RTC_CHECK(stream_ids.size() == 1U);
   SenderOptions options;
@@ -1552,6 +1555,8 @@ void MediaDescriptionOptions::AddSenderInternal(
   options.simulcast_layers = simulcast_layers;
   options.rids = rids;
   options.num_sim_layers = num_sim_layers;
+  options.audio_codecs = audio_codecs;
+  options.video_codecs = video_codecs;
   sender_options.push_back(options);
 }
 
@@ -2319,17 +2324,25 @@ bool MediaSessionDescriptionFactory::AddAudioContentForOffer(
         media_description_options.codec_preferences, audio_codecs,
         supported_audio_codecs, field_trials);
   } else {
-    // Add the codecs from current content if it exists and is not rejected nor
-    // recycled.
-    if (current_content && !current_content->rejected &&
-        current_content->name == media_description_options.mid) {
-      RTC_CHECK(IsMediaContentOfType(current_content, MEDIA_TYPE_AUDIO));
-      const AudioContentDescription* acd =
-          current_content->media_description()->as_audio();
-      for (const AudioCodec& codec : acd->codecs()) {
-        if (FindMatchingCodec<AudioCodec>(acd->codecs(), audio_codecs, codec,
-                                          nullptr, field_trials)) {
-          filtered_codecs.push_back(codec);
+    for (const auto& sender_opts : media_description_options.sender_options) {
+      if (!sender_opts.audio_codecs.empty()) {
+        filtered_codecs.insert(filtered_codecs.end(), sender_opts.audio_codecs.begin(),
+                               sender_opts.audio_codecs.end());
+      }
+    }
+    // If the sender doesn't specify codec, assume it supports all available codecs.
+    if (filtered_codecs.empty()) {
+      // Add the codecs from current content if it exists and is not being recycled.
+      if (current_content && !current_content->rejected &&
+          current_content->name == media_description_options.mid) {
+        RTC_CHECK(IsMediaContentOfType(current_content, MEDIA_TYPE_AUDIO));
+        const AudioContentDescription* acd =
+            current_content->media_description()->as_audio();
+        for (const AudioCodec& codec : acd->codecs()) {
+          if (FindMatchingCodec<AudioCodec>(acd->codecs(), audio_codecs, codec,
+                                            nullptr, field_trials)) {
+            filtered_codecs.push_back(codec);
+          }
         }
       }
     }
@@ -2342,7 +2355,7 @@ bool MediaSessionDescriptionFactory::AddAudioContentForOffer(
                                          filtered_codecs, codec, nullptr,
                                          field_trials)) {
         // Use the `found_codec` from `audio_codecs` because it has the
-        // correctly mapped payload type.
+        // mapped payload type.
         filtered_codecs.push_back(found_codec);
       }
     }
@@ -2383,6 +2396,17 @@ bool MediaSessionDescriptionFactory::AddAudioContentForOffer(
 
   return true;
 }
+ 
+namespace {
+
+const VideoCodec* FindVideoCodec(const VideoCodecs& codecs, const VideoCodec& codec) {
+    for (const auto& c : codecs) {
+        if (c.name == codec.name) return &c;
+    }
+    return nullptr;
+}
+
+}
 
 // TODO(kron): This function is very similar to AddAudioContentForOffer.
 // Refactor to reuse shared code.
@@ -2412,47 +2436,58 @@ bool MediaSessionDescriptionFactory::AddVideoContentForOffer(
         media_description_options.codec_preferences, video_codecs,
         supported_video_codecs, field_trials);
   } else {
-    // Add the codecs from current content if it exists and is not rejected nor
-    // recycled.
-    if (current_content && !current_content->rejected &&
-        current_content->name == media_description_options.mid) {
-      RTC_CHECK(IsMediaContentOfType(current_content, MEDIA_TYPE_VIDEO));
-      const VideoContentDescription* vcd =
-          current_content->media_description()->as_video();
-      for (const VideoCodec& codec : vcd->codecs()) {
-        if (FindMatchingCodec<VideoCodec>(vcd->codecs(), video_codecs, codec,
-                                          nullptr, field_trials)) {
-          filtered_codecs.push_back(codec);
+    for (const auto& sender_opts : media_description_options.sender_options) {
+      for (const VideoCodec& codec : sender_opts.video_codecs) {
+        const VideoCodec* found_codec = FindVideoCodec(supported_video_codecs, codec);
+        if (found_codec != nullptr && FindVideoCodec(filtered_codecs, codec) == nullptr) {
+          filtered_codecs.push_back(*found_codec);
         }
       }
     }
-    // Add other supported video codecs.
-    VideoCodec found_codec;
-    for (const VideoCodec& codec : supported_video_codecs) {
-      if (FindMatchingCodec<VideoCodec>(supported_video_codecs, video_codecs,
-                                        codec, &found_codec, field_trials) &&
-          !FindMatchingCodec<VideoCodec>(supported_video_codecs,
-                                         filtered_codecs, codec, nullptr,
-                                         field_trials)) {
-        // Use the `found_codec` from `video_codecs` because it has the
-        // correctly mapped payload type.
-        if (IsRtxCodec(codec)) {
-          // For RTX we might need to adjust the apt parameter if we got a
-          // remote offer without RTX for a codec for which we support RTX.
-          auto referenced_codec =
-              GetAssociatedCodecForRtx(supported_video_codecs, codec);
-          RTC_DCHECK(referenced_codec);
-
-          // Find the codec we should be referencing and point to it.
-          VideoCodec changed_referenced_codec;
-          if (FindMatchingCodec<VideoCodec>(
-                  supported_video_codecs, filtered_codecs, *referenced_codec,
-                  &changed_referenced_codec, field_trials)) {
-            found_codec.SetParam(kCodecParamAssociatedPayloadType,
-                                 changed_referenced_codec.id);
+    // If the sender doesn't specify codec, assume it supports all available codecs.
+    if (filtered_codecs.empty()) {
+      // Add the codecs from current content if it exists and is not rejected nor
+      // recycled.
+      if (current_content && !current_content->rejected &&
+          current_content->name == media_description_options.mid) {
+        RTC_CHECK(IsMediaContentOfType(current_content, MEDIA_TYPE_VIDEO));
+        const VideoContentDescription* vcd =
+            current_content->media_description()->as_video();
+        for (const VideoCodec& codec : vcd->codecs()) {
+          if (FindMatchingCodec<VideoCodec>(vcd->codecs(), video_codecs, codec,
+                                            nullptr, field_trials)) {
+            filtered_codecs.push_back(codec);
           }
         }
-        filtered_codecs.push_back(found_codec);
+      }
+      // Add other supported video codecs.
+      VideoCodec found_codec;
+      for (const VideoCodec& codec : supported_video_codecs) {
+        if (FindMatchingCodec<VideoCodec>(supported_video_codecs, video_codecs,
+                                          codec, &found_codec, field_trials) &&
+            !FindMatchingCodec<VideoCodec>(supported_video_codecs,
+                                           filtered_codecs, codec, nullptr,
+                                           field_trials)) {
+          // Use the `found_codec` from `video_codecs` because it has the
+          // correctly mapped payload type.
+          if (IsRtxCodec(codec)) {
+            // For RTX we might need to adjust the apt parameter if we got a
+            // remote offer without RTX for a codec for which we support RTX.
+            auto referenced_codec =
+                GetAssociatedCodecForRtx(supported_video_codecs, codec);
+            RTC_DCHECK(referenced_codec);
+
+            // Find the codec we should be referencing and point to it.
+            VideoCodec changed_referenced_codec;
+            if (FindMatchingCodec<VideoCodec>(
+                    supported_video_codecs, filtered_codecs, *referenced_codec,
+                    &changed_referenced_codec, field_trials)) {
+              found_codec.SetParam(kCodecParamAssociatedPayloadType,
+                                   changed_referenced_codec.id);
+            }
+          }
+          filtered_codecs.push_back(found_codec);
+        }
       }
     }
   }

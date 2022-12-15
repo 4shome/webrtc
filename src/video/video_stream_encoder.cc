@@ -914,13 +914,15 @@ void VideoStreamEncoder::ReconfigureEncoder() {
     encoder_.reset();
 
     encoder_ = settings_.encoder_factory->CreateVideoEncoder(
-        encoder_config_.video_format);
+        encoder_config_.id, encoder_config_.video_format);
     if (!encoder_) {
       RTC_LOG(LS_ERROR) << "CreateVideoEncoder failed, failing encoder format: "
                         << encoder_config_.video_format.ToString();
       RequestEncoderSwitch();
       return;
     }
+    const int max_bitrate = encoder_->MaxBitrate();
+    if (max_bitrate > 0) encoder_config_.max_bitrate_bps = max_bitrate;
 
     if (encoder_selector_) {
       encoder_selector_->OnCurrentEncoder(encoder_config_.video_format);

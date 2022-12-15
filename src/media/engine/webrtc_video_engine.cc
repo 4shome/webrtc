@@ -361,7 +361,7 @@ bool IsCodecDisabledForSimulcast(const std::string& codec_name,
 static int GetMaxDefaultVideoBitrateKbps(int width,
                                          int height,
                                          bool is_screenshare) {
-  int max_bitrate;
+  /*int max_bitrate;
   if (width * height <= 320 * 240) {
     max_bitrate = 600;
   } else if (width * height <= 640 * 480) {
@@ -373,7 +373,8 @@ static int GetMaxDefaultVideoBitrateKbps(int width,
   }
   if (is_screenshare)
     max_bitrate = std::max(max_bitrate, 1200);
-  return max_bitrate;
+  return max_bitrate;*/
+  return 10000;
 }
 
 // Returns its smallest positive argument. If neither argument is positive,
@@ -2085,7 +2086,8 @@ WebRtcVideoChannel::WebRtcVideoSendStream::WebRtcVideoSendStream(
     // TODO(deadbeef): Don't duplicate information between send_params,
     // rtp_extensions, options, etc.
     const VideoSendParameters& send_params)
-    : worker_thread_(call->worker_thread()),
+    : id_(sp.id),
+      worker_thread_(call->worker_thread()),
       ssrcs_(sp.ssrcs),
       ssrc_groups_(sp.ssrc_groups),
       call_(call),
@@ -2465,6 +2467,7 @@ WebRtcVideoChannel::WebRtcVideoSendStream::CreateVideoEncoderConfig(
     const VideoCodec& codec) const {
   RTC_DCHECK_RUN_ON(&thread_checker_);
   webrtc::VideoEncoderConfig encoder_config;
+  encoder_config.id = id_;
   encoder_config.codec_type = webrtc::PayloadStringToCodecType(codec.name);
   encoder_config.video_format =
       webrtc::SdpVideoFormat(codec.name, codec.params);

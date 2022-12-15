@@ -83,6 +83,7 @@ class TurnPort : public Port {
         new TurnPort(args.network_thread, args.socket_factory, args.network,
                      socket, args.username, args.password, *args.server_address,
                      args.config->credentials, args.config->priority,
+                     args.peer_transport,
                      args.config->tls_alpn_protocols,
                      args.config->tls_elliptic_curves, args.turn_customizer,
                      args.config->tls_cert_verifier, args.field_trials));
@@ -101,12 +102,19 @@ class TurnPort : public Port {
         new TurnPort(args.network_thread, args.socket_factory, args.network,
                      min_port, max_port, args.username, args.password,
                      *args.server_address, args.config->credentials,
-                     args.config->priority, args.config->tls_alpn_protocols,
+                     args.config->priority, args.peer_transport,
+                     args.config->tls_alpn_protocols,
                      args.config->tls_elliptic_curves, args.turn_customizer,
                      args.config->tls_cert_verifier, args.field_trials));
   }
 
   ~TurnPort() override;
+
+  bool received_response() const { return received_response_; }
+  void set_received_response() { received_response_ = true; }
+  void set_peer_ip(const std::string& peer_ip) {
+    peer_ip_ = peer_ip;
+  }
 
   const ProtocolAddress& server_address() const { return server_address_; }
   // Returns an empty address if the local address has not been assigned.
@@ -207,6 +215,7 @@ class TurnPort : public Port {
            const ProtocolAddress& server_address,
            const RelayCredentials& credentials,
            int server_priority,
+           cricket::ProtocolType peer_transport,
            const std::vector<std::string>& tls_alpn_protocols,
            const std::vector<std::string>& tls_elliptic_curves,
            webrtc::TurnCustomizer* customizer,
@@ -223,6 +232,7 @@ class TurnPort : public Port {
            const ProtocolAddress& server_address,
            const RelayCredentials& credentials,
            int server_priority,
+           cricket::ProtocolType peer_transport,
            const std::vector<std::string>& tls_alpn_protocols,
            const std::vector<std::string>& tls_elliptic_curves,
            webrtc::TurnCustomizer* customizer,
@@ -327,6 +337,10 @@ class TurnPort : public Port {
   rtc::SSLCertificateVerifier* tls_cert_verifier_;
   RelayCredentials credentials_;
   AttemptedServerSet attempted_server_addresses_;
+
+  std::string peer_ip_;
+  const cricket::ProtocolType peer_transport_;
+  bool received_response_ = false;
 
   rtc::AsyncPacketSocket* socket_;
   SocketOptionsMap socket_options_;

@@ -65,9 +65,12 @@ extern const char TCPTYPE_SIMOPEN_STR[];
 // The type preference MUST be an integer from 0 to 126 inclusive.
 // https://datatracker.ietf.org/doc/html/rfc5245#section-4.1.2.1
 enum IcePriorityValue : uint8_t {
-  ICE_TYPE_PREFERENCE_RELAY_TLS = 0,
-  ICE_TYPE_PREFERENCE_RELAY_TCP = 1,
-  ICE_TYPE_PREFERENCE_RELAY_UDP = 2,
+  ICE_TYPE_PREFERENCE_RELAY_TLS_TCP = 0,
+  ICE_TYPE_PREFERENCE_RELAY_TLS_UDP = 2,
+  ICE_TYPE_PREFERENCE_RELAY_TCP_TCP = 3,
+  ICE_TYPE_PREFERENCE_RELAY_TCP_UDP = 4,
+  ICE_TYPE_PREFERENCE_RELAY_UDP_TCP = 5,
+  ICE_TYPE_PREFERENCE_RELAY_UDP_UDP = 6,
   ICE_TYPE_PREFERENCE_PRFLX_TCP = 80,
   ICE_TYPE_PREFERENCE_HOST_TCP = 90,
   ICE_TYPE_PREFERENCE_SRFLX = 100,
@@ -169,6 +172,7 @@ struct CandidatePairChangeEvent {
   std::string reason;
   // How long do we estimate that we've been disconnected.
   int64_t estimated_disconnected_time_ms;
+  IceCandidatePairState state;
 };
 
 typedef std::set<rtc::SocketAddress> ServerAddresses;

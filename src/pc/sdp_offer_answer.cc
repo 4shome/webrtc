@@ -564,14 +564,14 @@ void AddPlanBRtpSenderOptions(
     if (sender->media_type() == cricket::MEDIA_TYPE_AUDIO) {
       if (audio_media_description_options) {
         audio_media_description_options->AddAudioSender(
-            sender->id(), sender->internal()->stream_ids());
+            sender->id(), sender->internal()->stream_ids(), {});
       }
     } else {
       RTC_DCHECK(sender->media_type() == cricket::MEDIA_TYPE_VIDEO);
       if (video_media_description_options) {
         video_media_description_options->AddVideoSender(
             sender->id(), sender->internal()->stream_ids(), {},
-            SimulcastLayerList(), num_sim_layers);
+            SimulcastLayerList(), num_sim_layers, {});
       }
     }
   }

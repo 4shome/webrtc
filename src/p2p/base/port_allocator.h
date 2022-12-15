@@ -89,6 +89,10 @@ enum {
   // Exclude link-local network interfaces
   // from considertaion after adapter enumeration.
   PORTALLOCATOR_DISABLE_LINK_LOCAL_NETWORKS = 0x10000,
+
+  PORTALLOCATOR_DISABLE_TCP_RELAY = 0x1000000,
+  PORTALLOCATOR_DISABLE_UDP_PEER_RELAY = 0x2000000,
+  PORTALLOCATOR_DISABLE_TCP_PEER_RELAY = 0x4000000,
 };
 
 // Defines various reasons that have caused ICE regathering.
@@ -184,6 +188,7 @@ struct RTC_EXPORT RelayServerConfig {
   std::vector<std::string> tls_elliptic_curves;
   rtc::SSLCertificateVerifier* tls_cert_verifier = nullptr;
   std::string turn_logging_id;
+  std::string peer_ip;
 };
 
 class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
