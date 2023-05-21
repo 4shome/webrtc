@@ -257,17 +257,20 @@ OBJC_SRCS=src/rtc_base/maccocoathreadhelper.mm \
           src/modules/video_capture/objc/rtc_video_capture_objc.mm \
           src/modules/video_capture/objc/video_capture.mm
 
+AVX2_SRCS=src/common_audio/fir_filter_avx2.cc \
+          src/common_audio/resampler/sinc_resampler_avx2.cc \
+          src/modules/audio_processing/aec3/adaptive_fir_filter_avx2.cc \
+          src/modules/audio_processing/aec3/adaptive_fir_filter_erl_avx2.cc \
+          src/modules/audio_processing/aec3/fft_data_avx2.cc \
+          src/modules/audio_processing/aec3/vector_math_avx2.cc \
+          src/modules/audio_processing/agc2/rnn_vad/vector_math_avx2.cc \
+          src/modules/audio_processing/aec3/matched_filter_avx2.cc
+
 CXX_SRCS/x86_64=src/common_audio/fir_filter_sse.cc \
-                src/common_audio/fir_filter_avx2.cc \
-                src/common_audio/resampler/sinc_resampler_avx2.cc \
                 src/common_audio/resampler/sinc_resampler_sse.cc \
                 src/common_audio/third_party/ooura/fft_size_128/ooura_fft_sse2.cc \
-                src/modules/audio_processing/aec3/adaptive_fir_filter_avx2.cc \
-                src/modules/audio_processing/aec3/adaptive_fir_filter_erl_avx2.cc \
-                src/modules/audio_processing/aec3/fft_data_avx2.cc \
-                src/modules/audio_processing/aec3/vector_math_avx2.cc \
-                src/modules/audio_processing/agc2/rnn_vad/vector_math_avx2.cc \
-                src/modules/video_processing/util/denoiser_filter_sse2.cc
+                src/modules/video_processing/util/denoiser_filter_sse2.cc \
+				$(AVX2_SRCS)
 
 CXX_SRCS/i686=src/common_audio/fir_filter_sse.cc \
               src/common_audio/resampler/sinc_resampler_sse.cc \
@@ -637,7 +640,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/audio_processing/aec3/frame_blocker.cc \
          src/modules/audio_processing/aec3/fullband_erle_estimator.cc \
          src/modules/audio_processing/aec3/matched_filter.cc \
-         src/modules/audio_processing/aec3/matched_filter_avx2.cc \
          src/modules/audio_processing/aec3/matched_filter_lag_aggregator.cc \
          src/modules/audio_processing/aec3/moving_average.cc \
          src/modules/audio_processing/aec3/multi_channel_content_detector.cc \
@@ -1406,7 +1408,7 @@ COMMON_DEFS=-D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACR
 
 # TODO: Support QUIC.
 WEBRTC_DEFS=-DWEBRTC_ENABLE_PROTOBUF=1 -DWEBRTC_STRICT_FIELD_TRIALS=0 -DRTC_ENABLE_VP9 \
-            -DRTC_DAV1D_IN_INTERNAL_DECODER_FACTORY -DWEBRTC_LIBRARY_IMPL -DWEBRTC_ENABLE_AVX2 \
+            -DRTC_DAV1D_IN_INTERNAL_DECODER_FACTORY -DWEBRTC_LIBRARY_IMPL \
             -DWEBRTC_NON_STATIC_TRACE_EVENT_HANDLERS=1 -DHAVE_WEBRTC_VIDEO -DHAVE_WEBRTC_VOICE \
             -DWEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE -DWEBRTC_CODEC_ILBC -DWEBRTC_CODEC_OPUS \
             -DWEBRTC_OPUS_SUPPORT_120MS_PTIME=1 -DWEBRTC_USE_BUILTIN_OPUS=1 \
@@ -1461,8 +1463,8 @@ COMMON_CFLAGS=-g -O2 -m64 --param=ssp-buffer-size=4 -fdata-sections -ffunction-s
 CFLAGS/Linux=-pthread -fstack-protector
 CFLAGS/Darwin=-mmacosx-version-min=10.7 -pthread -fstack-protector -Wno-c++11-narrowing -m64
 CFLAGS/MINGW=
-CFLAGS/x86_64=-mavx2 -mfma
-CFLAGS/i686=-msse2
+CFLAGS/x86_64=-m64 -msse4.2
+CFLAGS/i686=-msse4.2
 CFLAGS/armv7l=-mfpu=neon -fPIC
 CFLAGS/aarch64=-fPIC
 CFLAGS=$(COMMON_CFLAGS) $(CFLAGS/$(OS)) $(CFLAGS/$(ARCH))
@@ -1518,6 +1520,10 @@ $(RNNOISE_OBJS): %.o: %.cc
 
 .c.o:
 	$(CC) $(CFLAGS) $(DEFS) $(INCS) -c -o $@ $<
+
+AVX2_OBJS=$(AVX2_SRCS:.cc=.o)
+$(AVX2_OBJS): %.o: %.cc
+	$(CXX) $(CXXFLAGS) -mavx2 -mfma $(DEFS) $(INCS) -c -o $@ $<
 
 .cc.o:
 	$(CXX) $(CXXFLAGS) $(DEFS) $(INCS) -c -o $@ $<
