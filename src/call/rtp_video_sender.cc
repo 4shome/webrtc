@@ -551,8 +551,10 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
                                          encoded_image._frameType);
   MutexLock lock(&mutex_);
   RTC_DCHECK(!rtp_streams_.empty());
-  if (!active_)
+  if (!active_) {
+    RTC_LOG(LS_WARNING) << "RtpVideoSender is not active.";
     return Result(Result::ERROR_SEND_FAILED);
+  }
 
   shared_frame_id_++;
   size_t stream_index = 0;
@@ -578,6 +580,7 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
           rtp_config_.payload_type,
           encoded_image._frameType == VideoFrameType::kVideoFrameKey)) {
     // The payload router could be active but this module isn't sending.
+    RTC_LOG(LS_WARNING) << "OnSendingRtpFrame failed.";
     return Result(Result::ERROR_SEND_FAILED);
   }
 
@@ -625,8 +628,10 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
     frame_count_observer_->FrameCountUpdated(counts,
                                              rtp_config_.ssrcs[stream_index]);
   }
-  if (!send_result)
+  if (!send_result) {
+    RTC_LOG(LS_WARNING) << "SendEncodedImage failed.";
     return Result(Result::ERROR_SEND_FAILED);
+  }
 
   StreamDataCounters rtp_counters, rtx_counters;
   rtp_streams_[stream_index].rtp_rtcp->GetSendStreamDataCounters(&rtp_counters, &rtx_counters);

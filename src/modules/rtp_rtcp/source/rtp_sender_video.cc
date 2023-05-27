@@ -482,9 +482,12 @@ bool RTPSenderVideo::SendVideo(
   if (video_header.frame_type == VideoFrameType::kEmptyFrame)
     return true;
 
-  if (payload.empty())
+  if (payload.empty()) {
+    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo payload is empty.";
     return false;
+  }
   if (!rtp_sender_->SendingMedia()) {
+    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo not sending.";
     return false;
   }
 
@@ -629,6 +632,7 @@ bool RTPSenderVideo::SendVideo(
     if (frame_encryptor_->Encrypt(
             cricket::MEDIA_TYPE_VIDEO, first_packet->Ssrc(), additional_data,
             payload, encrypted_video_payload, &bytes_written) != 0) {
+      RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo failed to encrypt.";
       return false;
     }
 
@@ -653,8 +657,10 @@ bool RTPSenderVideo::SendVideo(
           : false;
   const size_t num_packets = packetizer->NumPackets();
 
-  if (num_packets == 0)
+  if (num_packets == 0) {
+    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo failed to packetize the payload.";
     return false;
+  }
 
   bool first_frame = first_frame_sent_();
   std::vector<std::unique_ptr<RtpPacketToSend>> rtp_packets;
@@ -681,8 +687,10 @@ bool RTPSenderVideo::SendVideo(
 
     packet->set_first_packet_of_frame(i == 0);
 
-    if (!packetizer->NextPacket(packet.get()))
+    if (!packetizer->NextPacket(packet.get())) {
+      RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo failed to get the next packet.";
       return false;
+    }
     RTC_DCHECK_LE(packet->payload_size(), expected_payload_capacity);
 
     packet->set_allow_retransmission(allow_retransmission);

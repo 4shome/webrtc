@@ -343,8 +343,10 @@ bool ModuleRtpRtcpImpl::OnSendingRtpFrame(uint32_t timestamp,
                                           int64_t capture_time_ms,
                                           int payload_type,
                                           bool force_sender_report) {
-  if (!Sending())
+  if (!Sending()) {
+    RTC_LOG(LS_WARNING) << "ModuleRtpRtcpImpl::OnSendingRtpFrame not sending.";
     return false;
+  }
 
   // TODO(bugs.webrtc.org/12873): Migrate this method and it's users to use
   // optional Timestamps.
