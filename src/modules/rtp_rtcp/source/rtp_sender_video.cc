@@ -775,6 +775,10 @@ bool RTPSenderVideo::SendEncodedImage(
         payload_type, codec_type, rtp_timestamp, encoded_image, video_header,
         expected_retransmission_time_ms);
   }
+  if (encoded_image.size() == 0) {
+    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendEncodedImage encoded_image is empty.";
+    return false;
+  }
   return SendVideo(payload_type, codec_type, rtp_timestamp,
                    encoded_image.capture_time_ms_, encoded_image, video_header,
                    expected_retransmission_time_ms);
