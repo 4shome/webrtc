@@ -629,7 +629,7 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
                                              rtp_config_.ssrcs[stream_index]);
   }
   if (!send_result) {
-    RTC_LOG(LS_WARNING) << "SendEncodedImage failed.";
+    RTC_LOG(LS_WARNING) << "SendEncodedImage failed to send " << encoded_image.size() << " bytes.";
     return Result(Result::ERROR_SEND_FAILED);
   }
 

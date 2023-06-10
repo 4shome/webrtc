@@ -9,6 +9,7 @@
  */
 
 #include "common_video/h264/h264_common.h"
+#include "rtc_base/logging.h"
 
 #include <cstdint>
 
@@ -16,19 +17,6 @@ namespace webrtc {
 namespace H264 {
 
 const uint8_t kNaluTypeMask = 0x1F;
-
-namespace {
-
-// Copied from ff_avc_mp4_find_startcode
-const uint8_t* mp4_find_startcode(const uint8_t *start, const uint8_t *end, int nal_length_size) {
-    if (end - start < nal_length_size) return nullptr;
-    unsigned int res = 0;
-    while (nal_length_size--) res = (res << 8) | *start++;
-    if (res > end - start) return nullptr;
-    return start + res;
-}
-
-}  // namespace
 
 std::vector<NaluIndex> FindNaluIndices(const uint8_t* buffer,
                                        size_t buffer_size) {
@@ -45,8 +33,7 @@ std::vector<NaluIndex> FindNaluIndices(const uint8_t* buffer,
   const size_t end = buffer_size - kNaluShortStartSequenceSize;
   for (size_t i = 0; i < end;) {
     if (buffer[i + 2] > 1) {
-        if (i == 0) break;
-        i += 3;
+      i += 3;
     } else if (buffer[i + 2] == 1) {
       if (buffer[i + 1] == 0 && buffer[i] == 0) {
         // We found a start sequence, now check if it was a 3 of 4 byte one.
@@ -68,24 +55,10 @@ std::vector<NaluIndex> FindNaluIndices(const uint8_t* buffer,
     }
   }
 
-  if (sequences.empty()) {
-    // Try to see whether it's ffmpeg's format "length(4 bytes) + NAL".
-    const uint8_t* start = buffer;
-    const uint8_t* end = buffer + buffer_size;
-    do {
-        const uint8_t* nal_end = mp4_find_startcode(start, end, 4);
-        if (nal_end == nullptr) {
-            sequences.clear();
-            break;
-        }
-        sequences.push_back({start - buffer, start - buffer + 4, nal_end - start - 4});
-        start = nal_end;
-    } while (start != end);
-  } else {
-    // Update length of last entry.
-    auto it = sequences.rbegin();
+  // Update length of last entry, if any.
+  auto it = sequences.rbegin();
+  if (it != sequences.rend())
     it->payload_size = buffer_size - it->payload_start_offset;
-  }
 
   return sequences;
 }

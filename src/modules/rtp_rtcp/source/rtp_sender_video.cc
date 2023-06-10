@@ -658,7 +658,8 @@ bool RTPSenderVideo::SendVideo(
   const size_t num_packets = packetizer->NumPackets();
 
   if (num_packets == 0) {
-    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo failed to packetize the payload.";
+    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo failed to packetize payload of "
+                        << payload.size() << " bytes";
     return false;
   }
 

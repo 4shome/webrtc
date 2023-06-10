@@ -22,6 +22,7 @@
 #include "modules/video_coding/codecs/vp8/include/vp8_globals.h"
 #include "modules/video_coding/codecs/vp9/include/vp9_globals.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 
@@ -81,6 +82,9 @@ std::vector<int> RtpPacketizer::SplitAboutEqually(
   if (limits.max_payload_len - limits.first_packet_reduction_len < 1 ||
       limits.max_payload_len - limits.last_packet_reduction_len < 1) {
     // Capacity is not enough to put a single byte into one of the packets.
+    RTC_LOG(LS_ERROR) << "Capacity is not enough to put a single byte into one of the packets: "
+        << limits.max_payload_len << " " << limits.first_packet_reduction_len
+        << " " << limits.last_packet_reduction_len;
     return result;
   }
   // First and last packet of the frame can be smaller. Pretend that it's
@@ -102,6 +106,8 @@ std::vector<int> RtpPacketizer::SplitAboutEqually(
     // bytes. This may happen when there is single byte of payload that can't be
     // put into single packet if
     // first_packet_reduction + last_packet_reduction >= max_payload_len.
+    RTC_LOG(LS_ERROR) << "payload_len < num_packets_left: " << payload_len
+                      << " < " << num_packets_left;
     return result;
   }
 
