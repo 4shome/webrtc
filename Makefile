@@ -31,10 +31,7 @@ C_SRCS/armv7l=src/common_audio/signal_processing/cross_correlation_neon.c \
               src/modules/audio_coding/codecs/isac/fix/source/filterbanks_neon.c \
               src/modules/audio_coding/codecs/isac/fix/source/filters_neon.c \
               src/modules/audio_coding/codecs/isac/fix/source/lattice_neon.c \
-              src/modules/audio_coding/codecs/isac/fix/source/transform_neon.c \
-              src/modules/audio_processing/ns/noise_suppression_x.c \
-              src/modules/audio_processing/ns/nsx_core.c \
-              src/modules/audio_processing/ns/nsx_core_neon.c
+              src/modules/audio_coding/codecs/isac/fix/source/transform_neon.c
 
 
 C_SRCS/aarch64=src/common_audio/signal_processing/cross_correlation_neon.c \
@@ -44,10 +41,7 @@ C_SRCS/aarch64=src/common_audio/signal_processing/cross_correlation_neon.c \
                src/modules/audio_coding/codecs/isac/fix/source/filterbanks_neon.c \
                src/modules/audio_coding/codecs/isac/fix/source/filters_neon.c \
                src/modules/audio_coding/codecs/isac/fix/source/lattice_neon.c \
-               src/modules/audio_coding/codecs/isac/fix/source/transform_neon.c \
-               src/modules/audio_processing/ns/noise_suppression_x.c \
-               src/modules/audio_processing/ns/nsx_core.c \
-               src/modules/audio_processing/ns/nsx_core_neon.c
+               src/modules/audio_coding/codecs/isac/fix/source/transform_neon.c
 
 C_SRCS=src/common_audio/ring_buffer.c \
        src/common_audio/signal_processing/auto_correlation.c \
@@ -279,16 +273,13 @@ CXX_SRCS/i686=src/common_audio/fir_filter_sse.cc \
 CXX_SRCS/armv7l=src/common_audio/fir_filter_neon.cc \
                 src/common_audio/resampler/sinc_resampler_neon.cc \
                 src/common_audio/third_party/ooura/fft_size_128/ooura_fft_neon.cc \
-                src/modules/audio_processing/aec/aec_core_neon.cc \
                 src/modules/audio_processing/aecm/aecm_core_neon.cc \
-                src/modules/audio_processing/utility/ooura_fft_neon.cc \
                 src/modules/video_processing/util/denoiser_filter_neon.cc
 
 CXX_SRCS/aarch64=src/common_audio/fir_filter_neon.cc \
                  src/common_audio/resampler/sinc_resampler_neon.cc \
-                 src/modules/audio_processing/aec/aec_core_neon.cc \
+                 src/common_audio/third_party/ooura/fft_size_128/ooura_fft_neon.cc \
                  src/modules/audio_processing/aecm/aecm_core_neon.cc \
-                 src/modules/audio_processing/utility/ooura_fft_neon.cc \
                  src/modules/video_processing/util/denoiser_filter_neon.cc
 
 CXX_SRCS=src/api/adaptation/resource.cc \
@@ -1457,11 +1448,11 @@ INCS/MinGW=-Isrc/modules/audio_device/win
 
 INCS=$(THIRD_PARTY_INCS) $(OWN_INCS) $(INCS/$(OS))
 
-COMMON_CFLAGS=-g -O2 -m64 --param=ssp-buffer-size=4 -fdata-sections -ffunction-sections -pipe \
+COMMON_CFLAGS=-g -O2 --param=ssp-buffer-size=4 -fdata-sections -ffunction-sections -pipe \
               -fdata-sections -ffunction-sections -fno-ident -fno-strict-aliasing -fno-builtin-abs \
               -fno-omit-frame-pointer
 CFLAGS/Linux=-pthread -fstack-protector
-CFLAGS/Darwin=-mmacosx-version-min=10.7 -pthread -fstack-protector -Wno-c++11-narrowing -m64
+CFLAGS/Darwin=-mmacosx-version-min=10.7 -pthread -fstack-protector -Wno-c++11-narrowing
 CFLAGS/MINGW=
 CFLAGS/x86_64=-m64 -msse4.2
 CFLAGS/i686=-msse4.2
