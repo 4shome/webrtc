@@ -1448,7 +1448,7 @@ INCS/MinGW=-Isrc/modules/audio_device/win
 
 INCS=$(THIRD_PARTY_INCS) $(OWN_INCS) $(INCS/$(OS))
 
-COMMON_CFLAGS=-g -O2 --param=ssp-buffer-size=4 -fdata-sections -ffunction-sections -pipe \
+COMMON_CFLAGS=-g -O3 --param=ssp-buffer-size=4 -fdata-sections -ffunction-sections -pipe \
               -fdata-sections -ffunction-sections -fno-ident -fno-strict-aliasing -fno-builtin-abs \
               -fno-omit-frame-pointer
 CFLAGS/Linux=-pthread -fstack-protector
@@ -1457,7 +1457,7 @@ CFLAGS/MINGW=
 CFLAGS/x86_64=-m64 -msse4.2
 CFLAGS/i686=-msse4.2
 CFLAGS/armv7l=-mfpu=neon -fPIC
-CFLAGS/aarch64=-fPIC
+CFLAGS/aarch64=-march=armv8.2-a+crc+crypto -fPIC
 CFLAGS=$(COMMON_CFLAGS) $(CFLAGS/$(OS)) $(CFLAGS/$(ARCH))
 
 CXXFLAGS=-std=gnu++17 $(CFLAGS) -fvisibility=hidden -funwind-tables \
