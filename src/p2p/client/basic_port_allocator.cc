@@ -130,6 +130,7 @@ bool IsAllowedByCandidateFilter(const Candidate& c, uint32_t filter) {
   } else if (c.type() == STUN_PORT_TYPE) {
     return ((filter & CF_REFLEXIVE) != 0);
   } else if (c.type() == LOCAL_PORT_TYPE) {
+    if ((filter & CF_RELAY) && c.address().IsPrivateIP()) return true;
     if ((filter & CF_REFLEXIVE) && !c.address().IsPrivateIP()) {
       // We allow host candidates if the filter allows server-reflexive
       // candidates and the candidate is a public IP. Because we don't generate
