@@ -13,6 +13,7 @@ rtc_library("rtc_api_video_unittests") {
   sources = [
     "color_space_unittest.cc",
     "i210_buffer_unittest.cc",
+    "i410_buffer_unittest.cc",
     "i422_buffer_unittest.cc",
     "i444_buffer_unittest.cc",
     "nv12_buffer_unittest.cc",
@@ -25,10 +26,10 @@ rtc_library("rtc_api_video_unittests") {
     "..:video_frame",
     "..:video_frame_i010",
     "..:video_rtp_headers",
+    "../..:scoped_refptr",
     "../../../test:frame_utils",
     "../../../test:test_support",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_source_set("mock_recordable_encoded_frame") {
@@ -37,8 +38,13 @@ rtc_source_set("mock_recordable_encoded_frame") {
   sources = [ "mock_recordable_encoded_frame.h" ]
 
   deps = [
+    "..:encoded_image",
     "..:recordable_encoded_frame",
+    "..:video_frame",
+    "..:video_rtp_headers",
+    "../..:scoped_refptr",
     "../../../test:test_support",
+    "../../units:timestamp",
   ]
 }
 

@@ -10,6 +10,9 @@
 
 #include "api/audio_codecs/opus/audio_encoder_multi_channel_opus_config.h"
 
+#include <cstddef>
+#include <vector>
+
 namespace webrtc {
 
 namespace {
@@ -32,8 +35,9 @@ AudioEncoderMultiChannelOpusConfig::AudioEncoderMultiChannelOpusConfig(
     const AudioEncoderMultiChannelOpusConfig&) = default;
 AudioEncoderMultiChannelOpusConfig::~AudioEncoderMultiChannelOpusConfig() =
     default;
-AudioEncoderMultiChannelOpusConfig& AudioEncoderMultiChannelOpusConfig::
-operator=(const AudioEncoderMultiChannelOpusConfig&) = default;
+AudioEncoderMultiChannelOpusConfig&
+AudioEncoderMultiChannelOpusConfig::operator=(
+    const AudioEncoderMultiChannelOpusConfig&) = default;
 
 bool AudioEncoderMultiChannelOpusConfig::IsOk() const {
   if (frame_size_ms <= 0 || frame_size_ms % 10 != 0)

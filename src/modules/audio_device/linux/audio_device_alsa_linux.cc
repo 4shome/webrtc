@@ -10,7 +10,6 @@
 
 #include "modules/audio_device/linux/audio_device_alsa_linux.h"
 
-
 #include "modules/audio_device/audio_device_config.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/system/arch.h"
@@ -589,7 +588,7 @@ int32_t AudioDeviceLinuxALSA::SetPlayoutDevice(uint16_t index) {
     return -1;
   }
 
-  uint32_t nDevices = GetDevicesInfo(0, true);
+  int32_t nDevices = GetDevicesInfo(0, true);
   RTC_LOG(LS_VERBOSE) << "number of available audio output devices is "
                       << nDevices;
 
@@ -658,7 +657,7 @@ int32_t AudioDeviceLinuxALSA::SetRecordingDevice(uint16_t index) {
     return -1;
   }
 
-  uint32_t nDevices = GetDevicesInfo(0, false);
+  int32_t nDevices = GetDevicesInfo(0, false);
   RTC_LOG(LS_VERBOSE) << "number of availiable audio input devices is "
                       << nDevices;
 
@@ -804,7 +803,7 @@ int32_t AudioDeviceLinuxALSA::InitPlayoutLocked() {
 #if defined(WEBRTC_ARCH_BIG_ENDIAN)
            SND_PCM_FORMAT_S16_BE,
 #else
-           SND_PCM_FORMAT_S16_LE,                             // format
+           SND_PCM_FORMAT_S16_LE,  // format
 #endif
            SND_PCM_ACCESS_RW_INTERLEAVED,  // access
            _playChannels,                  // channels
@@ -883,7 +882,7 @@ int32_t AudioDeviceLinuxALSA::InitRecordingLocked() {
   // Start by closing any existing pcm-input devices
   //
   if (_handleRecord != NULL) {
-    int errVal = LATE(snd_pcm_close)(_handleRecord);
+    errVal = LATE(snd_pcm_close)(_handleRecord);
     _handleRecord = NULL;
     _recIsInitialized = false;
     if (errVal < 0) {
@@ -928,7 +927,7 @@ int32_t AudioDeviceLinuxALSA::InitRecordingLocked() {
 #if defined(WEBRTC_ARCH_BIG_ENDIAN)
                                     SND_PCM_FORMAT_S16_BE,  // format
 #else
-                                    SND_PCM_FORMAT_S16_LE,    // format
+                                    SND_PCM_FORMAT_S16_LE,  // format
 #endif
                                     SND_PCM_ACCESS_RW_INTERLEAVED,  // access
                                     _recChannels,                   // channels
@@ -1020,13 +1019,14 @@ int32_t AudioDeviceLinuxALSA::StartRecording() {
     return -1;
   }
   // RECORDING
-  _ptrThreadRec = rtc::PlatformThread::SpawnJoinable(
+  _ptrThreadRec = webrtc::PlatformThread::SpawnJoinable(
       [this] {
         while (RecThreadProcess()) {
         }
       },
       "webrtc_audio_module_capture_thread",
-      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
+      webrtc::ThreadAttributes().SetPriority(
+          webrtc::ThreadPriority::kRealtime));
 
   errVal = LATE(snd_pcm_prepare)(_handleRecord);
   if (errVal < 0) {
@@ -1053,8 +1053,8 @@ int32_t AudioDeviceLinuxALSA::StartRecording() {
 }
 
 int32_t AudioDeviceLinuxALSA::StopRecording() {
-    MutexLock lock(&mutex_);
-    return StopRecordingLocked();
+  MutexLock lock(&mutex_);
+  return StopRecordingLocked();
 }
 
 int32_t AudioDeviceLinuxALSA::StopRecordingLocked() {
@@ -1137,13 +1137,14 @@ int32_t AudioDeviceLinuxALSA::StartPlayout() {
   }
 
   // PLAYOUT
-  _ptrThreadPlay = rtc::PlatformThread::SpawnJoinable(
+  _ptrThreadPlay = webrtc::PlatformThread::SpawnJoinable(
       [this] {
         while (PlayThreadProcess()) {
         }
       },
       "webrtc_audio_module_play_thread",
-      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
+      webrtc::ThreadAttributes().SetPriority(
+          webrtc::ThreadPriority::kRealtime));
 
   int errVal = LATE(snd_pcm_prepare)(_handlePlayout);
   if (errVal < 0) {
@@ -1157,8 +1158,8 @@ int32_t AudioDeviceLinuxALSA::StartPlayout() {
 }
 
 int32_t AudioDeviceLinuxALSA::StopPlayout() {
-    MutexLock lock(&mutex_);
-    return StopPlayoutLocked();
+  MutexLock lock(&mutex_);
+  return StopPlayoutLocked();
 }
 
 int32_t AudioDeviceLinuxALSA::StopPlayoutLocked() {
@@ -1517,7 +1518,7 @@ bool AudioDeviceLinuxALSA::RecThreadProcess() {
   int err;
   snd_pcm_sframes_t frames;
   snd_pcm_sframes_t avail_frames;
-  int8_t buffer[_recordingBufferSizeIn10MS];
+  std::vector<int8_t> buffer(_recordingBufferSizeIn10MS);
 
   Lock();
 
@@ -1543,7 +1544,7 @@ bool AudioDeviceLinuxALSA::RecThreadProcess() {
   if (static_cast<uint32_t>(avail_frames) > _recordingFramesLeft)
     avail_frames = _recordingFramesLeft;
 
-  frames = LATE(snd_pcm_readi)(_handleRecord, buffer,
+  frames = LATE(snd_pcm_readi)(_handleRecord, buffer.data(),
                                avail_frames);  // frames to be written
   if (frames < 0) {
     RTC_LOG(LS_ERROR) << "capture snd_pcm_readi error: "
@@ -1558,8 +1559,8 @@ bool AudioDeviceLinuxALSA::RecThreadProcess() {
         LATE(snd_pcm_frames_to_bytes)(_handleRecord, _recordingFramesLeft);
     int size = LATE(snd_pcm_frames_to_bytes)(_handleRecord, frames);
 
-    memcpy(&_recordingBuffer[_recordingBufferSizeIn10MS - left_size], buffer,
-           size);
+    memcpy(&_recordingBuffer[_recordingBufferSizeIn10MS - left_size],
+           buffer.data(), size);
     _recordingFramesLeft -= frames;
 
     if (!_recordingFramesLeft) {  // buf is full

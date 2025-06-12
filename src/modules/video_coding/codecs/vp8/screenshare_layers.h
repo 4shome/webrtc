@@ -9,18 +9,23 @@
 #ifndef MODULES_VIDEO_CODING_CODECS_VP8_SCREENSHARE_LAYERS_H_
 #define MODULES_VIDEO_CODING_CODECS_VP8_SCREENSHARE_LAYERS_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
-#include <utility>
+#include <optional>
 #include <vector>
 
+#include "absl/container/inlined_vector.h"
+#include "absl/strings/string_view.h"
+#include "api/transport/rtp/dependency_descriptor.h"
+#include "api/video_codecs/video_encoder.h"
+#include "api/video_codecs/vp8_frame_buffer_controller.h"
 #include "api/video_codecs/vp8_frame_config.h"
-#include "api/video_codecs/vp8_temporal_layers.h"
 #include "modules/video_coding/codecs/vp8/include/temporal_layers_checker.h"
 #include "modules/video_coding/include/video_codec_interface.h"
-#include "modules/video_coding/utility/frame_dropper.h"
+#include "rtc_base/numerics/sequence_number_unwrapper.h"
 #include "rtc_base/rate_statistics.h"
-#include "rtc_base/time_utils.h"
 
 namespace webrtc {
 
@@ -91,23 +96,23 @@ class ScreenshareLayers final : public Vp8FrameBufferController {
   const int number_of_temporal_layers_;
 
   // TODO(eladalon/sprang): These should be made into const-int set in the ctor.
-  absl::optional<int> min_qp_;
-  absl::optional<int> max_qp_;
+  std::optional<int> min_qp_;
+  std::optional<int> max_qp_;
 
   int active_layer_;
   int64_t last_timestamp_;
   int64_t last_sync_timestamp_;
   int64_t last_emitted_tl0_timestamp_;
   int64_t last_frame_time_ms_;
-  rtc::TimestampWrapAroundHandler time_wrap_handler_;
+  RtpTimestampUnwrapper time_wrap_handler_;
   uint32_t max_debt_bytes_;
 
   std::map<uint32_t, DependencyInfo> pending_frame_configs_;
 
   // Configured max framerate.
-  absl::optional<uint32_t> target_framerate_;
+  std::optional<uint32_t> target_framerate_;
   // Incoming framerate from capturer.
-  absl::optional<uint32_t> capture_framerate_;
+  std::optional<uint32_t> capture_framerate_;
 
   // Tracks what framerate we actually encode, and drops frames on overshoot.
   RateStatistics encode_framerate_;

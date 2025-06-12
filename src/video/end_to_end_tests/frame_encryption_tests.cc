@@ -15,6 +15,7 @@
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "test/call_test.h"
 #include "test/gtest.h"
+#include "test/video_test_constants.h"
 
 namespace webrtc {
 namespace {
@@ -26,11 +27,14 @@ enum : int {  // The first valid value is 1.
 };
 
 class DecryptedFrameObserver : public test::EndToEndTest,
-                               public rtc::VideoSinkInterface<VideoFrame> {
+                               public VideoSinkInterface<VideoFrame> {
  public:
   DecryptedFrameObserver()
-      : EndToEndTest(test::CallTest::kDefaultTimeout),
-        encoder_factory_([] { return VP8Encoder::Create(); }) {}
+      : EndToEndTest(test::VideoTestConstants::kDefaultTimeout),
+        encoder_factory_(
+            [](const Environment& env, const SdpVideoFormat& format) {
+              return CreateVp8Encoder(env);
+            }) {}
 
  private:
   void ModifyVideoConfigs(
@@ -40,7 +44,8 @@ class DecryptedFrameObserver : public test::EndToEndTest,
     // Use VP8 instead of FAKE.
     send_config->encoder_settings.encoder_factory = &encoder_factory_;
     send_config->rtp.payload_name = "VP8";
-    send_config->rtp.payload_type = test::CallTest::kVideoSendPayloadType;
+    send_config->rtp.payload_type =
+        test::VideoTestConstants::kVideoSendPayloadType;
     send_config->frame_encryptor = new FakeFrameEncryptor();
     send_config->crypto_options.sframe.require_frame_encryption = true;
     encoder_config->codec_type = kVideoCodecVP8;
@@ -51,7 +56,7 @@ class DecryptedFrameObserver : public test::EndToEndTest,
       recv_config.decoders.clear();
       recv_config.decoders.push_back(decoder);
       recv_config.renderer = this;
-      recv_config.frame_decryptor = rtc::make_ref_counted<FakeFrameDecryptor>();
+      recv_config.frame_decryptor = make_ref_counted<FakeFrameDecryptor>();
       recv_config.crypto_options.sframe.require_frame_encryption = true;
     }
   }

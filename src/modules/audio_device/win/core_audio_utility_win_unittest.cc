@@ -9,6 +9,7 @@
  */
 
 #include "modules/audio_device/win/core_audio_utility_win.h"
+
 #include "rtc_base/arraysize.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/win/scoped_com_initializer.h"
@@ -62,9 +63,9 @@ class CoreAudioUtilityWinTest : public ::testing::Test {
     EXPECT_TRUE(com_init_.Succeeded());
 
     // Configure logging.
-    rtc::LogMessage::LogToDebug(rtc::LS_INFO);
-    rtc::LogMessage::LogTimestamps();
-    rtc::LogMessage::LogThreads();
+    webrtc::LogMessage::LogToDebug(webrtc::LS_INFO);
+    webrtc::LogMessage::LogTimestamps();
+    webrtc::LogMessage::LogThreads();
   }
 
   virtual ~CoreAudioUtilityWinTest() {}
@@ -313,8 +314,8 @@ TEST_F(CoreAudioUtilityWinTest, GetOutputDeviceNames) {
 }
 
 TEST_F(CoreAudioUtilityWinTest, CreateSessionManager2) {
-  ABORT_TEST_IF_NOT(DevicesAvailable() &&
-                    rtc::rtc_win::GetVersion() >= rtc::rtc_win::VERSION_WIN7);
+  ABORT_TEST_IF_NOT(DevicesAvailable() && webrtc::rtc_win::GetVersion() >=
+                                              webrtc::rtc_win::VERSION_WIN7);
 
   EDataFlow data_flow[] = {eRender, eCapture};
 
@@ -332,8 +333,8 @@ TEST_F(CoreAudioUtilityWinTest, CreateSessionManager2) {
 }
 
 TEST_F(CoreAudioUtilityWinTest, CreateSessionEnumerator) {
-  ABORT_TEST_IF_NOT(DevicesAvailable() &&
-                    rtc::rtc_win::GetVersion() >= rtc::rtc_win::VERSION_WIN7);
+  ABORT_TEST_IF_NOT(DevicesAvailable() && webrtc::rtc_win::GetVersion() >=
+                                              webrtc::rtc_win::VERSION_WIN7);
 
   EDataFlow data_flow[] = {eRender, eCapture};
 
@@ -358,8 +359,8 @@ TEST_F(CoreAudioUtilityWinTest, CreateSessionEnumerator) {
 }
 
 TEST_F(CoreAudioUtilityWinTest, NumberOfActiveSessions) {
-  ABORT_TEST_IF_NOT(DevicesAvailable() &&
-                    rtc::rtc_win::GetVersion() >= rtc::rtc_win::VERSION_WIN7);
+  ABORT_TEST_IF_NOT(DevicesAvailable() && webrtc::rtc_win::GetVersion() >=
+                                              webrtc::rtc_win::VERSION_WIN7);
 
   EDataFlow data_flow[] = {eRender, eCapture};
 

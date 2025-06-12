@@ -11,6 +11,11 @@
 #ifndef API_NUMERICS_SAMPLES_STATS_COUNTER_H_
 #define API_NUMERICS_SAMPLES_STATS_COUNTER_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <map>
+#include <string>
 #include <vector>
 
 #include "api/array_view.h"
@@ -27,9 +32,12 @@ class SamplesStatsCounter {
   struct StatsSample {
     double value;
     Timestamp time;
+    // Sample's specific metadata.
+    std::map<std::string, std::string> metadata;
   };
 
   SamplesStatsCounter();
+  explicit SamplesStatsCounter(size_t expected_samples_count);
   ~SamplesStatsCounter();
   SamplesStatsCounter(const SamplesStatsCounter&);
   SamplesStatsCounter& operator=(const SamplesStatsCounter&);
@@ -60,6 +68,12 @@ class SamplesStatsCounter {
     RTC_DCHECK(!IsEmpty());
     return *stats_.GetMax();
   }
+  // Returns sum in O(1) time. This function may not be called if there are
+  // no samples.
+  double GetSum() const {
+    RTC_DCHECK(!IsEmpty());
+    return *stats_.GetSum();
+  }
   // Returns average in O(1) time. This function may not be called if there are
   // no samples.
   double GetAverage() const {
@@ -89,7 +103,7 @@ class SamplesStatsCounter {
   // guarantees of order, so samples can be in different order comparing to in
   // which they were added into counter. Also return value will be invalidate
   // after call to any non const method.
-  rtc::ArrayView<const StatsSample> GetTimedSamples() const { return samples_; }
+  ArrayView<const StatsSample> GetTimedSamples() const { return samples_; }
   std::vector<double> GetSamples() const {
     std::vector<double> out;
     out.reserve(samples_.size());

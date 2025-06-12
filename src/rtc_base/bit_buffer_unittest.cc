@@ -19,7 +19,7 @@
 #include "test/gmock.h"
 #include "test/gtest.h"
 
-namespace rtc {
+namespace webrtc {
 
 using ::testing::ElementsAre;
 using ::webrtc::BitstreamReader;
@@ -165,7 +165,7 @@ TEST(BitBufferWriterTest, SymmetricReadWrite) {
   // That should be all that fits in the buffer.
   EXPECT_FALSE(buffer.WriteBits(1, 1));
 
-  BitstreamReader reader(rtc::MakeArrayView(bytes, 4));
+  BitstreamReader reader(MakeArrayView(bytes, 4));
   EXPECT_EQ(reader.ReadBits(3), 0x2u);
   EXPECT_EQ(reader.ReadBits(2), 0x1u);
   EXPECT_EQ(reader.ReadBits(7), 0x53u);
@@ -221,4 +221,36 @@ TEST(BitBufferWriterTest, WriteClearsBits) {
   EXPECT_EQ(0x7F, bytes[1]);
 }
 
-}  // namespace rtc
+TEST(BitBufferWriterTest, WriteLeb128) {
+  uint8_t small_number[2];
+  BitBufferWriter small_buffer(small_number, sizeof(small_number));
+  EXPECT_TRUE(small_buffer.WriteLeb128(129));
+  EXPECT_THAT(small_number, ElementsAre(0x81, 0x01));
+
+  uint8_t large_number[10];
+  BitBufferWriter large_buffer(large_number, sizeof(large_number));
+  EXPECT_TRUE(large_buffer.WriteLeb128(std::numeric_limits<uint64_t>::max()));
+  EXPECT_THAT(large_number, ElementsAre(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                        0xFF, 0xFF, 0xFF, 0x01));
+}
+
+TEST(BitBufferWriterTest, WriteLeb128TooSmallBuffer) {
+  uint8_t bytes[1];
+  BitBufferWriter buffer(bytes, sizeof(bytes));
+  EXPECT_FALSE(buffer.WriteLeb128(12345));
+}
+
+TEST(BitBufferWriterTest, WriteString) {
+  uint8_t buffer[2];
+  BitBufferWriter writer(buffer, sizeof(buffer));
+  EXPECT_TRUE(writer.WriteString("ab"));
+  EXPECT_THAT(buffer, ElementsAre('a', 'b'));
+}
+
+TEST(BitBufferWriterTest, WriteStringTooSmallBuffer) {
+  uint8_t buffer[2];
+  BitBufferWriter writer(buffer, sizeof(buffer));
+  EXPECT_FALSE(writer.WriteString("abc"));
+}
+
+}  // namespace webrtc

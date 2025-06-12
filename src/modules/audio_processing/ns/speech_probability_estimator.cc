@@ -11,6 +11,7 @@
 #include "modules/audio_processing/ns/speech_probability_estimator.h"
 
 #include <math.h>
+
 #include <algorithm>
 
 #include "modules/audio_processing/ns/fast_math.h"
@@ -24,10 +25,10 @@ SpeechProbabilityEstimator::SpeechProbabilityEstimator() {
 
 void SpeechProbabilityEstimator::Update(
     int32_t num_analyzed_frames,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> prior_snr,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> post_snr,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> conservative_noise_spectrum,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> signal_spectrum,
+    ArrayView<const float, kFftSizeBy2Plus1> prior_snr,
+    ArrayView<const float, kFftSizeBy2Plus1> post_snr,
+    ArrayView<const float, kFftSizeBy2Plus1> conservative_noise_spectrum,
+    ArrayView<const float, kFftSizeBy2Plus1> signal_spectrum,
     float signal_spectral_sum,
     float signal_energy) {
   // Update models.

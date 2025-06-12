@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "api/scoped_refptr.h"
+#include "api/video/nv12_buffer.h"
 
 namespace webrtc {
 class I420Buffer;
@@ -37,10 +38,12 @@ static inline bool EqualPlane(const uint8_t* data1,
 
 bool FramesEqual(const webrtc::VideoFrame& f1, const webrtc::VideoFrame& f2);
 
-bool FrameBufsEqual(const rtc::scoped_refptr<webrtc::VideoFrameBuffer>& f1,
-                    const rtc::scoped_refptr<webrtc::VideoFrameBuffer>& f2);
+bool FrameBufsEqual(const scoped_refptr<webrtc::VideoFrameBuffer>& f1,
+                    const scoped_refptr<webrtc::VideoFrameBuffer>& f2);
 
-rtc::scoped_refptr<I420Buffer> ReadI420Buffer(int width, int height, FILE*);
+scoped_refptr<I420Buffer> ReadI420Buffer(int width, int height, FILE*);
+
+scoped_refptr<NV12Buffer> ReadNV12Buffer(int width, int height, FILE*);
 
 }  // namespace test
 }  // namespace webrtc

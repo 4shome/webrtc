@@ -10,12 +10,37 @@
 
 #include "test/pc/e2e/analyzer/audio/default_audio_quality_analyzer.h"
 
-#include "api/stats/rtc_stats.h"
+#include <cmath>
+#include <cstdint>
+#include <map>
+#include <string>
+#include <utility>
+
+#include "absl/flags/flag.h"
+#include "absl/strings/string_view.h"
+#include "api/scoped_refptr.h"
+#include "api/stats/rtc_stats_report.h"
 #include "api/stats/rtcstats_objects.h"
-#include "rtc_base/logging.h"
+#include "api/test/metrics/metric.h"
+#include "api/test/metrics/metrics_logger.h"
+#include "api/test/track_id_stream_info_map.h"
+#include "api/units/time_delta.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "test/pc/e2e/metric_metadata_keys.h"
+#include "test/test_flags.h"
 
 namespace webrtc {
 namespace webrtc_pc_e2e {
+
+using ::webrtc::test::ImprovementDirection;
+using ::webrtc::test::Unit;
+
+DefaultAudioQualityAnalyzer::DefaultAudioQualityAnalyzer(
+    test::MetricsLogger* const metrics_logger)
+    : metrics_logger_(metrics_logger) {
+  RTC_CHECK(metrics_logger_);
+}
 
 void DefaultAudioQualityAnalyzer::Start(std::string test_case_name,
                                         TrackIdStreamInfoMap* analyzer_helper) {
@@ -25,37 +50,38 @@ void DefaultAudioQualityAnalyzer::Start(std::string test_case_name,
 
 void DefaultAudioQualityAnalyzer::OnStatsReports(
     absl::string_view pc_label,
-    const rtc::scoped_refptr<const RTCStatsReport>& report) {
-  auto stats = report->GetStatsOfType<RTCInboundRTPStreamStats>();
+    const scoped_refptr<const RTCStatsReport>& report) {
+  auto stats = report->GetStatsOfType<RTCInboundRtpStreamStats>();
 
   for (auto& stat : stats) {
-    if (!stat->kind.is_defined() ||
-        !(*stat->kind == RTCMediaStreamTrackKind::kAudio)) {
+    if (!stat->kind.has_value() || !(*stat->kind == "audio")) {
       continue;
     }
 
     StatsSample sample;
-    sample.total_samples_received =
-        stat->total_samples_received.ValueOrDefault(0ul);
-    sample.concealed_samples = stat->concealed_samples.ValueOrDefault(0ul);
+    sample.total_samples_received = stat->total_samples_received.value_or(0ul);
+    sample.concealed_samples = stat->concealed_samples.value_or(0ul);
     sample.removed_samples_for_acceleration =
-        stat->removed_samples_for_acceleration.ValueOrDefault(0ul);
+        stat->removed_samples_for_acceleration.value_or(0ul);
     sample.inserted_samples_for_deceleration =
-        stat->inserted_samples_for_deceleration.ValueOrDefault(0ul);
+        stat->inserted_samples_for_deceleration.value_or(0ul);
     sample.silent_concealed_samples =
-        stat->silent_concealed_samples.ValueOrDefault(0ul);
+        stat->silent_concealed_samples.value_or(0ul);
     sample.jitter_buffer_delay =
-        TimeDelta::Seconds(stat->jitter_buffer_delay.ValueOrDefault(0.));
+        TimeDelta::Seconds(stat->jitter_buffer_delay.value_or(0.));
     sample.jitter_buffer_target_delay =
-        TimeDelta::Seconds(stat->jitter_buffer_target_delay.ValueOrDefault(0.));
+        TimeDelta::Seconds(stat->jitter_buffer_target_delay.value_or(0.));
     sample.jitter_buffer_emitted_count =
-        stat->jitter_buffer_emitted_count.ValueOrDefault(0ul);
+        stat->jitter_buffer_emitted_count.value_or(0ul);
+    sample.total_samples_duration = stat->total_samples_duration.value_or(0.);
+    sample.total_audio_energy = stat->total_audio_energy.value_or(0.);
 
-    const std::string stream_label = std::string(
-        analyzer_helper_->GetStreamLabelFromTrackId(*stat->track_identifier));
+    TrackIdStreamInfoMap::StreamInfo stream_info =
+        analyzer_helper_->GetStreamInfoFromTrackId(*stat->track_identifier);
 
     MutexLock lock(&lock_);
-    StatsSample prev_sample = last_stats_sample_[stream_label];
+    stream_info_.emplace(stream_info.stream_label, stream_info);
+    StatsSample prev_sample = last_stats_sample_[stream_info.stream_label];
     RTC_CHECK_GE(sample.total_samples_received,
                  prev_sample.total_samples_received);
     double total_samples_diff = static_cast<double>(
@@ -64,7 +90,8 @@ void DefaultAudioQualityAnalyzer::OnStatsReports(
       return;
     }
 
-    AudioStreamStats& audio_stream_stats = streams_stats_[stream_label];
+    AudioStreamStats& audio_stream_stats =
+        streams_stats_[stream_info.stream_label];
     audio_stream_stats.expand_rate.AddSample(
         (sample.concealed_samples - prev_sample.concealed_samples) /
         total_samples_diff);
@@ -101,35 +128,59 @@ void DefaultAudioQualityAnalyzer::OnStatsReports(
           jitter_buffer_target_delay_diff.ms<double>() /
           jitter_buffer_emitted_count_diff);
     }
+    audio_stream_stats.energy.AddSample(sqrt(
+        (sample.total_audio_energy - prev_sample.total_audio_energy) /
+        (sample.total_samples_duration - prev_sample.total_samples_duration)));
 
-    last_stats_sample_[stream_label] = sample;
+    last_stats_sample_[stream_info.stream_label] = sample;
   }
 }
 
 std::string DefaultAudioQualityAnalyzer::GetTestCaseName(
     const std::string& stream_label) const {
-  return test_case_name_ + "/" + stream_label;
+  if (!absl::GetFlag(FLAGS_isolated_script_test_perf_output).empty()) {
+    return test_case_name_ + "/" + stream_label;
+  }
+  return test_case_name_;
 }
 
 void DefaultAudioQualityAnalyzer::Stop() {
-  using ::webrtc::test::ImproveDirection;
   MutexLock lock(&lock_);
   for (auto& item : streams_stats_) {
-    ReportResult("expand_rate", item.first, item.second.expand_rate, "unitless",
-                 ImproveDirection::kSmallerIsBetter);
-    ReportResult("accelerate_rate", item.first, item.second.accelerate_rate,
-                 "unitless", ImproveDirection::kSmallerIsBetter);
-    ReportResult("preemptive_rate", item.first, item.second.preemptive_rate,
-                 "unitless", ImproveDirection::kSmallerIsBetter);
-    ReportResult("speech_expand_rate", item.first,
-                 item.second.speech_expand_rate, "unitless",
-                 ImproveDirection::kSmallerIsBetter);
-    ReportResult("average_jitter_buffer_delay_ms", item.first,
-                 item.second.average_jitter_buffer_delay_ms, "ms",
-                 ImproveDirection::kNone);
-    ReportResult("preferred_buffer_size_ms", item.first,
-                 item.second.preferred_buffer_size_ms, "ms",
-                 ImproveDirection::kNone);
+    std::string test_case_name = GetTestCaseName(item.first);
+    const TrackIdStreamInfoMap::StreamInfo& stream_info =
+        stream_info_[item.first];
+    std::map<std::string, std::string> metric_metadata{
+        {MetricMetadataKey::kAudioStreamMetadataKey, item.first},
+        {MetricMetadataKey::kPeerMetadataKey, stream_info.receiver_peer},
+        {MetricMetadataKey::kReceiverMetadataKey, stream_info.receiver_peer}};
+
+    metrics_logger_->LogMetric(
+        "expand_rate", test_case_name, item.second.expand_rate, Unit::kUnitless,
+        ImprovementDirection::kSmallerIsBetter, metric_metadata);
+    metrics_logger_->LogMetric("accelerate_rate", test_case_name,
+                               item.second.accelerate_rate, Unit::kUnitless,
+                               ImprovementDirection::kSmallerIsBetter,
+                               metric_metadata);
+    metrics_logger_->LogMetric("preemptive_rate", test_case_name,
+                               item.second.preemptive_rate, Unit::kUnitless,
+                               ImprovementDirection::kSmallerIsBetter,
+                               metric_metadata);
+    metrics_logger_->LogMetric("speech_expand_rate", test_case_name,
+                               item.second.speech_expand_rate, Unit::kUnitless,
+                               ImprovementDirection::kSmallerIsBetter,
+                               metric_metadata);
+    metrics_logger_->LogMetric(
+        "average_jitter_buffer_delay_ms", test_case_name,
+        item.second.average_jitter_buffer_delay_ms, Unit::kMilliseconds,
+        ImprovementDirection::kNeitherIsBetter, metric_metadata);
+    metrics_logger_->LogMetric(
+        "preferred_buffer_size_ms", test_case_name,
+        item.second.preferred_buffer_size_ms, Unit::kMilliseconds,
+        ImprovementDirection::kNeitherIsBetter, metric_metadata);
+    metrics_logger_->LogMetric(
+        "energy", test_case_name, item.second.energy, Unit::kUnitless,
+        ImprovementDirection::kNeitherIsBetter, metric_metadata);
   }
 }
 
@@ -137,19 +188,6 @@ std::map<std::string, AudioStreamStats>
 DefaultAudioQualityAnalyzer::GetAudioStreamsStats() const {
   MutexLock lock(&lock_);
   return streams_stats_;
-}
-
-void DefaultAudioQualityAnalyzer::ReportResult(
-    const std::string& metric_name,
-    const std::string& stream_label,
-    const SamplesStatsCounter& counter,
-    const std::string& unit,
-    webrtc::test::ImproveDirection improve_direction) const {
-  test::PrintResultMeanAndError(
-      metric_name, /*modifier=*/"", GetTestCaseName(stream_label),
-      counter.IsEmpty() ? 0 : counter.GetAverage(),
-      counter.IsEmpty() ? 0 : counter.GetStandardDeviation(), unit,
-      /*important=*/false, improve_direction);
 }
 
 }  // namespace webrtc_pc_e2e

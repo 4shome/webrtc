@@ -42,11 +42,11 @@ class SctpPacket {
   struct ChunkDescriptor {
     ChunkDescriptor(uint8_t type,
                     uint8_t flags,
-                    rtc::ArrayView<const uint8_t> data)
+                    webrtc::ArrayView<const uint8_t> data)
         : type(type), flags(flags), data(data) {}
     uint8_t type;
     uint8_t flags;
-    rtc::ArrayView<const uint8_t> data;
+    webrtc::ArrayView<const uint8_t> data;
   };
 
   SctpPacket(SctpPacket&& other) = default;
@@ -74,7 +74,9 @@ class SctpPacket {
 
     // Returns the payload of the build SCTP packet. The Builder will be cleared
     // after having called this function, and can be used to build a new packet.
-    std::vector<uint8_t> Build();
+    // If `write_checksum` is set to false, a value of zero (0) will be written
+    // as the packet's checksum, instead of the crc32c value.
+    std::vector<uint8_t> Build(bool write_checksum = true);
 
    private:
     VerificationTag verification_tag_;
@@ -87,15 +89,14 @@ class SctpPacket {
   };
 
   // Parses `data` as an SCTP packet and returns it if it validates.
-  static absl::optional<SctpPacket> Parse(
-      rtc::ArrayView<const uint8_t> data,
-      bool disable_checksum_verification = false);
+  static std::optional<SctpPacket> Parse(webrtc::ArrayView<const uint8_t> data,
+                                         const DcSctpOptions& options);
 
   // Returns the SCTP common header.
   const CommonHeader& common_header() const { return common_header_; }
 
   // Returns the chunks (types and offsets) within the packet.
-  rtc::ArrayView<const ChunkDescriptor> descriptors() const {
+  webrtc::ArrayView<const ChunkDescriptor> descriptors() const {
     return descriptors_;
   }
 

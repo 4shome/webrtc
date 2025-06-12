@@ -12,6 +12,7 @@
 #define API_TASK_QUEUE_TEST_MOCK_TASK_QUEUE_BASE_H_
 
 #include "absl/functional/any_invocable.h"
+#include "api/location.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/units/time_delta.h"
 #include "test/gmock.h"
@@ -20,15 +21,22 @@ namespace webrtc {
 
 class MockTaskQueueBase : public TaskQueueBase {
  public:
+  using TaskQueueBase::PostDelayedTaskTraits;
+  using TaskQueueBase::PostTaskTraits;
+
   MOCK_METHOD(void, Delete, (), (override));
-  MOCK_METHOD(void, PostTask, (absl::AnyInvocable<void() &&>), (override));
   MOCK_METHOD(void,
-              PostDelayedTask,
-              (absl::AnyInvocable<void() &&>, TimeDelta),
+              PostTaskImpl,
+              (absl::AnyInvocable<void() &&>,
+               const PostTaskTraits&,
+               const Location&),
               (override));
   MOCK_METHOD(void,
-              PostDelayedHighPrecisionTask,
-              (absl::AnyInvocable<void() &&>, TimeDelta),
+              PostDelayedTaskImpl,
+              (absl::AnyInvocable<void() &&>,
+               TimeDelta,
+               const PostDelayedTaskTraits&,
+               const Location&),
               (override));
 };
 

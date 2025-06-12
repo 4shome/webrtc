@@ -9,17 +9,36 @@
  */
 #include "test/pc/e2e/cross_media_metrics_reporter.h"
 
+#include <cstdlib>
+#include <map>
+#include <string>
 #include <utility>
 #include <vector>
 
-#include "api/stats/rtc_stats.h"
+#include "absl/flags/flag.h"
+#include "absl/strings/string_view.h"
+#include "api/scoped_refptr.h"
+#include "api/stats/rtc_stats_report.h"
 #include "api/stats/rtcstats_objects.h"
-#include "api/units/timestamp.h"
-#include "rtc_base/event.h"
-#include "system_wrappers/include/field_trial.h"
+#include "api/test/metrics/metric.h"
+#include "api/test/metrics/metrics_logger.h"
+#include "api/test/track_id_stream_info_map.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "test/pc/e2e/metric_metadata_keys.h"
+#include "test/test_flags.h"
 
 namespace webrtc {
 namespace webrtc_pc_e2e {
+
+using ::webrtc::test::ImprovementDirection;
+using ::webrtc::test::Unit;
+
+CrossMediaMetricsReporter::CrossMediaMetricsReporter(
+    test::MetricsLogger* metrics_logger)
+    : metrics_logger_(metrics_logger) {
+  RTC_CHECK(metrics_logger_);
+}
 
 void CrossMediaMetricsReporter::Start(
     absl::string_view test_case_name,
@@ -30,17 +49,16 @@ void CrossMediaMetricsReporter::Start(
 
 void CrossMediaMetricsReporter::OnStatsReports(
     absl::string_view pc_label,
-    const rtc::scoped_refptr<const RTCStatsReport>& report) {
-  auto inbound_stats = report->GetStatsOfType<RTCInboundRTPStreamStats>();
-  std::map<absl::string_view, std::vector<const RTCInboundRTPStreamStats*>>
+    const scoped_refptr<const RTCStatsReport>& report) {
+  auto inbound_stats = report->GetStatsOfType<RTCInboundRtpStreamStats>();
+  std::map<std::string, std::vector<const RTCInboundRtpStreamStats*>>
       sync_group_stats;
   for (const auto& stat : inbound_stats) {
-    auto media_source_stat =
-        report->GetAs<RTCMediaStreamTrackStats>(*stat->track_id);
-    if (stat->estimated_playout_timestamp.ValueOrDefault(0.) > 0 &&
-        media_source_stat->track_identifier.is_defined()) {
-      sync_group_stats[reporter_helper_->GetSyncGroupLabelFromTrackId(
-                           *media_source_stat->track_identifier)]
+    if (stat->estimated_playout_timestamp.value_or(0.) > 0 &&
+        stat->track_identifier.has_value()) {
+      sync_group_stats[reporter_helper_
+                           ->GetStreamInfoFromTrackId(*stat->track_identifier)
+                           .sync_group]
           .push_back(stat);
     }
   }
@@ -52,32 +70,28 @@ void CrossMediaMetricsReporter::OnStatsReports(
       continue;
     }
     auto sync_group = std::string(pair.first);
-    const RTCInboundRTPStreamStats* audio_stat = pair.second[0];
-    const RTCInboundRTPStreamStats* video_stat = pair.second[1];
+    const RTCInboundRtpStreamStats* audio_stat = pair.second[0];
+    const RTCInboundRtpStreamStats* video_stat = pair.second[1];
 
-    RTC_CHECK(pair.second.size() == 2 && audio_stat->kind.is_defined() &&
-              video_stat->kind.is_defined() &&
+    RTC_CHECK(pair.second.size() == 2 && audio_stat->kind.has_value() &&
+              video_stat->kind.has_value() &&
               *audio_stat->kind != *video_stat->kind)
         << "Sync group should consist of one audio and one video stream.";
 
-    if (*audio_stat->kind == RTCMediaStreamTrackKind::kVideo) {
+    if (*audio_stat->kind == "video") {
       std::swap(audio_stat, video_stat);
     }
     // Stream labels of a sync group are same for all polls, so we need it add
     // it only once.
     if (stats_info_.find(sync_group) == stats_info_.end()) {
-      auto audio_source_stat =
-          report->GetAs<RTCMediaStreamTrackStats>(*audio_stat->track_id);
-      auto video_source_stat =
-          report->GetAs<RTCMediaStreamTrackStats>(*video_stat->track_id);
-      // *_source_stat->track_identifier is always defined here because we
-      // checked it while grouping stats.
-      stats_info_[sync_group].audio_stream_label =
-          std::string(reporter_helper_->GetStreamLabelFromTrackId(
-              *audio_source_stat->track_identifier));
-      stats_info_[sync_group].video_stream_label =
-          std::string(reporter_helper_->GetStreamLabelFromTrackId(
-              *video_source_stat->track_identifier));
+      RTC_CHECK(audio_stat->track_identifier.has_value());
+      RTC_CHECK(video_stat->track_identifier.has_value());
+      stats_info_[sync_group].audio_stream_info =
+          reporter_helper_->GetStreamInfoFromTrackId(
+              *audio_stat->track_identifier);
+      stats_info_[sync_group].video_stream_info =
+          reporter_helper_->GetStreamInfoFromTrackId(
+              *video_stat->track_identifier);
     }
 
     double audio_video_playout_diff = *audio_stat->estimated_playout_timestamp -
@@ -98,31 +112,45 @@ void CrossMediaMetricsReporter::StopAndReportResults() {
   MutexLock lock(&mutex_);
   for (const auto& pair : stats_info_) {
     const std::string& sync_group = pair.first;
-    ReportResult("audio_ahead_ms",
-                 GetTestCaseName(pair.second.audio_stream_label, sync_group),
-                 pair.second.audio_ahead_ms, "ms",
-                 webrtc::test::ImproveDirection::kSmallerIsBetter);
-    ReportResult("video_ahead_ms",
-                 GetTestCaseName(pair.second.video_stream_label, sync_group),
-                 pair.second.video_ahead_ms, "ms",
-                 webrtc::test::ImproveDirection::kSmallerIsBetter);
-  }
-}
+    std::map<std::string, std::string> audio_metric_metadata{
+        {MetricMetadataKey::kPeerSyncGroupMetadataKey, sync_group},
+        {MetricMetadataKey::kAudioStreamMetadataKey,
+         pair.second.audio_stream_info.stream_label},
+        {MetricMetadataKey::kPeerMetadataKey,
+         pair.second.audio_stream_info.receiver_peer},
+        {MetricMetadataKey::kReceiverMetadataKey,
+         pair.second.audio_stream_info.receiver_peer}};
+    metrics_logger_->LogMetric(
+        "audio_ahead_ms",
+        GetTestCaseName(pair.second.audio_stream_info.stream_label, sync_group),
+        pair.second.audio_ahead_ms, Unit::kMilliseconds,
+        webrtc::test::ImprovementDirection::kSmallerIsBetter,
+        std::move(audio_metric_metadata));
 
-void CrossMediaMetricsReporter::ReportResult(
-    const std::string& metric_name,
-    const std::string& test_case_name,
-    const SamplesStatsCounter& counter,
-    const std::string& unit,
-    webrtc::test::ImproveDirection improve_direction) {
-  test::PrintResult(metric_name, /*modifier=*/"", test_case_name, counter, unit,
-                    /*important=*/false, improve_direction);
+    std::map<std::string, std::string> video_metric_metadata{
+        {MetricMetadataKey::kPeerSyncGroupMetadataKey, sync_group},
+        {MetricMetadataKey::kAudioStreamMetadataKey,
+         pair.second.video_stream_info.stream_label},
+        {MetricMetadataKey::kPeerMetadataKey,
+         pair.second.video_stream_info.receiver_peer},
+        {MetricMetadataKey::kReceiverMetadataKey,
+         pair.second.video_stream_info.receiver_peer}};
+    metrics_logger_->LogMetric(
+        "video_ahead_ms",
+        GetTestCaseName(pair.second.video_stream_info.stream_label, sync_group),
+        pair.second.video_ahead_ms, Unit::kMilliseconds,
+        webrtc::test::ImprovementDirection::kSmallerIsBetter,
+        std::move(video_metric_metadata));
+  }
 }
 
 std::string CrossMediaMetricsReporter::GetTestCaseName(
     const std::string& stream_label,
     const std::string& sync_group) const {
-  return test_case_name_ + "/" + sync_group + "_" + stream_label;
+  if (!absl::GetFlag(FLAGS_isolated_script_test_perf_output).empty()) {
+    return test_case_name_ + "/" + sync_group + "_" + stream_label;
+  }
+  return test_case_name_;
 }
 
 }  // namespace webrtc_pc_e2e

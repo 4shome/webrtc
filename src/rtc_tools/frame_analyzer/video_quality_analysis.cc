@@ -14,9 +14,10 @@
 #include <array>
 #include <cstddef>
 
+#include "api/numerics/samples_stats_counter.h"
+#include "api/test/metrics/metric.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
-#include "test/testsupport/perf_test.h"
 #include "third_party/libyuv/include/libyuv/compare.h"
 
 namespace webrtc {
@@ -28,8 +29,8 @@ ResultsContainer::~ResultsContainer() {}
 template <typename FrameMetricFunction>
 static double CalculateMetric(
     const FrameMetricFunction& frame_metric_function,
-    const rtc::scoped_refptr<I420BufferInterface>& ref_buffer,
-    const rtc::scoped_refptr<I420BufferInterface>& test_buffer) {
+    const scoped_refptr<I420BufferInterface>& ref_buffer,
+    const scoped_refptr<I420BufferInterface>& test_buffer) {
   RTC_CHECK_EQ(ref_buffer->width(), test_buffer->width());
   RTC_CHECK_EQ(ref_buffer->height(), test_buffer->height());
   return frame_metric_function(
@@ -40,28 +41,28 @@ static double CalculateMetric(
       test_buffer->width(), test_buffer->height());
 }
 
-double Psnr(const rtc::scoped_refptr<I420BufferInterface>& ref_buffer,
-            const rtc::scoped_refptr<I420BufferInterface>& test_buffer) {
+double Psnr(const scoped_refptr<I420BufferInterface>& ref_buffer,
+            const scoped_refptr<I420BufferInterface>& test_buffer) {
   // LibYuv sets the max psnr value to 128, we restrict it to 48.
   // In case of 0 mse in one frame, 128 can skew the results significantly.
   return std::min(48.0,
                   CalculateMetric(&libyuv::I420Psnr, ref_buffer, test_buffer));
 }
 
-double Ssim(const rtc::scoped_refptr<I420BufferInterface>& ref_buffer,
-            const rtc::scoped_refptr<I420BufferInterface>& test_buffer) {
+double Ssim(const scoped_refptr<I420BufferInterface>& ref_buffer,
+            const scoped_refptr<I420BufferInterface>& test_buffer) {
   return CalculateMetric(&libyuv::I420Ssim, ref_buffer, test_buffer);
 }
 
 std::vector<AnalysisResult> RunAnalysis(
-    const rtc::scoped_refptr<webrtc::test::Video>& reference_video,
-    const rtc::scoped_refptr<webrtc::test::Video>& test_video,
+    const scoped_refptr<webrtc::test::Video>& reference_video,
+    const scoped_refptr<webrtc::test::Video>& test_video,
     const std::vector<size_t>& test_frame_indices) {
   std::vector<AnalysisResult> results;
   for (size_t i = 0; i < test_video->number_of_frames(); ++i) {
-    const rtc::scoped_refptr<I420BufferInterface>& test_frame =
+    const scoped_refptr<I420BufferInterface>& test_frame =
         test_video->GetFrame(i);
-    const rtc::scoped_refptr<I420BufferInterface>& reference_frame =
+    const scoped_refptr<I420BufferInterface>& reference_frame =
         reference_video->GetFrame(i);
 
     // Fill in the result struct.
@@ -117,39 +118,42 @@ int GetTotalNumberOfSkippedFrames(const std::vector<Cluster>& clusters) {
   return static_cast<int>(number_ref_frames - clusters.size());
 }
 
-void PrintAnalysisResults(const std::string& label, ResultsContainer* results) {
-  PrintAnalysisResults(stdout, label, results);
-}
+void PrintAnalysisResults(const std::string& label,
+                          ResultsContainer& results,
+                          MetricsLogger& logger) {
+  if (results.frames.size() > 0u) {
+    logger.LogSingleValueMetric("Unique_frames_count", label,
+                                results.frames.size(), Unit::kUnitless,
+                                ImprovementDirection::kNeitherIsBetter);
 
-void PrintAnalysisResults(FILE* output,
-                          const std::string& label,
-                          ResultsContainer* results) {
-  SetPerfResultsOutput(output);
-
-  if (results->frames.size() > 0u) {
-    PrintResult("Unique_frames_count", "", label, results->frames.size(),
-                "score", false);
-
-    std::vector<double> psnr_values;
-    std::vector<double> ssim_values;
-    for (const auto& frame : results->frames) {
-      psnr_values.push_back(frame.psnr_value);
-      ssim_values.push_back(frame.ssim_value);
+    SamplesStatsCounter psnr_values;
+    SamplesStatsCounter ssim_values;
+    for (const auto& frame : results.frames) {
+      psnr_values.AddSample(frame.psnr_value);
+      ssim_values.AddSample(frame.ssim_value);
     }
 
-    PrintResultList("PSNR", "", label, psnr_values, "dB", false);
-    PrintResultList("SSIM", "", label, ssim_values, "score", false);
+    logger.LogMetric("PSNR_dB", label, psnr_values, Unit::kUnitless,
+                     ImprovementDirection::kNeitherIsBetter);
+    logger.LogMetric("SSIM", label, ssim_values, Unit::kUnitless,
+                     ImprovementDirection::kNeitherIsBetter);
   }
 
-  PrintResult("Max_repeated", "", label, results->max_repeated_frames, "",
-              false);
-  PrintResult("Max_skipped", "", label, results->max_skipped_frames, "", false);
-  PrintResult("Total_skipped", "", label, results->total_skipped_frames, "",
-              false);
-  PrintResult("Decode_errors_reference", "", label, results->decode_errors_ref,
-              "", false);
-  PrintResult("Decode_errors_test", "", label, results->decode_errors_test, "",
-              false);
+  logger.LogSingleValueMetric("Max_repeated", label,
+                              results.max_repeated_frames, Unit::kUnitless,
+                              ImprovementDirection::kNeitherIsBetter);
+  logger.LogSingleValueMetric("Max_skipped", label, results.max_skipped_frames,
+                              Unit::kUnitless,
+                              ImprovementDirection::kNeitherIsBetter);
+  logger.LogSingleValueMetric("Total_skipped", label,
+                              results.total_skipped_frames, Unit::kUnitless,
+                              ImprovementDirection::kNeitherIsBetter);
+  logger.LogSingleValueMetric("Decode_errors_reference", label,
+                              results.decode_errors_ref, Unit::kUnitless,
+                              ImprovementDirection::kNeitherIsBetter);
+  logger.LogSingleValueMetric("Decode_errors_test", label,
+                              results.decode_errors_test, Unit::kUnitless,
+                              ImprovementDirection::kNeitherIsBetter);
 }
 
 }  // namespace test

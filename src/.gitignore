@@ -25,6 +25,7 @@
 *_proto.xml
 *_proto_cpp.xml
 *~
+\#*#
 .*.sw?
 .cache
 .cipd
@@ -47,6 +48,7 @@
 /mojo
 /out
 /testing
+/third_party
 /tools
 /tools_webrtc/android/profiling/flamegraph
 /tools_webrtc/android/profiling/simpleperf
@@ -70,3 +72,4 @@
 /x86-generic_out/
 /xcodebuild
 /.vscode
+!webrtc/*

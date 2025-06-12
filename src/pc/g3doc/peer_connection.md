@@ -1,5 +1,5 @@
-<?% config.freshness.reviewed = '2021-05-07' %?>
-<?% config.freshness.owner = 'hta' %?>
+<!-- go/cmark -->
+<!--* freshness: {owner: 'hta' reviewed: '2021-05-07'} *-->
 
 # PeerConnection and friends
 
@@ -53,7 +53,7 @@ all here; please consult the .h files.
 
 PeerConnectionFactory owns an object called ConnectionContext, and a
 reference to this is passed to each PeerConnection. It is referenced
-via an rtc::scoped_refptr, which means that it is guaranteed to be
+via an webrtc::scoped_refptr, which means that it is guaranteed to be
 alive as long as either the factory or one of the PeerConnections
 is using it.
 

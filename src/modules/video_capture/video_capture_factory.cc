@@ -14,12 +14,25 @@
 
 namespace webrtc {
 
-rtc::scoped_refptr<VideoCaptureModule> VideoCaptureFactory::Create(
-    const char* deviceUniqueIdUTF8) {
+scoped_refptr<VideoCaptureModule> VideoCaptureFactory::Create(
+    [[maybe_unused]] const char* deviceUniqueIdUTF8) {
 #if defined(WEBRTC_ANDROID) || defined(WEBRTC_MAC)
   return nullptr;
 #else
   return videocapturemodule::VideoCaptureImpl::Create(deviceUniqueIdUTF8);
+#endif
+}
+
+scoped_refptr<VideoCaptureModule> VideoCaptureFactory::Create(
+    [[maybe_unused]] VideoCaptureOptions* options,
+    [[maybe_unused]] const char* deviceUniqueIdUTF8) {
+// This is only implemented on pure Linux and WEBRTC_LINUX is defined for
+// Android as well
+#if !defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
+  return nullptr;
+#else
+  return videocapturemodule::VideoCaptureImpl::Create(options,
+                                                      deviceUniqueIdUTF8);
 #endif
 }
 
@@ -28,6 +41,17 @@ VideoCaptureModule::DeviceInfo* VideoCaptureFactory::CreateDeviceInfo() {
   return nullptr;
 #else
   return videocapturemodule::VideoCaptureImpl::CreateDeviceInfo();
+#endif
+}
+
+VideoCaptureModule::DeviceInfo* VideoCaptureFactory::CreateDeviceInfo(
+    [[maybe_unused]] VideoCaptureOptions* options) {
+// This is only implemented on pure Linux and WEBRTC_LINUX is defined for
+// Android as well
+#if !defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
+  return nullptr;
+#else
+  return videocapturemodule::VideoCaptureImpl::CreateDeviceInfo(options);
 #endif
 }
 

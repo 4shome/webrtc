@@ -17,9 +17,9 @@
 #include <cmath>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "api/audio/echo_canceller3_config.h"
 #include "modules/audio_processing/aec3/aec3_common.h"
@@ -35,15 +35,9 @@
 #include "modules/audio_processing/logging/apm_data_dumper.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
-#include "system_wrappers/include/field_trial.h"
 
 namespace webrtc {
 namespace {
-
-bool UpdateCaptureCallCounterOnSkippedBlocks() {
-  return !field_trial::IsEnabled(
-      "WebRTC-Aec3RenderBufferCallCounterUpdateKillSwitch");
-}
 
 class RenderDelayBufferImpl final : public RenderDelayBuffer {
  public:
@@ -78,15 +72,14 @@ class RenderDelayBufferImpl final : public RenderDelayBuffer {
   std::unique_ptr<ApmDataDumper> data_dumper_;
   const Aec3Optimization optimization_;
   const EchoCanceller3Config config_;
-  const bool update_capture_call_counter_on_skipped_blocks_;
   const float render_linear_amplitude_gain_;
-  const rtc::LoggingSeverity delay_log_level_;
+  const LoggingSeverity delay_log_level_;
   size_t down_sampling_factor_;
   const int sub_block_size_;
   BlockBuffer blocks_;
   SpectrumBuffer spectra_;
   FftBuffer ffts_;
-  absl::optional<size_t> delay_;
+  std::optional<size_t> delay_;
   RenderBuffer echo_remover_buffer_;
   DownsampledRenderBuffer low_rate_;
   AlignmentMixer render_mixer_;
@@ -101,7 +94,7 @@ class RenderDelayBufferImpl final : public RenderDelayBuffer {
   int64_t render_call_counter_ = 0;
   bool render_activity_ = false;
   size_t render_activity_counter_ = 0;
-  absl::optional<int> external_audio_buffer_delay_;
+  std::optional<int> external_audio_buffer_delay_;
   bool external_audio_buffer_delay_verified_after_reset_ = false;
   size_t min_latency_blocks_ = 0;
   size_t excess_render_detection_counter_ = 0;
@@ -110,7 +103,7 @@ class RenderDelayBufferImpl final : public RenderDelayBuffer {
   int ComputeDelay() const;
   void ApplyTotalDelay(int delay);
   void InsertBlock(const Block& block, int previous_write);
-  bool DetectActiveRender(rtc::ArrayView<const float> x) const;
+  bool DetectActiveRender(ArrayView<const float> x) const;
   bool DetectExcessRenderBlocks();
   void IncrementWriteIndices();
   void IncrementLowRateReadIndices();
@@ -127,13 +120,10 @@ RenderDelayBufferImpl::RenderDelayBufferImpl(const EchoCanceller3Config& config,
     : data_dumper_(new ApmDataDumper(instance_count_.fetch_add(1) + 1)),
       optimization_(DetectOptimization()),
       config_(config),
-      update_capture_call_counter_on_skipped_blocks_(
-          UpdateCaptureCallCounterOnSkippedBlocks()),
       render_linear_amplitude_gain_(
           std::pow(10.0f, config_.render_levels.render_power_gain_db / 20.f)),
-      delay_log_level_(config_.delay.log_warning_on_delay_changes
-                           ? rtc::LS_WARNING
-                           : rtc::LS_VERBOSE),
+      delay_log_level_(config_.delay.log_warning_on_delay_changes ? LS_WARNING
+                                                                  : LS_VERBOSE),
       down_sampling_factor_(config.delay.down_sampling_factor),
       sub_block_size_(static_cast<int>(down_sampling_factor_ > 0
                                            ? kBlockSize / down_sampling_factor_
@@ -201,7 +191,7 @@ void RenderDelayBufferImpl::Reset() {
     ApplyTotalDelay(config_.delay.default_delay);
 
     // Unset the delays which are set by AlignFromDelay.
-    delay_ = absl::nullopt;
+    delay_ = std::nullopt;
   }
 }
 
@@ -251,9 +241,7 @@ RenderDelayBuffer::BufferingEvent RenderDelayBufferImpl::Insert(
 }
 
 void RenderDelayBufferImpl::HandleSkippedCaptureProcessing() {
-  if (update_capture_call_counter_on_skipped_blocks_) {
-    ++capture_call_counter_;
-  }
+  ++capture_call_counter_;
 }
 
 // Prepares the render buffers for processing another capture block.
@@ -412,8 +400,7 @@ void RenderDelayBufferImpl::InsertBlock(const Block& block,
   if (render_linear_amplitude_gain_ != 1.f) {
     for (size_t band = 0; band < num_bands; ++band) {
       for (size_t ch = 0; ch < num_render_channels; ++ch) {
-        rtc::ArrayView<float, kBlockSize> b_view =
-            b.buffer[b.write].View(band, ch);
+        ArrayView<float, kBlockSize> b_view = b.buffer[b.write].View(band, ch);
         for (float& sample : b_view) {
           sample *= render_linear_amplitude_gain_;
         }
@@ -436,8 +423,7 @@ void RenderDelayBufferImpl::InsertBlock(const Block& block,
   }
 }
 
-bool RenderDelayBufferImpl::DetectActiveRender(
-    rtc::ArrayView<const float> x) const {
+bool RenderDelayBufferImpl::DetectActiveRender(ArrayView<const float> x) const {
   const float x_energy = std::inner_product(x.begin(), x.end(), x.begin(), 0.f);
   return x_energy > (config_.render_levels.active_render_limit *
                      config_.render_levels.active_render_limit) *

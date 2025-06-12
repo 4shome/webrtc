@@ -11,7 +11,7 @@
 #ifndef PC_CHANNEL_INTERFACE_H_
 #define PC_CHANNEL_INTERFACE_H_
 
-#include <memory>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -19,17 +19,19 @@
 #include "api/jsep.h"
 #include "api/media_types.h"
 #include "media/base/media_channel.h"
+#include "media/base/media_config.h"
+#include "media/base/stream_params.h"
 #include "pc/rtp_transport_internal.h"
+#include "pc/session_description.h"
 
 namespace webrtc {
 class Call;
 class VideoBitrateAllocatorFactory;
+class VideoChannel;
+class VoiceChannel;
 }  // namespace webrtc
 
-namespace cricket {
-
-class MediaContentDescription;
-struct MediaConfig;
+namespace webrtc {
 
 // A Channel is a construct that groups media streams of the same type
 // (audio or video), both outgoing and incoming.
@@ -45,13 +47,21 @@ struct MediaConfig;
 class ChannelInterface {
  public:
   virtual ~ChannelInterface() = default;
-  virtual cricket::MediaType media_type() const = 0;
+  virtual MediaType media_type() const = 0;
 
-  virtual MediaChannel* media_channel() const = 0;
+  virtual VideoChannel* AsVideoChannel() = 0;
+  virtual VoiceChannel* AsVoiceChannel() = 0;
+
+  virtual MediaSendChannelInterface* media_send_channel() = 0;
   // Typecasts of media_channel(). Will cause an exception if the
   // channel is of the wrong type.
-  virtual VideoMediaChannel* video_media_channel() const = 0;
-  virtual VoiceMediaChannel* voice_media_channel() const = 0;
+  virtual VideoMediaSendChannelInterface* video_media_send_channel() = 0;
+  virtual VoiceMediaSendChannelInterface* voice_media_send_channel() = 0;
+  virtual MediaReceiveChannelInterface* media_receive_channel() = 0;
+  // Typecasts of media_channel(). Will cause an exception if the
+  // channel is of the wrong type.
+  virtual VideoMediaReceiveChannelInterface* video_media_receive_channel() = 0;
+  virtual VoiceMediaReceiveChannelInterface* voice_media_receive_channel() = 0;
 
   // Returns a string view for the transport name. Fetching the transport name
   // must be done on the network thread only and note that the lifetime of
@@ -68,13 +78,14 @@ class ChannelInterface {
   // Used for latency measurements.
   virtual void SetFirstPacketReceivedCallback(
       std::function<void()> callback) = 0;
+  virtual void SetFirstPacketSentCallback(std::function<void()> callback) = 0;
 
   // Channel control
   virtual bool SetLocalContent(const MediaContentDescription* content,
-                               webrtc::SdpType type,
+                               SdpType type,
                                std::string& error_desc) = 0;
   virtual bool SetRemoteContent(const MediaContentDescription* content,
-                                webrtc::SdpType type,
+                                SdpType type,
                                 std::string& error_desc) = 0;
   virtual bool SetPayloadTypeDemuxingEnabled(bool enabled) = 0;
 
@@ -87,9 +98,17 @@ class ChannelInterface {
   //   * An RtpTransport without encryption.
   //   * An SrtpTransport for SDES.
   //   * A DtlsSrtpTransport for DTLS-SRTP.
-  virtual bool SetRtpTransport(webrtc::RtpTransportInternal* rtp_transport) = 0;
+  virtual bool SetRtpTransport(RtpTransportInternal* rtp_transport) = 0;
 };
 
+}  //  namespace webrtc
+
+// Re-export symbols from the webrtc namespace for backwards compatibility.
+// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
+#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
+namespace cricket {
+using ::webrtc::ChannelInterface;
 }  // namespace cricket
+#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // PC_CHANNEL_INTERFACE_H_

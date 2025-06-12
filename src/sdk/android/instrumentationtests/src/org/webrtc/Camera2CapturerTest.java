@@ -18,8 +18,8 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.os.Handler;
 import android.os.Looper;
-import android.support.test.InstrumentationRegistry;
 import androidx.annotation.Nullable;
+import androidx.test.InstrumentationRegistry;
 import androidx.test.filters.LargeTest;
 import androidx.test.filters.MediumTest;
 import androidx.test.filters.SmallTest;
@@ -42,6 +42,7 @@ public class Camera2CapturerTest {
     @Nullable CameraDevice cameraDevice; // Guarded by cameraDeviceLock
     boolean openSucceeded; // Guarded by cameraDeviceLock
 
+    @SuppressWarnings("ClassCanBeStatic")
     private class LooperThread extends Thread {
       final CountDownLatch startedSignal = new CountDownLatch(1);
       private Handler handler;

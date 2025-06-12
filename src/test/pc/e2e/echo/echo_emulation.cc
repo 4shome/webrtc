@@ -12,6 +12,9 @@
 #include <limits>
 #include <utility>
 
+#include "api/test/pclf/media_configuration.h"
+#include "rtc_base/logging.h"
+
 namespace webrtc {
 namespace webrtc_pc_e2e {
 namespace {
@@ -22,7 +25,7 @@ constexpr int kSingleBufferDurationMs = 10;
 
 EchoEmulatingCapturer::EchoEmulatingCapturer(
     std::unique_ptr<TestAudioDeviceModule::Capturer> capturer,
-    PeerConnectionE2EQualityTestFixture::EchoEmulationConfig config)
+    EchoEmulationConfig config)
     : delegate_(std::move(capturer)),
       config_(config),
       renderer_queue_(2 * config_.echo_delay.ms() / kSingleBufferDurationMs),
@@ -36,8 +39,7 @@ EchoEmulatingCapturer::EchoEmulatingCapturer(
   capturer_thread_.Detach();
 }
 
-void EchoEmulatingCapturer::OnAudioRendered(
-    rtc::ArrayView<const int16_t> data) {
+void EchoEmulatingCapturer::OnAudioRendered(ArrayView<const int16_t> data) {
   RTC_DCHECK_RUN_ON(&renderer_thread_);
   if (!recording_started_) {
     // Because rendering can start before capturing in the beginning we can have
@@ -61,7 +63,7 @@ void EchoEmulatingCapturer::OnAudioRendered(
   }
 }
 
-bool EchoEmulatingCapturer::Capture(rtc::BufferT<int16_t>* buffer) {
+bool EchoEmulatingCapturer::Capture(BufferT<int16_t>* buffer) {
   RTC_DCHECK_RUN_ON(&capturer_thread_);
   bool result = delegate_->Capture(buffer);
   // Now we have to reduce input signal to avoid saturation when mixing in the
@@ -104,7 +106,7 @@ EchoEmulatingRenderer::EchoEmulatingRenderer(
   RTC_DCHECK(echo_emulating_capturer_);
 }
 
-bool EchoEmulatingRenderer::Render(rtc::ArrayView<const int16_t> data) {
+bool EchoEmulatingRenderer::Render(ArrayView<const int16_t> data) {
   if (data.size() > 0) {
     echo_emulating_capturer_->OnAudioRendered(data);
   }

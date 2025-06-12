@@ -18,8 +18,8 @@
 #include <utility>
 
 #include "absl/strings/string_view.h"
-#include "modules/include/module_common_types_public.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/numerics/sequence_number_unwrapper.h"
 
 namespace webrtc {
 namespace test {
@@ -86,7 +86,7 @@ void PrintDelays(const NetEqDelayAnalyzer::Delays& delays,
 
 void NetEqDelayAnalyzer::AfterInsertPacket(
     const test::NetEqInput::PacketData& packet,
-    NetEq* neteq) {
+    NetEq* /* neteq */) {
   data_.insert(
       std::make_pair(packet.header.timestamp, TimingData(packet.time_ms)));
   ssrcs_.insert(packet.header.ssrc);
@@ -140,13 +140,12 @@ void NetEqDelayAnalyzer::CreateGraphs(Delays* arrival_delay_ms,
 
   std::vector<double> rtp_timestamps_ms;
   double offset = std::numeric_limits<double>::max();
-  TimestampUnwrapper unwrapper;
+  RtpTimestampUnwrapper unwrapper;
   // This loop traverses data_ and populates rtp_timestamps_ms as well as
   // calculates the base offset.
   for (auto& d : data_) {
-    rtp_timestamps_ms.push_back(
-        static_cast<double>(unwrapper.Unwrap(d.first)) /
-        rtc::CheckedDivExact(last_sample_rate_hz_, 1000));
+    rtp_timestamps_ms.push_back(static_cast<double>(unwrapper.Unwrap(d.first)) /
+                                CheckedDivExact(last_sample_rate_hz_, 1000));
     offset =
         std::min(offset, d.second.arrival_time_ms - rtp_timestamps_ms.back());
   }
@@ -284,6 +283,9 @@ void NetEqDelayAnalyzer::CreatePythonScript(
   output << "  plt.ylabel('relative delay [ms]')" << std::endl;
   if (!ssrcs_.empty()) {
     auto ssrc_it = ssrcs_.cbegin();
+    output << "  plt.legend((\"arrival delay\", \"target delay\", \"playout "
+              "delay\"))"
+           << std::endl;
     output << "  plt.title('SSRC: 0x" << std::hex
            << static_cast<int64_t>(*ssrc_it++);
     while (ssrc_it != ssrcs_.end()) {

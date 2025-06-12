@@ -14,10 +14,10 @@
 #include <stdint.h>
 
 #include <list>
+#include <optional>
 
-#include "absl/types/optional.h"
-#include "modules/include/module_common_types_public.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/numerics/sequence_number_unwrapper.h"
 #include "system_wrappers/include/ntp_time.h"
 
 namespace webrtc {
@@ -64,8 +64,8 @@ class RtpToNtpEstimator {
 
   int consecutive_invalid_samples_ = 0;
   std::list<RtcpMeasurement> measurements_;
-  absl::optional<Parameters> params_;
-  mutable TimestampUnwrapper unwrapper_;
+  std::optional<Parameters> params_;
+  mutable RtpTimestampUnwrapper unwrapper_;
 };
 }  // namespace webrtc
 

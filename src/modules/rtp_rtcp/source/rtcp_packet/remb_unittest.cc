@@ -10,6 +10,13 @@
 
 #include "modules/rtp_rtcp/source/rtcp_packet/remb.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <iterator>
+#include <vector>
+
+#include "rtc_base/buffer.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/rtcp_packet_parser.h"
@@ -39,7 +46,7 @@ TEST(RtcpPacketRembTest, Create) {
       std::vector<uint32_t>(std::begin(kRemoteSsrcs), std::end(kRemoteSsrcs)));
   remb.SetBitrateBps(kBitrateBps);
 
-  rtc::Buffer packet = remb.Build();
+  Buffer packet = remb.Build();
 
   EXPECT_THAT(make_tuple(packet.data(), packet.size()),
               ElementsAreArray(kPacket));
@@ -59,7 +66,7 @@ TEST(RtcpPacketRembTest, CreateAndParseWithoutSsrcs) {
   Remb remb;
   remb.SetSenderSsrc(kSenderSsrc);
   remb.SetBitrateBps(kBitrateBps);
-  rtc::Buffer packet = remb.Build();
+  Buffer packet = remb.Build();
 
   Remb parsed;
   EXPECT_TRUE(test::ParseSinglePacket(packet, &parsed));
@@ -71,7 +78,7 @@ TEST(RtcpPacketRembTest, CreateAndParseWithoutSsrcs) {
 TEST(RtcpPacketRembTest, CreateAndParse64bitBitrate) {
   Remb remb;
   remb.SetBitrateBps(kBitrateBps64bit);
-  rtc::Buffer packet = remb.Build();
+  Buffer packet = remb.Build();
 
   Remb parsed;
   EXPECT_TRUE(test::ParseSinglePacket(packet, &parsed));
@@ -101,9 +108,22 @@ TEST(RtcpPacketRembTest, ParseFailsWhenUniqueIdentifierIsNotRemb) {
 TEST(RtcpPacketRembTest, ParseFailsWhenBitrateDoNotFitIn64bits) {
   uint8_t packet[kPacketLength];
   memcpy(packet, kPacket, kPacketLength);
-  packet[17] |= 0xfc;  // Set exponenta component to maximum of 63.
+  packet[17] |= 0xfc;  // Set exponent component to maximum of 63.
   packet[19] |= 0x02;  // Ensure mantissa is at least 2.
 
+  Remb remb;
+  EXPECT_FALSE(test::ParseSinglePacket(packet, &remb));
+}
+
+TEST(RtcpPacketRembTest, ParseFailsWhenBitrateDoNotFitIn63bits) {
+  uint8_t packet[kPacketLength];
+  memcpy(packet, kPacket, kPacketLength);
+  packet[17] = 56 << 2;  // Set exponent component to 56.
+  packet[18] = 0;        // Set mantissa to 200 > 128
+  packet[19] = 200;
+
+  // Result value 200 * 2^56 can't be represented with int64_t and thus should
+  // be rejected.
   Remb remb;
   EXPECT_FALSE(test::ParseSinglePacket(packet, &remb));
 }

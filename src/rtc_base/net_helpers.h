@@ -12,7 +12,7 @@
 #define RTC_BASE_NET_HELPERS_H_
 
 #if defined(WEBRTC_POSIX)
-#include <sys/socket.h>
+#include <sys/socket.h>  // IWYU pragma: export
 #elif WEBRTC_WIN
 #include <winsock2.h>  // NOLINT
 
@@ -21,16 +21,22 @@
 
 #include "absl/strings/string_view.h"
 
-namespace rtc {
+namespace webrtc {
 
 // rtc namespaced wrappers for inet_ntop and inet_pton so we can avoid
 // the windows-native versions of these.
 const char* inet_ntop(int af, const void* src, char* dst, socklen_t size);
 int inet_pton(int af, absl::string_view src, void* dst);
 
-bool HasIPv4Enabled();
-bool HasIPv6Enabled();
+}  //  namespace webrtc
 
+// Re-export symbols from the webrtc namespace for backwards compatibility.
+// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
+#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
+namespace rtc {
+using ::webrtc::inet_ntop;
+using ::webrtc::inet_pton;
 }  // namespace rtc
+#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // RTC_BASE_NET_HELPERS_H_

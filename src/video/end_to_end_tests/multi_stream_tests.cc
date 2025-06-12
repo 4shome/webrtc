@@ -16,20 +16,20 @@
 
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
-#include "api/video_codecs/video_encoder_config.h"
 #include "call/rtp_config.h"
 #include "call/video_receive_stream.h"
 #include "call/video_send_stream.h"
 #include "rtc_base/event.h"
 #include "test/frame_generator_capturer.h"
 #include "test/gtest.h"
+#include "video/config/video_encoder_config.h"
 #include "video/end_to_end_tests/multi_stream_tester.h"
 
 namespace webrtc {
 // Each renderer verifies that it receives the expected resolution, and as soon
 // as every renderer has received a frame, the test finishes.
 TEST(MultiStreamEndToEndTest, SendsAndReceivesMultipleStreams) {
-  class VideoOutputObserver : public rtc::VideoSinkInterface<VideoFrame> {
+  class VideoOutputObserver : public VideoSinkInterface<VideoFrame> {
    public:
     VideoOutputObserver(const MultiStreamTester::CodecSettings& settings,
                         uint32_t ssrc,
@@ -51,7 +51,7 @@ TEST(MultiStreamEndToEndTest, SendsAndReceivesMultipleStreams) {
     const MultiStreamTester::CodecSettings& settings_;
     const uint32_t ssrc_;
     test::FrameGeneratorCapturer** const frame_generator_;
-    rtc::Event done_;
+    Event done_;
   };
 
   class Tester : public MultiStreamTester {

@@ -12,8 +12,8 @@
 
 #include <vector>
 
-#include "api/video/video_stream_encoder_interface.h"
 #include "test/gmock.h"
+#include "video/video_stream_encoder_interface.h"
 
 namespace webrtc {
 
@@ -21,20 +21,23 @@ class MockVideoStreamEncoder : public VideoStreamEncoderInterface {
  public:
   MOCK_METHOD(void,
               AddAdaptationResource,
-              (rtc::scoped_refptr<Resource>),
+              (webrtc::scoped_refptr<Resource>),
               (override));
-  MOCK_METHOD(std::vector<rtc::scoped_refptr<Resource>>,
+  MOCK_METHOD(std::vector<scoped_refptr<Resource>>,
               GetAdaptationResources,
               (),
               (override));
   MOCK_METHOD(void,
               SetSource,
-              (rtc::VideoSourceInterface<VideoFrame>*,
+              (webrtc::VideoSourceInterface<VideoFrame>*,
                const DegradationPreference&),
               (override));
   MOCK_METHOD(void, SetSink, (EncoderSink*, bool), (override));
   MOCK_METHOD(void, SetStartBitrate, (int), (override));
-  MOCK_METHOD(void, SendKeyFrame, (), (override));
+  MOCK_METHOD(void,
+              SendKeyFrame,
+              (const std::vector<VideoFrameType>&),
+              (override));
   MOCK_METHOD(void,
               OnLossNotification,
               (const VideoEncoder::LossNotification&),
@@ -52,10 +55,18 @@ class MockVideoStreamEncoder : public VideoStreamEncoderInterface {
   MOCK_METHOD(void,
               MockedConfigureEncoder,
               (const VideoEncoderConfig&, size_t));
+  MOCK_METHOD(void,
+              MockedConfigureEncoder,
+              (const VideoEncoderConfig&, size_t, SetParametersCallback));
   // gtest generates implicit copy which is not allowed on VideoEncoderConfig,
   // so we can't mock ConfigureEncoder directly.
   void ConfigureEncoder(VideoEncoderConfig config,
                         size_t max_data_payload_length) {
+    MockedConfigureEncoder(config, max_data_payload_length);
+  }
+  void ConfigureEncoder(VideoEncoderConfig config,
+                        size_t max_data_payload_length,
+                        SetParametersCallback) {
     MockedConfigureEncoder(config, max_data_payload_length);
   }
 };

@@ -26,7 +26,7 @@ namespace webrtc {
 namespace {
 
 std::string ProduceDebugText(size_t delay, size_t down_sampling_factor) {
-  rtc::StringBuilder ss;
+  StringBuilder ss;
   ss << "Delay: " << delay;
   ss << ", Down sampling factor: " << down_sampling_factor;
   return ss.Release();
@@ -70,7 +70,6 @@ TEST(EchoPathDelayEstimator, DelayEstimation) {
   constexpr size_t kNumCaptureChannels = 1;
   constexpr int kSampleRateHz = 48000;
   constexpr size_t kNumBands = NumBandsForRate(kSampleRateHz);
-
   Random random_generator(42U);
   Block render(kNumBands, kNumRenderChannels);
   Block capture(/*num_bands=*/1, kNumCaptureChannels);
@@ -89,7 +88,7 @@ TEST(EchoPathDelayEstimator, DelayEstimation) {
       EchoPathDelayEstimator estimator(&data_dumper, config,
                                        kNumCaptureChannels);
 
-      absl::optional<DelayEstimate> estimated_delay_samples;
+      std::optional<DelayEstimate> estimated_delay_samples;
       for (size_t k = 0; k < (500 + (delay_samples) / kBlockSize); ++k) {
         RandomizeSampleVector(&random_generator,
                               render.View(/*band=*/0, /*channel=*/0));
