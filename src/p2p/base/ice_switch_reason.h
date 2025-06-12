@@ -13,9 +13,12 @@
 
 #include <string>
 
-namespace cricket {
+#include "rtc_base/system/rtc_export.h"
+
+namespace webrtc {
 
 enum class IceSwitchReason {
+  UNKNOWN,
   REMOTE_CANDIDATE_GENERATION_CHANGE,
   NETWORK_PREFERENCE_CHANGE,
   NEW_CONNECTION_FROM_LOCAL_CANDIDATE,
@@ -29,10 +32,21 @@ enum class IceSwitchReason {
   // P2PTransportChannel to recheck a switch periodically without an event
   // taking place.
   ICE_CONTROLLER_RECHECK,
+  // The webrtc application requested a connection switch.
+  APPLICATION_REQUESTED,
 };
 
-std::string IceSwitchReasonToString(IceSwitchReason reason);
+RTC_EXPORT std::string IceSwitchReasonToString(IceSwitchReason reason);
 
+}  //  namespace webrtc
+
+// Re-export symbols from the webrtc namespace for backwards compatibility.
+// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
+#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
+namespace cricket {
+using ::webrtc::IceSwitchReason;
+using ::webrtc::IceSwitchReasonToString;
 }  // namespace cricket
+#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // P2P_BASE_ICE_SWITCH_REASON_H_

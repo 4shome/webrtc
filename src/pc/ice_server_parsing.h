@@ -27,10 +27,17 @@ namespace webrtc {
 //
 // Intended to be used to convert/validate the servers passed into a
 // PeerConnection through RTCConfiguration.
-RTC_EXPORT RTCErrorType
-ParseIceServers(const PeerConnectionInterface::IceServers& servers,
-                cricket::ServerAddresses* stun_servers,
-                std::vector<cricket::RelayServerConfig>* turn_servers);
+RTC_EXPORT RTCError
+ParseIceServersOrError(const PeerConnectionInterface::IceServers& servers,
+                       ServerAddresses* stun_servers,
+                       std::vector<RelayServerConfig>* turn_servers);
+
+// Calls `ParseIceServersOrError` to extract ice server information from the
+// `configuration` and then validates the extracted configuration.
+RTC_EXPORT RTCError ParseAndValidateIceServersFromConfiguration(
+    const PeerConnectionInterface::RTCConfiguration& configuration,
+    ServerAddresses& stun_servers,
+    std::vector<RelayServerConfig>& turn_servers);
 
 }  // namespace webrtc
 

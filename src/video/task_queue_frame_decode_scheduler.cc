@@ -49,22 +49,21 @@ void TaskQueueFrameDecodeScheduler::ScheduleFrame(
       SafeTask(task_safety_.flag(),
                [this, rtp, schedule, cb = std::move(cb)]() mutable {
                  RTC_DCHECK_RUN_ON(bookkeeping_queue_);
-                 // If the next frame rtp  has changed since this task was
-                 // this scheduled  release should be skipped.
+                 // If the next frame rtp has changed since this task was
+                 // this scheduled release should be skipped.
                  if (scheduled_rtp_ != rtp)
                    return;
-                 scheduled_rtp_ = absl::nullopt;
+                 scheduled_rtp_ = std::nullopt;
                  std::move(cb)(rtp, schedule.render_time);
                }),
       wait);
 }
 
 void TaskQueueFrameDecodeScheduler::CancelOutstanding() {
-  scheduled_rtp_ = absl::nullopt;
+  scheduled_rtp_ = std::nullopt;
 }
 
-absl::optional<uint32_t>
-TaskQueueFrameDecodeScheduler::ScheduledRtpTimestamp() {
+std::optional<uint32_t> TaskQueueFrameDecodeScheduler::ScheduledRtpTimestamp() {
   return scheduled_rtp_;
 }
 

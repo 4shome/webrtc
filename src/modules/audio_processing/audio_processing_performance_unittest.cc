@@ -16,8 +16,12 @@
 
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
+#include "api/audio/builtin_audio_processing_builder.h"
+#include "api/environment/environment_factory.h"
+#include "api/numerics/samples_stats_counter.h"
+#include "api/test/metrics/global_metrics_logger_and_exporter.h"
+#include "api/test/metrics/metric.h"
 #include "modules/audio_processing/audio_processing_impl.h"
-#include "modules/audio_processing/test/audio_processing_builder_for_testing.h"
 #include "modules/audio_processing/test/test_utils.h"
 #include "rtc_base/event.h"
 #include "rtc_base/numerics/safe_conversions.h"
@@ -25,13 +29,14 @@
 #include "rtc_base/random.h"
 #include "system_wrappers/include/clock.h"
 #include "test/gtest.h"
-#include "test/testsupport/perf_test.h"
 
 namespace webrtc {
-
 namespace {
 
-static const bool kPrintAllDurations = false;
+using ::webrtc::test::GetGlobalMetricsLogger;
+using ::webrtc::test::ImprovementDirection;
+using ::webrtc::test::Metric;
+using ::webrtc::test::Unit;
 
 class CallSimulator;
 
@@ -203,11 +208,11 @@ class TimedThreadApiProcessor {
         frame_data_(kMaxFrameSize),
         clock_(webrtc::Clock::GetRealTimeClock()),
         num_durations_to_store_(num_durations_to_store),
+        api_call_durations_(num_durations_to_store_ - kNumInitializationFrames),
+        samples_count_(0),
         input_level_(input_level),
         processor_type_(processor_type),
-        num_channels_(num_channels) {
-    api_call_durations_.reserve(num_durations_to_store_);
-  }
+        num_channels_(num_channels) {}
 
   // Implements the callback functionality for the threads.
   bool Process();
@@ -219,53 +224,23 @@ class TimedThreadApiProcessor {
     const std::string sample_rate_name =
         "_" + std::to_string(simulation_config_->sample_rate_hz) + "Hz";
 
-    webrtc::test::PrintResultMeanAndError(
-        "apm_timing", sample_rate_name, processor_name, GetDurationAverage(),
-        GetDurationStandardDeviation(), "us", false);
-
-    if (kPrintAllDurations) {
-      webrtc::test::PrintResultList("apm_call_durations", sample_rate_name,
-                                    processor_name, api_call_durations_, "us",
-                                    false);
-    }
+    GetGlobalMetricsLogger()->LogMetric(
+        "apm_timing" + sample_rate_name, processor_name, api_call_durations_,
+        Unit::kMilliseconds, ImprovementDirection::kNeitherIsBetter);
   }
 
   void AddDuration(int64_t duration) {
-    if (api_call_durations_.size() < num_durations_to_store_) {
-      api_call_durations_.push_back(duration);
+    if (samples_count_ >= kNumInitializationFrames &&
+        samples_count_ < num_durations_to_store_) {
+      api_call_durations_.AddSample(duration);
     }
+    samples_count_++;
   }
 
  private:
   static const int kMaxCallDifference = 10;
   static const int kMaxFrameSize = 480;
   static const int kNumInitializationFrames = 5;
-
-  int64_t GetDurationStandardDeviation() const {
-    double variance = 0;
-    const int64_t average_duration = GetDurationAverage();
-    for (size_t k = kNumInitializationFrames; k < api_call_durations_.size();
-         k++) {
-      int64_t tmp = api_call_durations_[k] - average_duration;
-      variance += static_cast<double>(tmp * tmp);
-    }
-    const int denominator = rtc::checked_cast<int>(api_call_durations_.size()) -
-                            kNumInitializationFrames;
-    return (denominator > 0
-                ? rtc::checked_cast<int64_t>(sqrt(variance / denominator))
-                : -1);
-  }
-
-  int64_t GetDurationAverage() const {
-    int64_t average_duration = 0;
-    for (size_t k = kNumInitializationFrames; k < api_call_durations_.size();
-         k++) {
-      average_duration += api_call_durations_[k];
-    }
-    const int denominator = rtc::checked_cast<int>(api_call_durations_.size()) -
-                            kNumInitializationFrames;
-    return (denominator > 0 ? average_duration / denominator : -1);
-  }
 
   int ProcessCapture() {
     // Set the stream delay.
@@ -382,7 +357,8 @@ class TimedThreadApiProcessor {
   AudioFrameData frame_data_;
   webrtc::Clock* clock_;
   const size_t num_durations_to_store_;
-  std::vector<double> api_call_durations_;
+  SamplesStatsCounter api_call_durations_;
+  size_t samples_count_ = 0;
   const float input_level_;
   bool first_process_call_ = true;
   const ProcessorType processor_type_;
@@ -473,31 +449,31 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
     int num_capture_channels = 1;
     switch (simulation_config_.simulation_settings) {
       case SettingsType::kDefaultApmMobile: {
-        apm_ = AudioProcessingBuilderForTesting().Create();
+        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
         ASSERT_TRUE(!!apm_);
         set_default_mobile_apm_runtime_settings(apm_.get());
         break;
       }
       case SettingsType::kDefaultApmDesktop: {
-        apm_ = AudioProcessingBuilderForTesting().Create();
+        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         break;
       }
       case SettingsType::kAllSubmodulesTurnedOff: {
-        apm_ = AudioProcessingBuilderForTesting().Create();
+        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
         ASSERT_TRUE(!!apm_);
         turn_off_default_apm_runtime_settings(apm_.get());
         break;
       }
       case SettingsType::kDefaultApmDesktopWithoutDelayAgnostic: {
-        apm_ = AudioProcessingBuilderForTesting().Create();
+        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         break;
       }
       case SettingsType::kDefaultApmDesktopWithoutExtendedFilter: {
-        apm_ = AudioProcessingBuilderForTesting().Create();
+        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         break;
@@ -517,14 +493,14 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
   // Start the threads used in the test.
   void StartThreads() {
     const auto attributes =
-        rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime);
-    render_thread_ = rtc::PlatformThread::SpawnJoinable(
+        ThreadAttributes().SetPriority(ThreadPriority::kRealtime);
+    render_thread_ = PlatformThread::SpawnJoinable(
         [this] {
           while (render_thread_state_->Process()) {
           }
         },
         "render", attributes);
-    capture_thread_ = rtc::PlatformThread::SpawnJoinable(
+    capture_thread_ = PlatformThread::SpawnJoinable(
         [this] {
           while (capture_thread_state_->Process()) {
           }
@@ -533,19 +509,19 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
   }
 
   // Event handler for the test.
-  rtc::Event test_complete_;
+  Event test_complete_;
 
   // Thread related variables.
   Random rand_gen_;
 
-  rtc::scoped_refptr<AudioProcessing> apm_;
+  scoped_refptr<AudioProcessing> apm_;
   const SimulationConfig simulation_config_;
   FrameCounters frame_counters_;
   LockedFlag capture_call_checker_;
   std::unique_ptr<TimedThreadApiProcessor> render_thread_state_;
   std::unique_ptr<TimedThreadApiProcessor> capture_thread_state_;
-  rtc::PlatformThread render_thread_;
-  rtc::PlatformThread capture_thread_;
+  PlatformThread render_thread_;
+  PlatformThread capture_thread_;
 };
 
 // Implements the callback functionality for the threads.
@@ -579,8 +555,7 @@ const float CallSimulator::kRenderInputFloatLevel = 0.5f;
 const float CallSimulator::kCaptureInputFloatLevel = 0.03125f;
 }  // anonymous namespace
 
-// TODO(peah): Reactivate once issue 7712 has been resolved.
-TEST_P(CallSimulator, DISABLED_ApiCallDurationTest) {
+TEST_P(CallSimulator, ApiCallDurationTest) {
   // Run test and verify that it did not time out.
   EXPECT_TRUE(Run());
 }

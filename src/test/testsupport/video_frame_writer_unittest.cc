@@ -18,6 +18,7 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "api/test/video/video_frame_writer.h"
 #include "api/video/i420_buffer.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
@@ -37,8 +38,8 @@ const size_t kFileHeaderSize = 29;
 // Size of header: "FRAME\n"
 const size_t kFrameHeaderSize = 6;
 
-rtc::scoped_refptr<I420Buffer> CreateI420Buffer(int width, int height) {
-  rtc::scoped_refptr<I420Buffer> buffer(I420Buffer::Create(width, height));
+scoped_refptr<I420Buffer> CreateI420Buffer(int width, int height) {
+  scoped_refptr<I420Buffer> buffer(I420Buffer::Create(width, height));
   for (int x = 0; x < width; x++) {
     for (int y = 0; y < height; y++) {
       buffer->MutableDataY()[x + y * width] = 128;
@@ -55,9 +56,8 @@ rtc::scoped_refptr<I420Buffer> CreateI420Buffer(int width, int height) {
   return buffer;
 }
 
-void AssertI420BuffersEq(
-    rtc::scoped_refptr<webrtc::I420BufferInterface> actual,
-    rtc::scoped_refptr<webrtc::I420BufferInterface> expected) {
+void AssertI420BuffersEq(scoped_refptr<webrtc::I420BufferInterface> actual,
+                         scoped_refptr<webrtc::I420BufferInterface> expected) {
   ASSERT_TRUE(actual);
 
   ASSERT_EQ(actual->width(), expected->width());
@@ -125,7 +125,7 @@ class YuvVideoFrameWriterTest : public VideoFrameWriterTest {
 TEST_F(Y4mVideoFrameWriterTest, InitSuccess) {}
 
 TEST_F(Y4mVideoFrameWriterTest, WriteFrame) {
-  rtc::scoped_refptr<I420Buffer> expected_buffer =
+  scoped_refptr<I420Buffer> expected_buffer =
       CreateI420Buffer(kFrameWidth, kFrameHeight);
 
   VideoFrame frame =
@@ -139,19 +139,16 @@ TEST_F(Y4mVideoFrameWriterTest, WriteFrame) {
             GetFileSize(temp_filename_));
 
   std::unique_ptr<FrameReader> frame_reader =
-      std::make_unique<Y4mFrameReaderImpl>(temp_filename_, kFrameWidth,
-                                           kFrameHeight);
-  ASSERT_TRUE(frame_reader->Init());
-  AssertI420BuffersEq(frame_reader->ReadFrame(), expected_buffer);
-  AssertI420BuffersEq(frame_reader->ReadFrame(), expected_buffer);
-  EXPECT_FALSE(frame_reader->ReadFrame());  // End of file.
-  frame_reader->Close();
+      CreateY4mFrameReader(temp_filename_);
+  AssertI420BuffersEq(frame_reader->PullFrame(), expected_buffer);
+  AssertI420BuffersEq(frame_reader->PullFrame(), expected_buffer);
+  EXPECT_FALSE(frame_reader->PullFrame());  // End of file.
 }
 
 TEST_F(YuvVideoFrameWriterTest, InitSuccess) {}
 
 TEST_F(YuvVideoFrameWriterTest, WriteFrame) {
-  rtc::scoped_refptr<I420Buffer> expected_buffer =
+  scoped_refptr<I420Buffer> expected_buffer =
       CreateI420Buffer(kFrameWidth, kFrameHeight);
 
   VideoFrame frame =
@@ -163,14 +160,12 @@ TEST_F(YuvVideoFrameWriterTest, WriteFrame) {
   frame_writer_->Close();
   EXPECT_EQ(2 * kFrameLength, GetFileSize(temp_filename_));
 
-  std::unique_ptr<FrameReader> frame_reader =
-      std::make_unique<YuvFrameReaderImpl>(temp_filename_, kFrameWidth,
-                                           kFrameHeight);
-  ASSERT_TRUE(frame_reader->Init());
-  AssertI420BuffersEq(frame_reader->ReadFrame(), expected_buffer);
-  AssertI420BuffersEq(frame_reader->ReadFrame(), expected_buffer);
-  EXPECT_FALSE(frame_reader->ReadFrame());  // End of file.
-  frame_reader->Close();
+  std::unique_ptr<FrameReader> frame_reader = CreateYuvFrameReader(
+      temp_filename_,
+      Resolution({.width = kFrameWidth, .height = kFrameHeight}));
+  AssertI420BuffersEq(frame_reader->PullFrame(), expected_buffer);
+  AssertI420BuffersEq(frame_reader->PullFrame(), expected_buffer);
+  EXPECT_FALSE(frame_reader->PullFrame());  // End of file.
 }
 
 }  // namespace test

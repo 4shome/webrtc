@@ -16,12 +16,16 @@
 #include <utility>
 #include <vector>
 
+#include "api/array_view.h"
+#include "api/audio/audio_device.h"
+#include "api/environment/environment.h"
 #include "api/rtc_event_log/rtc_event_log.h"
+#include "api/rtp_parameters.h"
 #include "api/test/time_controller.h"
 #include "api/units/data_rate.h"
 #include "call/call.h"
-#include "modules/audio_device/include/test_audio_device.h"
 #include "modules/congestion_controller/goog_cc/test/goog_cc_printer.h"
+#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "rtc_base/task_queue_for_test.h"
 #include "test/logging/log_writer.h"
 #include "test/network/network_emulation.h"
@@ -92,9 +96,9 @@ class LoggingNetworkControllerFactory
 };
 
 struct CallClientFakeAudio {
-  rtc::scoped_refptr<AudioProcessing> apm;
-  rtc::scoped_refptr<TestAudioDeviceModule> fake_audio_device;
-  rtc::scoped_refptr<AudioState> audio_state;
+  scoped_refptr<AudioProcessing> apm;
+  scoped_refptr<AudioDeviceModule> fake_audio_device;
+  scoped_refptr<AudioState> audio_state;
 };
 // CallClient represents a participant in a call scenario. It is created by the
 // Scenario class and is used as sender and receiver when setting up a media
@@ -120,6 +124,12 @@ class CallClient : public EmulatedNetworkReceiverInterface {
   DataRate padding_rate() const;
   void UpdateBitrateConstraints(const BitrateConstraints& constraints);
   void SetRemoteBitrate(DataRate bitrate);
+
+  void SetAudioReceiveRtpHeaderExtensions(ArrayView<RtpExtension> extensions);
+  void SetVideoReceiveRtpHeaderExtensions(ArrayView<RtpExtension> extensions);
+
+  // Sets the network adapter id used next time the network route changes.
+  void UpdateNetworkAdapterId(int adapter_id);
 
   void OnPacketReceived(EmulatedIpPacket packet) override;
   std::unique_ptr<RtcEventLogOutput> GetLogWriter(std::string name);
@@ -148,14 +158,15 @@ class CallClient : public EmulatedNetworkReceiverInterface {
   void UnBind();
 
   TimeController* const time_controller_;
-  Clock* clock_;
+  Environment env_;
   const std::unique_ptr<LogWriterFactoryInterface> log_writer_factory_;
-  std::unique_ptr<RtcEventLog> event_log_;
   LoggingNetworkControllerFactory network_controller_factory_;
   CallClientFakeAudio fake_audio_setup_;
   std::unique_ptr<Call> call_;
   std::unique_ptr<NetworkNodeTransport> transport_;
   std::vector<std::pair<EmulatedEndpoint*, uint16_t>> endpoints_;
+  RtpHeaderExtensionMap audio_extensions_;
+  RtpHeaderExtensionMap video_extensions_;
 
   int next_video_ssrc_index_ = 0;
   int next_video_local_ssrc_index_ = 0;
@@ -165,8 +176,6 @@ class CallClient : public EmulatedNetworkReceiverInterface {
   std::map<uint32_t, MediaType> ssrc_media_types_;
   // Defined last so it's destroyed first.
   TaskQueueForTest task_queue_;
-
-  const FieldTrialBasedConfig field_trials_;
 };
 
 class CallClientPair {

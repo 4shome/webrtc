@@ -13,6 +13,8 @@
 
 #include <stdint.h>
 
+#include <cstring>
+
 #if defined(WEBRTC_POSIX) && !defined(__native_client__)
 #include <arpa/inet.h>
 #endif
@@ -42,8 +44,8 @@
 #include <stdlib.h>
 #include <winsock2.h>
 #else
-#include <netinet/in.h>
-#endif  // defined(WEBRTC_WIN)
+#include <netinet/in.h>  // no-presubmit-check
+#endif                   // defined(WEBRTC_WIN)
 
 #if defined(WEBRTC_ARCH_LITTLE_ENDIAN)
 #define htobe16(v) htons(v)
@@ -94,7 +96,7 @@
 #error "Missing byte order functions for this arch."
 #endif  // defined(WEBRTC_MAC)
 
-namespace rtc {
+namespace webrtc {
 
 // Reading and writing of little and big-endian numbers from memory
 
@@ -107,51 +109,69 @@ inline uint8_t Get8(const void* memory, size_t offset) {
 }
 
 inline void SetBE16(void* memory, uint16_t v) {
-  *static_cast<uint16_t*>(memory) = htobe16(v);
+  uint16_t val = htobe16(v);
+  memcpy(memory, &val, sizeof(val));
 }
 
 inline void SetBE32(void* memory, uint32_t v) {
-  *static_cast<uint32_t*>(memory) = htobe32(v);
+  uint32_t val = htobe32(v);
+  memcpy(memory, &val, sizeof(val));
 }
 
 inline void SetBE64(void* memory, uint64_t v) {
-  *static_cast<uint64_t*>(memory) = htobe64(v);
+  uint64_t val = htobe64(v);
+  memcpy(memory, &val, sizeof(val));
 }
 
 inline uint16_t GetBE16(const void* memory) {
-  return be16toh(*static_cast<const uint16_t*>(memory));
+  uint16_t val;
+  memcpy(&val, memory, sizeof(val));
+  return be16toh(val);
 }
 
 inline uint32_t GetBE32(const void* memory) {
-  return be32toh(*static_cast<const uint32_t*>(memory));
+  uint32_t val;
+  memcpy(&val, memory, sizeof(val));
+  return be32toh(val);
 }
 
 inline uint64_t GetBE64(const void* memory) {
-  return be64toh(*static_cast<const uint64_t*>(memory));
+  uint64_t val;
+  memcpy(&val, memory, sizeof(val));
+  return be64toh(val);
 }
 
 inline void SetLE16(void* memory, uint16_t v) {
-  *static_cast<uint16_t*>(memory) = htole16(v);
+  uint16_t val = htole16(v);
+  memcpy(memory, &val, sizeof(val));
 }
 
 inline void SetLE32(void* memory, uint32_t v) {
-  *static_cast<uint32_t*>(memory) = htole32(v);
+  uint32_t val = htole32(v);
+  memcpy(memory, &val, sizeof(val));
 }
 
 inline void SetLE64(void* memory, uint64_t v) {
-  *static_cast<uint64_t*>(memory) = htole64(v);
+  uint64_t val = htole64(v);
+  memcpy(memory, &val, sizeof(val));
 }
 
 inline uint16_t GetLE16(const void* memory) {
-  return le16toh(*static_cast<const uint16_t*>(memory));
+  uint16_t val;
+  memcpy(&val, memory, sizeof(val));
+  return le16toh(val);
 }
 
 inline uint32_t GetLE32(const void* memory) {
-  return le32toh(*static_cast<const uint32_t*>(memory));
+  uint32_t val;
+  memcpy(&val, memory, sizeof(val));
+  return le32toh(val);
 }
 
 inline uint64_t GetLE64(const void* memory) {
-  return le64toh(*static_cast<const uint64_t*>(memory));
+  uint64_t val;
+  memcpy(&val, memory, sizeof(val));
+  return le64toh(val);
 }
 
 // Check if the current host is big endian.
@@ -187,6 +207,34 @@ inline uint64_t NetworkToHost64(uint64_t n) {
   return be64toh(n);
 }
 
+}  //  namespace webrtc
+
+// Re-export symbols from the webrtc namespace for backwards compatibility.
+// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
+#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
+namespace rtc {
+using ::webrtc::Get8;
+using ::webrtc::GetBE16;
+using ::webrtc::GetBE32;
+using ::webrtc::GetBE64;
+using ::webrtc::GetLE16;
+using ::webrtc::GetLE32;
+using ::webrtc::GetLE64;
+using ::webrtc::HostToNetwork16;
+using ::webrtc::HostToNetwork32;
+using ::webrtc::HostToNetwork64;
+using ::webrtc::IsHostBigEndian;
+using ::webrtc::NetworkToHost16;
+using ::webrtc::NetworkToHost32;
+using ::webrtc::NetworkToHost64;
+using ::webrtc::Set8;
+using ::webrtc::SetBE16;
+using ::webrtc::SetBE32;
+using ::webrtc::SetBE64;
+using ::webrtc::SetLE16;
+using ::webrtc::SetLE32;
+using ::webrtc::SetLE64;
 }  // namespace rtc
+#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // RTC_BASE_BYTE_ORDER_H_

@@ -11,15 +11,14 @@
 #include "modules/audio_processing/gain_control_impl.h"
 
 #include <cstdint>
+#include <optional>
 
-#include "absl/types/optional.h"
+#include "api/audio/audio_processing.h"
 #include "modules/audio_processing/agc/legacy/gain_control.h"
 #include "modules/audio_processing/audio_buffer.h"
-#include "modules/audio_processing/include/audio_processing.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
-#include "system_wrappers/include/field_trial.h"
 
 namespace webrtc {
 
@@ -39,12 +38,8 @@ int16_t MapSetting(GainControl::Mode mode) {
   return -1;
 }
 
-// Checks whether the legacy digital gain application should be used.
-bool UseLegacyDigitalGainApplier() {
-  return field_trial::IsEnabled("WebRTC-UseLegacyDigitalGainApplier");
-}
-
-// Floating point variant of WebRtcAgc_Process.
+// Applies the sub-frame `gains` to all the bands in `out` and clamps the output
+// in the signed 16 bit range.
 void ApplyDigitalGain(const int32_t gains[11],
                       size_t num_bands,
                       float* const* out) {
@@ -97,7 +92,6 @@ int GainControlImpl::instance_counter_ = 0;
 
 GainControlImpl::GainControlImpl()
     : data_dumper_(new ApmDataDumper(instance_counter_)),
-      use_legacy_gain_applier_(UseLegacyDigitalGainApplier()),
       mode_(kAdaptiveAnalog),
       minimum_capture_level_(0),
       maximum_capture_level_(255),
@@ -111,7 +105,7 @@ GainControlImpl::GainControlImpl()
 GainControlImpl::~GainControlImpl() = default;
 
 void GainControlImpl::ProcessRenderAudio(
-    rtc::ArrayView<const int16_t> packed_render_audio) {
+    ArrayView<const int16_t> packed_render_audio) {
   for (size_t ch = 0; ch < mono_agcs_.size(); ++ch) {
     WebRtcAgc_AddFarend(mono_agcs_[ch]->state, packed_render_audio.data(),
                         packed_render_audio.size());
@@ -124,8 +118,8 @@ void GainControlImpl::PackRenderAudioBuffer(
   RTC_DCHECK_GE(AudioBuffer::kMaxSplitFrameLength, audio.num_frames_per_band());
   std::array<int16_t, AudioBuffer::kMaxSplitFrameLength>
       mixed_16_kHz_render_data;
-  rtc::ArrayView<const int16_t> mixed_16_kHz_render(
-      mixed_16_kHz_render_data.data(), audio.num_frames_per_band());
+  ArrayView<const int16_t> mixed_16_kHz_render(mixed_16_kHz_render_data.data(),
+                                               audio.num_frames_per_band());
   if (audio.num_channels() == 1) {
     FloatS16ToS16(audio.split_bands_const(0)[kBand0To8kHz],
                   audio.num_frames_per_band(), mixed_16_kHz_render_data.data());
@@ -236,26 +230,9 @@ int GainControlImpl::ProcessCaptureAudio(AudioBuffer* audio,
     }
   }
 
-  if (use_legacy_gain_applier_) {
-    for (size_t ch = 0; ch < mono_agcs_.size(); ++ch) {
-      int16_t split_band_data[AudioBuffer::kMaxNumBands]
-                             [AudioBuffer::kMaxSplitFrameLength];
-      int16_t* split_bands[AudioBuffer::kMaxNumBands] = {
-          split_band_data[0], split_band_data[1], split_band_data[2]};
-      audio->ExportSplitChannelData(ch, split_bands);
-
-      int err_process = WebRtcAgc_Process(
-          mono_agcs_[ch]->state, mono_agcs_[index_to_apply]->gains, split_bands,
-          audio->num_bands(), split_bands);
-      RTC_DCHECK_EQ(err_process, 0);
-
-      audio->ImportSplitChannelData(ch, split_bands);
-    }
-  } else {
-    for (size_t ch = 0; ch < mono_agcs_.size(); ++ch) {
-      ApplyDigitalGain(mono_agcs_[index_to_apply]->gains, audio->num_bands(),
-                       audio->split_bands(ch));
-    }
+  for (size_t ch = 0; ch < mono_agcs_.size(); ++ch) {
+    ApplyDigitalGain(mono_agcs_[index_to_apply]->gains, audio->num_bands(),
+                     audio->split_bands(ch));
   }
 
   RTC_DCHECK_LT(0ul, *num_proc_channels_);
@@ -276,7 +253,6 @@ int GainControlImpl::ProcessCaptureAudio(AudioBuffer* audio,
 
   return AudioProcessing::kNoError;
 }
-
 
 // TODO(ajm): ensure this is called under kAdaptiveAnalog.
 int GainControlImpl::set_stream_analog_level(int level) {
@@ -309,7 +285,6 @@ int GainControlImpl::set_mode(Mode mode) {
   return AudioProcessing::kNoError;
 }
 
-
 int GainControlImpl::set_analog_level_limits(int minimum, int maximum) {
   if (minimum < 0 || maximum > 65535 || maximum < minimum) {
     return AudioProcessing::kBadParameterError;
@@ -323,7 +298,6 @@ int GainControlImpl::set_analog_level_limits(int minimum, int maximum) {
   Initialize(*num_proc_channels_, *sample_rate_hz_);
   return AudioProcessing::kNoError;
 }
-
 
 int GainControlImpl::set_target_level_dbfs(int level) {
   if (level > 31 || level < 0) {

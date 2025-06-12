@@ -23,6 +23,9 @@ struct RTC_EXPORT EchoCanceller3Config {
   // ranges. Returns true if and only of the config did not need to be changed.
   static bool Validate(EchoCanceller3Config* config);
 
+  // Produces a default configuration for multichannel.
+  static EchoCanceller3Config CreateDefaultMultichannelConfig();
+
   EchoCanceller3Config();
   EchoCanceller3Config(const EchoCanceller3Config& e);
   EchoCanceller3Config& operator=(const EchoCanceller3Config& other);
@@ -59,7 +62,7 @@ struct RTC_EXPORT EchoCanceller3Config {
     };
     AlignmentMixing render_alignment_mixing = {false, true, 10000.f, true};
     AlignmentMixing capture_alignment_mixing = {false, true, 10000.f, false};
-    bool detect_pre_echo = false;
+    bool detect_pre_echo = true;
   } delay;
 
   struct Filter {

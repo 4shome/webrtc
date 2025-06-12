@@ -13,7 +13,7 @@ package org.webrtc;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
-import android.support.test.InstrumentationRegistry;
+import androidx.test.InstrumentationRegistry;
 import androidx.test.filters.SmallTest;
 import org.junit.Before;
 import org.junit.Test;
@@ -68,10 +68,6 @@ public class VideoTrackTest {
   public void testAddingSameVideoSinkMultipleTimes() {
     class FrameCounter implements VideoSink {
       private int count;
-
-      public int getCount() {
-        return count;
-      }
 
       @Override
       public void onFrame(VideoFrame frame) {

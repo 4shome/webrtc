@@ -24,20 +24,45 @@
 
 #include "api/scoped_refptr.h"
 #include "media/base/video_common.h"
+#if defined(WEBRTC_USE_PIPEWIRE)
+#include "modules/video_capture/linux/video_capture_pipewire.h"
+#endif
 #include "modules/video_capture/linux/video_capture_v4l2.h"
 #include "modules/video_capture/video_capture.h"
+#include "modules/video_capture/video_capture_options.h"
 #include "rtc_base/logging.h"
 
 namespace webrtc {
 namespace videocapturemodule {
-rtc::scoped_refptr<VideoCaptureModule> VideoCaptureImpl::Create(
+scoped_refptr<VideoCaptureModule> VideoCaptureImpl::Create(
     const char* deviceUniqueId) {
-  auto implementation = rtc::make_ref_counted<VideoCaptureModuleV4L2>();
+  auto implementation = make_ref_counted<VideoCaptureModuleV4L2>();
 
   if (implementation->Init(deviceUniqueId) != 0)
     return nullptr;
 
   return implementation;
+}
+
+scoped_refptr<VideoCaptureModule> VideoCaptureImpl::Create(
+    VideoCaptureOptions* options,
+    const char* deviceUniqueId) {
+#if defined(WEBRTC_USE_PIPEWIRE)
+  if (options->allow_pipewire()) {
+    auto implementation =
+        webrtc::make_ref_counted<VideoCaptureModulePipeWire>(options);
+
+    if (implementation->Init(deviceUniqueId) == 0)
+      return implementation;
+  }
+#endif
+  if (options->allow_v4l2()) {
+    auto implementation = make_ref_counted<VideoCaptureModuleV4L2>();
+
+    if (implementation->Init(deviceUniqueId) == 0)
+      return implementation;
+  }
+  return nullptr;
 }
 }  // namespace videocapturemodule
 }  // namespace webrtc

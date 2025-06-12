@@ -11,6 +11,7 @@
 #define MODULES_RTP_RTCP_SOURCE_RTP_DEPENDENCY_DESCRIPTOR_EXTENSION_H_
 
 #include <bitset>
+#include <cstddef>
 #include <cstdint>
 
 #include "absl/strings/string_view.h"
@@ -22,18 +23,21 @@
 namespace webrtc {
 // Trait to read/write the dependency descriptor extension as described in
 // https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension
-// While the format is still in design, the code might change without backward
-// compatibility.
 class RtpDependencyDescriptorExtension {
  public:
-  static constexpr RTPExtensionType kId = kRtpExtensionGenericFrameDescriptor02;
+  static constexpr RTPExtensionType kId = kRtpExtensionDependencyDescriptor;
   static constexpr absl::string_view Uri() {
     return RtpExtension::kDependencyDescriptorUri;
   }
 
-  static bool Parse(rtc::ArrayView<const uint8_t> data,
+  static bool Parse(ArrayView<const uint8_t> data,
                     const FrameDependencyStructure* structure,
                     DependencyDescriptor* descriptor);
+
+  // Reads the mandatory part of the descriptor.
+  // Such read is stateless, i.e., doesn't require `FrameDependencyStructure`.
+  static bool Parse(ArrayView<const uint8_t> data,
+                    DependencyDescriptorMandatory* descriptor);
 
   static size_t ValueSize(const FrameDependencyStructure& structure,
                           const DependencyDescriptor& descriptor) {
@@ -42,12 +46,12 @@ class RtpDependencyDescriptorExtension {
   static size_t ValueSize(const FrameDependencyStructure& structure,
                           std::bitset<32> active_chains,
                           const DependencyDescriptor& descriptor);
-  static bool Write(rtc::ArrayView<uint8_t> data,
+  static bool Write(ArrayView<uint8_t> data,
                     const FrameDependencyStructure& structure,
                     const DependencyDescriptor& descriptor) {
     return Write(data, structure, kAllChainsAreActive, descriptor);
   }
-  static bool Write(rtc::ArrayView<uint8_t> data,
+  static bool Write(ArrayView<uint8_t> data,
                     const FrameDependencyStructure& structure,
                     std::bitset<32> active_chains,
                     const DependencyDescriptor& descriptor);

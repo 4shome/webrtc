@@ -10,6 +10,7 @@
 
 #include "modules/video_coding/codecs/test/videocodec_test_stats_impl.h"
 
+#include <cstddef>
 #include <vector>
 
 #include "test/gmock.h"
@@ -36,6 +37,21 @@ TEST(StatsTest, AddAndGetFrame) {
   FrameStatistics* frame_stat = stats.GetFrame(0u, 0);
   EXPECT_EQ(0u, frame_stat->frame_number);
   EXPECT_EQ(kTimestamp, frame_stat->rtp_timestamp);
+}
+
+TEST(StatsTest, GetOrAddFrame_noFrame_createsNewFrameStat) {
+  VideoCodecTestStatsImpl stats;
+  stats.GetOrAddFrame(kTimestamp, 0);
+  FrameStatistics* frame_stat = stats.GetFrameWithTimestamp(kTimestamp, 0);
+  EXPECT_EQ(kTimestamp, frame_stat->rtp_timestamp);
+}
+
+TEST(StatsTest, GetOrAddFrame_frameExists_returnsExistingFrameStat) {
+  VideoCodecTestStatsImpl stats;
+  stats.AddFrame(FrameStatistics(0, kTimestamp, 0));
+  FrameStatistics* frame_stat1 = stats.GetFrameWithTimestamp(kTimestamp, 0);
+  FrameStatistics* frame_stat2 = stats.GetOrAddFrame(kTimestamp, 0);
+  EXPECT_EQ(frame_stat1, frame_stat2);
 }
 
 TEST(StatsTest, AddAndGetFrames) {

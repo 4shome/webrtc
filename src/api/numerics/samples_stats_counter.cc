@@ -12,13 +12,20 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 
 #include "absl/algorithm/container.h"
+#include "api/units/timestamp.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/time_utils.h"
 
 namespace webrtc {
 
 SamplesStatsCounter::SamplesStatsCounter() = default;
+SamplesStatsCounter::SamplesStatsCounter(size_t expected_samples_count) {
+  samples_.reserve(expected_samples_count);
+}
+
 SamplesStatsCounter::~SamplesStatsCounter() = default;
 SamplesStatsCounter::SamplesStatsCounter(const SamplesStatsCounter&) = default;
 SamplesStatsCounter& SamplesStatsCounter::operator=(
@@ -28,7 +35,7 @@ SamplesStatsCounter& SamplesStatsCounter::operator=(SamplesStatsCounter&&) =
     default;
 
 void SamplesStatsCounter::AddSample(double value) {
-  AddSample(StatsSample{value, Timestamp::Micros(rtc::TimeMicros())});
+  AddSample(StatsSample{value, Timestamp::Micros(TimeMicros())});
 }
 
 void SamplesStatsCounter::AddSample(StatsSample sample) {

@@ -70,7 +70,9 @@ class RTC_EXPORT ScreenCapturerWinDirectx : public DesktopCapturer {
   static int GetIndexFromScreenId(ScreenId id,
                                   const std::vector<std::string>& device_names);
 
-  explicit ScreenCapturerWinDirectx();
+  // This constructor is deprecated. Please don't use it in new implementations.
+  ScreenCapturerWinDirectx();
+  explicit ScreenCapturerWinDirectx(const DesktopCaptureOptions& options);
 
   ~ScreenCapturerWinDirectx() override;
 
@@ -86,7 +88,8 @@ class RTC_EXPORT ScreenCapturerWinDirectx : public DesktopCapturer {
   bool SelectSource(SourceId id) override;
 
  private:
-  const rtc::scoped_refptr<DxgiDuplicatorController> controller_;
+  const webrtc::scoped_refptr<DxgiDuplicatorController> controller_;
+  DesktopCaptureOptions options_;
 
   // The underlying DxgiDuplicators may retain a reference to the frames that
   // we ask them to duplicate so that they can continue returning valid frames

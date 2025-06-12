@@ -15,24 +15,23 @@
 #include <stdint.h>
 
 #include <array>
-#include <atomic>
 #include <memory>
+#include <optional>
 #include <vector>
 
-#include "absl/types/optional.h"
+#include "api/array_view.h"
 #include "api/field_trials_view.h"
-#include "api/function_view.h"
-#include "api/transport/field_trial_based_config.h"
+#include "api/rtp_packet_sender.h"
 #include "api/transport/network_types.h"
+#include "api/units/data_rate.h"
+#include "api/units/data_size.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "modules/pacing/bitrate_prober.h"
-#include "modules/pacing/interval_budget.h"
 #include "modules/pacing/prioritized_packet_queue.h"
-#include "modules/pacing/rtp_packet_pacer.h"
-#include "modules/rtp_rtcp/include/rtp_packet_sender.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
-#include "rtc_base/experiments/field_trial_parser.h"
-#include "rtc_base/thread_annotations.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 
@@ -52,43 +51,80 @@ class PacingController {
     virtual std::vector<std::unique_ptr<RtpPacketToSend>> FetchFec() = 0;
     virtual std::vector<std::unique_ptr<RtpPacketToSend>> GeneratePadding(
         DataSize size) = 0;
+    // TODO(bugs.webrtc.org/1439830): Make pure virtual once subclasses adapt.
+    virtual void OnBatchComplete() {}
 
     // TODO(bugs.webrtc.org/11340): Make pure virtual once downstream projects
     // have been updated.
     virtual void OnAbortedRetransmissions(
-        uint32_t ssrc,
-        rtc::ArrayView<const uint16_t> sequence_numbers) {}
-    virtual absl::optional<uint32_t> GetRtxSsrcForMedia(uint32_t ssrc) const {
-      return absl::nullopt;
+        uint32_t /* ssrc */,
+        ArrayView<const uint16_t> /* sequence_numbers */) {}
+    virtual std::optional<uint32_t> GetRtxSsrcForMedia(
+        uint32_t /* ssrc */) const {
+      return std::nullopt;
     }
   };
 
-  // Expected max pacer delay. If ExpectedQueueTime() is higher than
-  // this value, the packet producers should wait (eg drop frames rather than
-  // encoding them). Bitrate sent may temporarily exceed target set by
-  // UpdateBitrate() so that this limit will be upheld.
-  static const TimeDelta kMaxExpectedQueueLength;
-  // Pacing-rate relative to our target send rate.
-  // Multiplicative factor that is applied to the target bitrate to calculate
-  // the number of bytes that can be transmitted per interval.
-  // Increasing this factor will result in lower delays in cases of bitrate
-  // overshoots from the encoder.
-  static const float kDefaultPaceMultiplier;
   // If no media or paused, wake up at least every `kPausedProcessIntervalMs` in
   // order to send a keep-alive packet so we don't get stuck in a bad state due
   // to lack of feedback.
   static const TimeDelta kPausedProcessInterval;
-
+  // The default minimum time that should elapse calls to `ProcessPackets()`.
   static const TimeDelta kMinSleepTime;
-
+  // When padding should be generated, add packets to the buffer with a size
+  // corresponding to this duration times the current padding rate.
+  static const TimeDelta kTargetPaddingDuration;
+  // The maximum time that the pacer can use when "replaying" passed time where
+  // padding should have been generated.
+  static const TimeDelta kMaxPaddingReplayDuration;
   // Allow probes to be processed slightly ahead of inteded send time. Currently
   // set to 1ms as this is intended to allow times be rounded down to the
   // nearest millisecond.
   static const TimeDelta kMaxEarlyProbeProcessing;
+  // Max total size of packets expected to be sent in a burst in order to not
+  // risk loosing packets due to too small send socket buffers. It upper limits
+  // the send burst interval.
+  // Ex: max send burst interval = 63Kb / 10Mbit/s = 50ms.
+  static constexpr DataSize kMaxBurstSize = DataSize::Bytes(63 * 1000);
+
+  // Configuration default values.
+  static constexpr TimeDelta kDefaultBurstInterval = TimeDelta::Millis(40);
+  static constexpr TimeDelta kMaxExpectedQueueLength = TimeDelta::Millis(2000);
+
+  struct Configuration {
+    // If the pacer queue grows longer than the configured max queue limit,
+    // pacer sends at the minimum rate needed to keep the max queue limit and
+    // ignore the current bandwidth estimate.
+    bool drain_large_queues = true;
+    // Expected max pacer delay. If ExpectedQueueTime() is higher than
+    // this value, the packet producers should wait (eg drop frames rather than
+    // encoding them). Bitrate sent may temporarily exceed target set by
+    // SetPacingRates() so that this limit will be upheld if
+    // `drain_large_queues` is set.
+    TimeDelta queue_time_limit = kMaxExpectedQueueLength;
+    // If the first packet of a keyframe is enqueued on a RTP stream, pacer
+    // skips forward to that packet and drops other enqueued packets on that
+    // stream, unless a keyframe is already being paced.
+    bool keyframe_flushing = false;
+    // Audio retransmission is prioritized before video retransmission packets.
+    bool prioritize_audio_retransmission = false;
+    // Configure separate timeouts per priority. After a timeout, a packet of
+    // that sort will not be paced and instead dropped.
+    // Note: to set TTL on audio retransmission,
+    // `prioritize_audio_retransmission` must be true.
+    PacketQueueTTL packet_queue_ttl;
+    // The pacer is allowed to send enqueued packets in bursts and can build up
+    // a packet "debt" that correspond to approximately the send rate during the
+    // burst interval.
+    TimeDelta send_burst_interval = kDefaultBurstInterval;
+  };
+
+  static Configuration DefaultConfiguration() { return Configuration{}; }
 
   PacingController(Clock* clock,
                    PacketSender* packet_sender,
-                   const FieldTrialsView& field_trials);
+                   const FieldTrialsView& field_trials,
+                   Configuration configuration = DefaultConfiguration());
 
   ~PacingController();
 
@@ -96,10 +132,8 @@ class PacingController {
   // it's time to send.
   void EnqueuePacket(std::unique_ptr<RtpPacketToSend> packet);
 
-  // ABSL_DEPRECATED("Use CreateProbeClusters instead")
-  void CreateProbeCluster(DataRate bitrate, int cluster_id);
   void CreateProbeClusters(
-      rtc::ArrayView<const ProbeClusterConfig> probe_cluster_configs);
+      ArrayView<const ProbeClusterConfig> probe_cluster_configs);
 
   void Pause();   // Temporarily pause all sending.
   void Resume();  // Resume sending packets.
@@ -124,6 +158,9 @@ class PacingController {
   // 'burst_interval'.
   void SetSendBurstInterval(TimeDelta burst_interval);
 
+  // A probe may be sent without first waing for a media packet.
+  void SetAllowProbeWithoutMediaPacket(bool allow);
+
   // Returns the time when the oldest packet was queued.
   Timestamp OldestPacketEnqueueTime() const;
 
@@ -140,7 +177,7 @@ class PacingController {
   DataSize CurrentBufferLevel() const;
 
   // Returns the time when the first packet was sent.
-  absl::optional<Timestamp> FirstSentPacketTime() const;
+  std::optional<Timestamp> FirstSentPacketTime() const;
 
   // Returns the number of milliseconds it will take to send the current
   // packets in the queue, given the current size and bitrate, ignoring prio.
@@ -161,6 +198,14 @@ class PacingController {
   void ProcessPackets();
 
   bool IsProbing() const;
+
+  // Note: Intended for debugging purposes only, will be removed.
+  // Sets the number of iterations of the main loop in `ProcessPackets()` that
+  // is considered erroneous to exceed.
+  void SetCircuitBreakerThreshold(int num_iterations);
+
+  // Remove any pending packets matching this SSRC from the packet queue.
+  void RemovePacketsForSsrc(uint32_t ssrc);
 
  private:
   TimeDelta UpdateTimeAndGetElapsed(Timestamp now);
@@ -200,8 +245,8 @@ class PacingController {
   const bool pace_audio_;
   const bool ignore_transport_overhead_;
   const bool fast_retransmissions_;
-
-  TimeDelta min_packet_limit_;
+  const bool keyframe_flushing_;
+  DataRate max_rate = DataRate::BitsPerSec(100'000'000);
   DataSize transport_overhead_per_packet_;
   TimeDelta send_burst_interval_;
 
@@ -228,7 +273,7 @@ class PacingController {
 
   Timestamp last_process_time_;
   Timestamp last_send_time_;
-  absl::optional<Timestamp> first_sent_packet_time_;
+  std::optional<Timestamp> first_sent_packet_time_;
   bool seen_first_packet_;
 
   PrioritizedPacketQueue packet_queue_;
@@ -238,6 +283,8 @@ class PacingController {
   TimeDelta queue_time_limit_;
   bool account_for_audio_;
   bool include_overhead_;
+
+  int circuit_breaker_threshold_;
 };
 }  // namespace webrtc
 

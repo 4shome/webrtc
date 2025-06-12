@@ -12,7 +12,11 @@
 #include <stdint.h>
 
 #include <memory>
+#include <utility>
+#include <vector>
 
+#include "api/video_codecs/sdp_video_format.h"
+#include "call/video_receive_stream.h"
 #include "test/fuzzers/utils/rtp_replayer.h"
 
 namespace webrtc {
@@ -22,14 +26,13 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
   VideoReceiveStreamInterface::Config vp9_config(&(stream_state->transport));
 
   VideoReceiveStreamInterface::Decoder vp9_decoder;
-  vp9_decoder.video_format = SdpVideoFormat("VP9");
+  vp9_decoder.video_format = SdpVideoFormat::VP9Profile0();
   vp9_decoder.payload_type = 124;
   vp9_config.decoders.push_back(std::move(vp9_decoder));
 
   vp9_config.rtp.local_ssrc = 7731;
   vp9_config.rtp.remote_ssrc = 1337;
   vp9_config.rtp.rtx_ssrc = 100;
-  vp9_config.rtp.transport_cc = true;
   vp9_config.rtp.nack.rtp_history_ms = 1000;
 
   std::vector<VideoReceiveStreamInterface::Config> replay_configs;

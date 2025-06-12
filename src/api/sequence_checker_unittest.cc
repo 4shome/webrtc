@@ -10,15 +10,22 @@
 
 #include "api/sequence_checker.h"
 
+#include <functional>
 #include <memory>
-#include <utility>
 
+#include "absl/functional/any_invocable.h"
 #include "api/function_view.h"
 #include "api/units/time_delta.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/event.h"
 #include "rtc_base/platform_thread.h"
+#include "rtc_base/synchronization/sequence_checker_internal.h"
 #include "rtc_base/task_queue_for_test.h"
+#include "rtc_base/thread_annotations.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
+
+using testing::HasSubstr;
 
 namespace webrtc {
 namespace {
@@ -40,9 +47,9 @@ class CompileTimeTestForGuardedBy {
   ::webrtc::SequenceChecker sequence_checker_;
 };
 
-void RunOnDifferentThread(rtc::FunctionView<void()> run) {
-  rtc::Event thread_has_run_event;
-  rtc::PlatformThread::SpawnJoinable(
+void RunOnDifferentThread(FunctionView<void()> run) {
+  Event thread_has_run_event;
+  PlatformThread::SpawnJoinable(
       [&] {
         run();
         thread_has_run_event.Set();
@@ -80,6 +87,13 @@ TEST(SequenceCheckerTest, DetachFromThreadAndUseOnTaskQueue) {
   queue.SendTask([&] { EXPECT_TRUE(sequence_checker.IsCurrent()); });
 }
 
+TEST(SequenceCheckerTest, InitializeForDifferentTaskQueue) {
+  TaskQueueForTest queue;
+  SequenceChecker sequence_checker(queue.Get());
+  EXPECT_EQ(sequence_checker.IsCurrent(), !RTC_DCHECK_IS_ON);
+  queue.SendTask([&] { EXPECT_TRUE(sequence_checker.IsCurrent()); });
+}
+
 TEST(SequenceCheckerTest, DetachFromTaskQueueAndUseOnThread) {
   TaskQueueForTest queue;
   queue.SendTask([] {
@@ -94,6 +108,19 @@ TEST(SequenceCheckerTest, MethodNotAllowedOnDifferentThreadInDebug) {
   RunOnDifferentThread(
       [&] { EXPECT_EQ(sequence_checker.IsCurrent(), !RTC_DCHECK_IS_ON); });
 }
+
+#if RTC_DCHECK_IS_ON
+TEST(SequenceCheckerTest, OnlyCurrentOnOneThread) {
+  SequenceChecker sequence_checker(SequenceChecker::kDetached);
+  RunOnDifferentThread([&] {
+    EXPECT_TRUE(sequence_checker.IsCurrent());
+    // Spawn a new thread from within the first one to guarantee that we have
+    // two concurrently active threads (and that there's no chance of the
+    // thread ref being reused).
+    RunOnDifferentThread([&] { EXPECT_FALSE(sequence_checker.IsCurrent()); });
+  });
+}
+#endif
 
 TEST(SequenceCheckerTest, MethodNotAllowedOnDifferentTaskQueueInDebug) {
   SequenceChecker sequence_checker;
@@ -114,6 +141,53 @@ TEST(SequenceCheckerTest, DetachFromTaskQueueInDebug) {
   TaskQueueForTest queue2;
   queue2.SendTask(
       [&] { EXPECT_EQ(sequence_checker.IsCurrent(), !RTC_DCHECK_IS_ON); });
+}
+
+TEST(SequenceCheckerTest, ExpectationToString) {
+  TaskQueueForTest queue1;
+
+  SequenceChecker sequence_checker(SequenceChecker::kDetached);
+
+  Event blocker;
+  queue1.PostTask([&blocker, &sequence_checker]() {
+    (void)sequence_checker.IsCurrent();
+    blocker.Set();
+  });
+
+  blocker.Wait(Event::kForever);
+
+#if RTC_DCHECK_IS_ON
+
+  EXPECT_THAT(ExpectationToString(&sequence_checker),
+              HasSubstr("# Expected: TQ:"));
+
+  // Test for the base class
+  webrtc_sequence_checker_internal::SequenceCheckerImpl* sequence_checker_base =
+      &sequence_checker;
+  EXPECT_THAT(ExpectationToString(sequence_checker_base),
+              HasSubstr("# Expected: TQ:"));
+
+#else
+  GTEST_ASSERT_EQ(ExpectationToString(&sequence_checker), "");
+#endif
+}
+
+TEST(SequenceCheckerTest, InitiallyDetached) {
+  TaskQueueForTest queue1;
+
+  SequenceChecker sequence_checker(SequenceChecker::kDetached);
+
+  Event blocker;
+  queue1.PostTask([&blocker, &sequence_checker]() {
+    EXPECT_TRUE(sequence_checker.IsCurrent());
+    blocker.Set();
+  });
+
+  blocker.Wait(Event::kForever);
+
+#if RTC_DCHECK_IS_ON
+  EXPECT_FALSE(sequence_checker.IsCurrent());
+#endif
 }
 
 class TestAnnotations {

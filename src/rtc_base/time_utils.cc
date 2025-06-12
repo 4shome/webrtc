@@ -14,16 +14,26 @@
 #include <sys/time.h>
 #endif
 
-#if defined(WEBRTC_WIN)
-#include <sys/timeb.h>
-#endif
-
 #include "rtc_base/checks.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/system_time.h"
 #include "rtc_base/time_utils.h"
+#if defined(WEBRTC_WIN)
+#include "rtc_base/win32.h"
+#endif
+#if defined(WEBRTC_WIN)
+#include <minwinbase.h>
+#endif
 
-namespace rtc {
+namespace webrtc {
+
+#if defined(WEBRTC_WIN) || defined(WINUWP)
+// FileTime (January 1st 1601) to Unix time (January 1st 1970)
+// offset in units of 100ns.
+static constexpr uint64_t kFileTimeToUnixTimeEpochOffset =
+    116444736000000000ULL;
+static constexpr uint64_t kFileTimeToMicroSeconds = 10LL;
+#endif
 
 ClockInterface* g_clock = nullptr;
 
@@ -55,7 +65,7 @@ class TimeHelper final {
     TIME_ZONE_INFORMATION time_zone;
     GetTimeZoneInformation(&time_zone);
     int64_t time_zone_bias_ns =
-        rtc::dchecked_cast<int64_t>(time_zone.Bias) * 60 * 1000 * 1000 * 1000;
+        dchecked_cast<int64_t>(time_zone.Bias) * 60 * 1000 * 1000 * 1000;
     singleton.app_start_time_ns_ =
         (ntp_server_time_ms - kNTPTimeToUnixTimeEpochOffset) * 1000000 -
         time_zone_bias_ns;
@@ -68,9 +78,9 @@ class TimeHelper final {
     int64_t result = 0;
     LARGE_INTEGER qpcnt;
     QueryPerformanceCounter(&qpcnt);
-    result = rtc::dchecked_cast<int64_t>(
-        (rtc::dchecked_cast<uint64_t>(qpcnt.QuadPart) * 100000 /
-         rtc::dchecked_cast<uint64_t>(singleton.os_ticks_per_second_)) *
+    result = dchecked_cast<int64_t>(
+        (dchecked_cast<uint64_t>(qpcnt.QuadPart) * 100000 /
+         dchecked_cast<uint64_t>(singleton.os_ticks_per_second_)) *
         10000);
     result = singleton.app_start_time_ns_ + result -
              singleton.time_since_os_start_ns_;
@@ -82,7 +92,7 @@ class TimeHelper final {
     TIME_ZONE_INFORMATION time_zone;
     GetTimeZoneInformation(&time_zone);
     int64_t time_zone_bias_ns =
-        rtc::dchecked_cast<int64_t>(time_zone.Bias) * 60 * 1000 * 1000 * 1000;
+        dchecked_cast<int64_t>(time_zone.Bias) * 60 * 1000 * 1000 * 1000;
     FILETIME ft;
     // This will give us system file in UTC format.
     GetSystemTimeAsFileTime(&ft);
@@ -104,19 +114,17 @@ class TimeHelper final {
   void UpdateReferenceTime() {
     LARGE_INTEGER qpfreq;
     QueryPerformanceFrequency(&qpfreq);
-    os_ticks_per_second_ = rtc::dchecked_cast<int64_t>(qpfreq.QuadPart);
+    os_ticks_per_second_ = dchecked_cast<int64_t>(qpfreq.QuadPart);
 
     LARGE_INTEGER qpcnt;
     QueryPerformanceCounter(&qpcnt);
-    time_since_os_start_ns_ = rtc::dchecked_cast<int64_t>(
-        (rtc::dchecked_cast<uint64_t>(qpcnt.QuadPart) * 100000 /
-         rtc::dchecked_cast<uint64_t>(os_ticks_per_second_)) *
+    time_since_os_start_ns_ = dchecked_cast<int64_t>(
+        (dchecked_cast<uint64_t>(qpcnt.QuadPart) * 100000 /
+         dchecked_cast<uint64_t>(os_ticks_per_second_)) *
         10000);
   }
 
  private:
-  static constexpr uint64_t kFileTimeToUnixTimeEpochOffset =
-      116444736000000000ULL;
   static constexpr uint64_t kNTPTimeToUnixTimeEpochOffset = 2208988800000L;
 
   // The number of nanoseconds since unix system epoch
@@ -175,28 +183,6 @@ int64_t TimeDiff(int64_t later, int64_t earlier) {
   return later - earlier;
 }
 
-TimestampWrapAroundHandler::TimestampWrapAroundHandler()
-    : last_ts_(0), num_wrap_(-1) {}
-
-int64_t TimestampWrapAroundHandler::Unwrap(uint32_t ts) {
-  if (num_wrap_ == -1) {
-    last_ts_ = ts;
-    num_wrap_ = 0;
-    return ts;
-  }
-
-  if (ts < last_ts_) {
-    if (last_ts_ >= 0xf0000000 && ts < 0x0fffffff)
-      ++num_wrap_;
-  } else if ((ts - last_ts_) > 0xf0000000) {
-    // Backwards wrap. Unwrap with last wrap count and don't update last_ts_.
-    return ts + (num_wrap_ - 1) * (int64_t{1} << 32);
-  }
-
-  last_ts_ = ts;
-  return ts + (num_wrap_ << 32);
-}
-
 int64_t TmToSeconds(const tm& tm) {
   static short int mdays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   static short int cumul_mdays[12] = {0,   31,  59,  90,  120, 151,
@@ -251,15 +237,17 @@ int64_t TimeUTCMicros() {
   struct timeval time;
   gettimeofday(&time, nullptr);
   // Convert from second (1.0) and microsecond (1e-6).
-  return (static_cast<int64_t>(time.tv_sec) * rtc::kNumMicrosecsPerSec +
+  return (static_cast<int64_t>(time.tv_sec) * kNumMicrosecsPerSec +
           time.tv_usec);
-
 #elif defined(WEBRTC_WIN)
-  struct _timeb time;
-  _ftime(&time);
-  // Convert from second (1.0) and milliseconds (1e-3).
-  return (static_cast<int64_t>(time.time) * rtc::kNumMicrosecsPerSec +
-          static_cast<int64_t>(time.millitm) * rtc::kNumMicrosecsPerMillisec);
+  FILETIME ft;
+  // This will give us system file in UTC format in multiples of 100ns.
+  GetSystemTimeAsFileTime(&ft);
+  LARGE_INTEGER li;
+  li.HighPart = ft.dwHighDateTime;
+  li.LowPart = ft.dwLowDateTime;
+  return (li.QuadPart - kFileTimeToUnixTimeEpochOffset) /
+         kFileTimeToMicroSeconds;
 #endif
 }
 
@@ -267,4 +255,4 @@ int64_t TimeUTCMillis() {
   return TimeUTCMicros() / kNumMicrosecsPerMillisec;
 }
 
-}  // namespace rtc
+}  // namespace webrtc

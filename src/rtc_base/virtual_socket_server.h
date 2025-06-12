@@ -13,26 +13,28 @@
 
 #include <deque>
 #include <map>
+#include <optional>
 #include <vector>
 
+#include "api/make_ref_counted.h"
+#include "api/ref_counted_base.h"
+#include "api/scoped_refptr.h"
+#include "api/task_queue/task_queue_base.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/event.h"
 #include "rtc_base/fake_clock.h"
-#include "rtc_base/message_handler.h"
+#include "rtc_base/socket_address_pair.h"
 #include "rtc_base/socket_server.h"
 #include "rtc_base/synchronization/mutex.h"
 
-namespace rtc {
+namespace webrtc {
 
-class Packet;
+class VirtualSocketPacket;
 class VirtualSocketServer;
-class SocketAddressPair;
 
-// Implements the socket interface using the virtual network.  Packets are
-// passed as messages using the message queue of the socket server.
-class VirtualSocket : public Socket,
-                      public MessageHandler,
-                      public sigslot::has_slots<> {
+// Implements the socket interface using the virtual network. Packets are
+// passed in tasks using the thread of the socket server.
+class VirtualSocket : public Socket, public sigslot::has_slots<> {
  public:
   VirtualSocket(VirtualSocketServer* server, int family, int type);
   ~VirtualSocket() override;
@@ -58,7 +60,6 @@ class VirtualSocket : public Socket,
   ConnState GetState() const override;
   int GetOption(Option opt, int* value) override;
   int SetOption(Option opt, int value) override;
-  void OnMessage(Message* pmsg) override;
 
   size_t recv_buffer_size() const { return recv_buffer_size_; }
   size_t send_buffer_size() const { return send_buffer_.size(); }
@@ -85,16 +86,83 @@ class VirtualSocket : public Socket,
   // Removes stale packets from the network. Returns current size.
   size_t PurgeNetworkPackets(int64_t cur_time);
 
+  void PostPacket(TimeDelta delay, std::unique_ptr<VirtualSocketPacket> packet);
+  void PostConnect(TimeDelta delay, const SocketAddress& remote_addr);
+  void PostDisconnect(TimeDelta delay);
+
  private:
+  // Struct shared with pending tasks that may outlive VirtualSocket.
+  class SafetyBlock : public RefCountedNonVirtual<SafetyBlock> {
+   public:
+    explicit SafetyBlock(VirtualSocket* socket);
+    SafetyBlock(const SafetyBlock&) = delete;
+    SafetyBlock& operator=(const SafetyBlock&) = delete;
+    ~SafetyBlock();
+
+    // Prohibits posted delayed task to access owning VirtualSocket and
+    // cleanups members protected by the `mutex`.
+    void SetNotAlive();
+    bool IsAlive();
+
+    // Copies up to `size` bytes into buffer from the next received packet
+    // and fills `addr` with remote address of that received packet.
+    // Returns number of bytes copied or negative value on failure.
+    int RecvFrom(void* buffer, size_t size, SocketAddress& addr);
+
+    void Listen();
+
+    struct AcceptResult {
+      int error = 0;
+      std::unique_ptr<VirtualSocket> socket;
+      SocketAddress remote_addr;
+    };
+    AcceptResult Accept();
+
+    bool AddPacket(std::unique_ptr<VirtualSocketPacket> packet);
+    void PostConnect(TimeDelta delay, const SocketAddress& remote_addr);
+
+   private:
+    enum class Signal { kNone, kReadEvent, kConnectEvent };
+    // `PostConnect` rely on the fact that std::list iterators are not
+    // invalidated on any changes to other elements in the container.
+    using PostedConnects = std::list<SocketAddress>;
+
+    void PostSignalReadEvent() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+    void MaybeSignalReadEvent();
+    Signal Connect(PostedConnects::iterator remote_addr_it);
+
+    Mutex mutex_;
+    VirtualSocket& socket_;
+    bool alive_ RTC_GUARDED_BY(mutex_) = true;
+    // Flag indicating if async Task to signal SignalReadEvent is posted.
+    // To avoid posting multiple such tasks.
+    bool pending_read_signal_event_ RTC_GUARDED_BY(mutex_) = false;
+
+    // Members below do not need to outlive VirtualSocket, but are used by the
+    // posted tasks. Keeping them in the VirtualSocket confuses thread
+    // annotations because they can't detect that locked mutex is the same mutex
+    // this members are guarded by.
+
+    // Addresses of the sockets for potential connect. For each address there
+    // is a posted task that should finilze the connect.
+    PostedConnects posted_connects_ RTC_GUARDED_BY(mutex_);
+
+    // Data which has been received from the network
+    std::list<std::unique_ptr<VirtualSocketPacket>> recv_buffer_
+        RTC_GUARDED_BY(mutex_);
+
+    // Pending sockets which can be Accepted
+    std::optional<std::deque<SocketAddress>> listen_queue_
+        RTC_GUARDED_BY(mutex_);
+  };
+
   struct NetworkEntry {
     size_t size;
     int64_t done_time;
   };
 
-  typedef std::deque<SocketAddress> ListenQueue;
   typedef std::deque<NetworkEntry> NetworkQueue;
   typedef std::vector<char> SendBuffer;
-  typedef std::list<Packet*> RecvBuffer;
   typedef std::map<Option, int> OptionsMap;
 
   int InitiateConnect(const SocketAddress& addr, bool use_delay);
@@ -111,18 +179,14 @@ class VirtualSocket : public Socket,
   SocketAddress local_addr_;
   SocketAddress remote_addr_;
 
-  // Pending sockets which can be Accepted
-  std::unique_ptr<ListenQueue> listen_queue_ RTC_GUARDED_BY(mutex_)
-      RTC_PT_GUARDED_BY(mutex_);
+  const scoped_refptr<SafetyBlock> safety_ =
+      make_ref_counted<SafetyBlock>(this);
 
   // Data which tcp has buffered for sending
   SendBuffer send_buffer_;
   // Set to false if the last attempt to send resulted in EWOULDBLOCK.
   // Set back to true when the socket can send again.
   bool ready_to_send_ = true;
-
-  // Mutex to protect the recv_buffer and listen_queue_
-  webrtc::Mutex mutex_;
 
   // Network model that enforces bandwidth and capacity constraints
   NetworkQueue network_;
@@ -131,8 +195,6 @@ class VirtualSocket : public Socket,
   // It is used to ensure ordered delivery of packets sent on this socket.
   int64_t last_delivery_time_ = 0;
 
-  // Data which has been received from the network
-  RecvBuffer recv_buffer_ RTC_GUARDED_BY(mutex_);
   // The amount of data which is in flight or in recv_buffer_
   size_t recv_buffer_size_;
 
@@ -223,10 +285,10 @@ class VirtualSocketServer : public SocketServer {
 
   // SocketServer:
   void SetMessageQueue(Thread* queue) override;
-  bool Wait(webrtc::TimeDelta max_wait_duration, bool process_io) override;
+  bool Wait(TimeDelta max_wait_duration, bool process_io) override;
   void WakeUp() override;
 
-  void SetDelayOnAddress(const rtc::SocketAddress& address, int delay_ms) {
+  void SetDelayOnAddress(const SocketAddress& address, int delay_ms) {
     delay_by_ip_[address.ipaddr()] = delay_ms;
   }
 
@@ -237,8 +299,8 @@ class VirtualSocketServer : public SocketServer {
   // If SetAlternativeLocalAddress(A, B) is called, then when something
   // attempts to bind a socket to address A, it will get a socket bound to
   // address B instead.
-  void SetAlternativeLocalAddress(const rtc::IPAddress& address,
-                                  const rtc::IPAddress& alternative);
+  void SetAlternativeLocalAddress(const IPAddress& address,
+                                  const IPAddress& alternative);
 
   typedef std::pair<double, double> Point;
   typedef std::vector<Point> Function;
@@ -308,14 +370,6 @@ class VirtualSocketServer : public SocketServer {
   // Computes the number of milliseconds required to send a packet of this size.
   uint32_t SendDelay(uint32_t size) RTC_LOCKS_EXCLUDED(mutex_);
 
-  // Cancel attempts to connect to a socket that is being closed.
-  void CancelConnects(VirtualSocket* socket);
-
-  // Clear incoming messages for a socket that is being closed.
-  void Clear(VirtualSocket* socket);
-
-  void PostSignalReadEvent(VirtualSocket* socket);
-
   // Sending was previously blocked, but now isn't.
   sigslot::signal0<> SignalReadyToSend;
 
@@ -327,6 +381,7 @@ class VirtualSocketServer : public SocketServer {
   VirtualSocket* LookupBinding(const SocketAddress& addr);
 
  private:
+  friend VirtualSocket;
   uint16_t GetNextPort();
 
   // Find the socket pair corresponding to this server address.
@@ -397,7 +452,7 @@ class VirtualSocketServer : public SocketServer {
   IPAddress default_source_address_v4_;
   IPAddress default_source_address_v6_;
 
-  mutable webrtc::Mutex mutex_;
+  mutable Mutex mutex_;
 
   uint32_t bandwidth_ RTC_GUARDED_BY(mutex_);
   uint32_t network_capacity_ RTC_GUARDED_BY(mutex_);
@@ -410,8 +465,8 @@ class VirtualSocketServer : public SocketServer {
   // Used for testing.
   uint32_t sent_packets_ RTC_GUARDED_BY(mutex_) = 0;
 
-  std::map<rtc::IPAddress, int> delay_by_ip_;
-  std::map<rtc::IPAddress, rtc::IPAddress> alternative_address_mapping_;
+  std::map<IPAddress, int> delay_by_ip_;
+  std::map<IPAddress, IPAddress> alternative_address_mapping_;
   std::unique_ptr<Function> delay_dist_;
 
   double drop_prob_ RTC_GUARDED_BY(mutex_);
@@ -423,6 +478,14 @@ class VirtualSocketServer : public SocketServer {
   bool sending_blocked_ RTC_GUARDED_BY(mutex_) = false;
 };
 
-}  // namespace rtc
+}  // namespace webrtc
+
+// Re-export symbols from the webrtc namespace for backwards compatibility.
+// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
+#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
+namespace rtc {
+using ::webrtc::VirtualSocketServer;
+}
+#endif  //  WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // RTC_BASE_VIRTUAL_SOCKET_SERVER_H_

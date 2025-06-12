@@ -10,8 +10,11 @@
 
 #ifndef API_VIDEO_CODECS_BITSTREAM_PARSER_H_
 #define API_VIDEO_CODECS_BITSTREAM_PARSER_H_
+
 #include <stddef.h>
 #include <stdint.h>
+
+#include <optional>
 
 #include "api/array_view.h"
 
@@ -23,11 +26,11 @@ class BitstreamParser {
   virtual ~BitstreamParser() = default;
 
   // Parse an additional chunk of the bitstream.
-  virtual void ParseBitstream(rtc::ArrayView<const uint8_t> bitstream) = 0;
+  virtual void ParseBitstream(ArrayView<const uint8_t> bitstream) = 0;
 
   // Get the last extracted QP value from the parsed bitstream. If no QP
-  // value could be parsed, returns absl::nullopt.
-  virtual absl::optional<int> GetLastSliceQp() const = 0;
+  // value could be parsed, returns std::nullopt.
+  virtual std::optional<int> GetLastSliceQp() const = 0;
 };
 
 }  // namespace webrtc

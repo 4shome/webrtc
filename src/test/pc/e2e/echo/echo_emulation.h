@@ -16,7 +16,8 @@
 #include <memory>
 #include <vector>
 
-#include "api/test/peerconnection_quality_test_fixture.h"
+#include "api/sequence_checker.h"
+#include "api/test/pclf/media_configuration.h"
 #include "modules/audio_device/include/test_audio_device.h"
 #include "rtc_base/swap_queue.h"
 
@@ -29,19 +30,19 @@ class EchoEmulatingCapturer : public TestAudioDeviceModule::Capturer {
  public:
   EchoEmulatingCapturer(
       std::unique_ptr<TestAudioDeviceModule::Capturer> capturer,
-      PeerConnectionE2EQualityTestFixture::EchoEmulationConfig config);
+      EchoEmulationConfig config);
 
-  void OnAudioRendered(rtc::ArrayView<const int16_t> data);
+  void OnAudioRendered(ArrayView<const int16_t> data);
 
   int SamplingFrequency() const override {
     return delegate_->SamplingFrequency();
   }
   int NumChannels() const override { return delegate_->NumChannels(); }
-  bool Capture(rtc::BufferT<int16_t>* buffer) override;
+  bool Capture(BufferT<int16_t>* buffer) override;
 
  private:
   std::unique_ptr<TestAudioDeviceModule::Capturer> delegate_;
-  const PeerConnectionE2EQualityTestFixture::EchoEmulationConfig config_;
+  const EchoEmulationConfig config_;
 
   SwapQueue<std::vector<int16_t>> renderer_queue_;
 
@@ -66,7 +67,7 @@ class EchoEmulatingRenderer : public TestAudioDeviceModule::Renderer {
     return delegate_->SamplingFrequency();
   }
   int NumChannels() const override { return delegate_->NumChannels(); }
-  bool Render(rtc::ArrayView<const int16_t> data) override;
+  bool Render(ArrayView<const int16_t> data) override;
 
  private:
   std::unique_ptr<TestAudioDeviceModule::Renderer> delegate_;

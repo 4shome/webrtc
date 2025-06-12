@@ -14,13 +14,15 @@
 #include <memory>
 
 #include "absl/container/inlined_vector.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "api/video/encoded_frame.h"
 
 namespace webrtc {
 
-bool FrameHasBadRenderTiming(Timestamp render_time,
-                             Timestamp now,
-                             TimeDelta target_video_delay);
+bool FrameHasBadRenderTiming(Timestamp render_time, Timestamp now);
+
+bool TargetVideoDelayIsTooLarge(TimeDelta target_video_delay);
 
 std::unique_ptr<EncodedFrame> CombineAndDeleteFrames(
     absl::InlinedVector<std::unique_ptr<EncodedFrame>, 4> frames);

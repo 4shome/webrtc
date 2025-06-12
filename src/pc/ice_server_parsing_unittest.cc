@@ -13,6 +13,9 @@
 #include <string>
 #include <vector>
 
+#include "api/peer_connection_interface.h"
+#include "p2p/base/port.h"
+#include "p2p/base/port_allocator.h"
 #include "p2p/base/port_interface.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/socket_address.h"
@@ -62,13 +65,12 @@ class IceServerParsingTest : public ::testing::Test {
     server.tls_cert_policy = tls_certificate_policy;
     server.hostname = hostname;
     servers.push_back(server);
-    return webrtc::ParseIceServers(servers, &stun_servers_, &turn_servers_) ==
-           webrtc::RTCErrorType::NONE;
+    return ParseIceServersOrError(servers, &stun_servers_, &turn_servers_).ok();
   }
 
  protected:
-  cricket::ServerAddresses stun_servers_;
-  std::vector<cricket::RelayServerConfig> turn_servers_;
+  ServerAddresses stun_servers_;
+  std::vector<RelayServerConfig> turn_servers_;
 };
 
 // Make sure all STUN/TURN prefixes are parsed correctly.
@@ -84,14 +86,14 @@ TEST_F(IceServerParsingTest, ParseStunPrefixes) {
   EXPECT_TRUE(ParseTurnUrl("turn:hostname"));
   EXPECT_EQ(0U, stun_servers_.size());
   EXPECT_EQ(1U, turn_servers_.size());
-  EXPECT_EQ(cricket::PROTO_UDP, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_UDP, turn_servers_[0].ports[0].proto);
 
   EXPECT_TRUE(ParseTurnUrl("turns:hostname"));
   EXPECT_EQ(0U, stun_servers_.size());
   EXPECT_EQ(1U, turn_servers_.size());
-  EXPECT_EQ(cricket::PROTO_TLS, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_TLS, turn_servers_[0].ports[0].proto);
   EXPECT_TRUE(turn_servers_[0].tls_cert_policy ==
-              cricket::TlsCertPolicy::TLS_CERT_POLICY_SECURE);
+              TlsCertPolicy::TLS_CERT_POLICY_SECURE);
 
   EXPECT_TRUE(ParseUrl(
       "turns:hostname", "username", "password",
@@ -99,8 +101,8 @@ TEST_F(IceServerParsingTest, ParseStunPrefixes) {
   EXPECT_EQ(0U, stun_servers_.size());
   EXPECT_EQ(1U, turn_servers_.size());
   EXPECT_TRUE(turn_servers_[0].tls_cert_policy ==
-              cricket::TlsCertPolicy::TLS_CERT_POLICY_INSECURE_NO_CHECK);
-  EXPECT_EQ(cricket::PROTO_TLS, turn_servers_[0].ports[0].proto);
+              TlsCertPolicy::TLS_CERT_POLICY_INSECURE_NO_CHECK);
+  EXPECT_EQ(PROTO_TLS, turn_servers_[0].ports[0].proto);
 
   // invalid prefixes
   EXPECT_FALSE(ParseUrl("stunn:hostname"));
@@ -114,13 +116,13 @@ TEST_F(IceServerParsingTest, VerifyDefaults) {
   EXPECT_TRUE(ParseTurnUrl("turns:hostname"));
   EXPECT_EQ(1U, turn_servers_.size());
   EXPECT_EQ(5349, turn_servers_[0].ports[0].address.port());
-  EXPECT_EQ(cricket::PROTO_TLS, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_TLS, turn_servers_[0].ports[0].proto);
 
   // TURN defaults
   EXPECT_TRUE(ParseTurnUrl("turn:hostname"));
   EXPECT_EQ(1U, turn_servers_.size());
   EXPECT_EQ(3478, turn_servers_[0].ports[0].address.port());
-  EXPECT_EQ(cricket::PROTO_UDP, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_UDP, turn_servers_[0].ports[0].proto);
 
   // STUN defaults
   EXPECT_TRUE(ParseUrl("stun:hostname"));
@@ -167,7 +169,7 @@ TEST_F(IceServerParsingTest, ParseHostnameAndPort) {
                PeerConnectionInterface::TlsCertPolicy::kTlsCertPolicySecure,
                "hostname"));
   EXPECT_EQ(1U, turn_servers_.size());
-  rtc::SocketAddress address = turn_servers_[0].ports[0].address;
+  SocketAddress address = turn_servers_[0].ports[0].address;
   EXPECT_EQ("hostname", address.hostname());
   EXPECT_EQ(1234, address.port());
   EXPECT_FALSE(address.IsUnresolvedIP());
@@ -187,17 +189,19 @@ TEST_F(IceServerParsingTest, ParseHostnameAndPort) {
   EXPECT_FALSE(ParseUrl("stun:/hostname"));  // / is not allowed
   EXPECT_FALSE(ParseUrl("stun:?hostname"));  // ? is not allowed
   EXPECT_FALSE(ParseUrl("stun:#hostname"));  // # is not allowed
+  // STUN explicitly forbids query parameters.
+  EXPECT_FALSE(ParseUrl("stun:hostname?transport=udp"));
 }
 
 // Test parsing the "?transport=xxx" part of the URL.
 TEST_F(IceServerParsingTest, ParseTransport) {
   EXPECT_TRUE(ParseTurnUrl("turn:hostname:1234?transport=tcp"));
   EXPECT_EQ(1U, turn_servers_.size());
-  EXPECT_EQ(cricket::PROTO_TCP, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_TCP, turn_servers_[0].ports[0].proto);
 
   EXPECT_TRUE(ParseTurnUrl("turn:hostname?transport=udp"));
   EXPECT_EQ(1U, turn_servers_.size());
-  EXPECT_EQ(cricket::PROTO_UDP, turn_servers_[0].ports[0].proto);
+  EXPECT_EQ(PROTO_UDP, turn_servers_[0].ports[0].proto);
 
   EXPECT_FALSE(ParseTurnUrl("turn:hostname?transport=invalid"));
   EXPECT_FALSE(ParseTurnUrl("turn:hostname?transport="));
@@ -229,26 +233,10 @@ TEST_F(IceServerParsingTest, ParseMultipleUrls) {
   server.username = "foo";
   server.password = "bar";
   servers.push_back(server);
-  EXPECT_EQ(webrtc::RTCErrorType::NONE,
-            webrtc::ParseIceServers(servers, &stun_servers_, &turn_servers_));
+  EXPECT_TRUE(
+      ParseIceServersOrError(servers, &stun_servers_, &turn_servers_).ok());
   EXPECT_EQ(1U, stun_servers_.size());
   EXPECT_EQ(1U, turn_servers_.size());
-}
-
-// Ensure that TURN servers are given unique priorities,
-// so that their resulting candidates have unique priorities.
-TEST_F(IceServerParsingTest, TurnServerPrioritiesUnique) {
-  PeerConnectionInterface::IceServers servers;
-  PeerConnectionInterface::IceServer server;
-  server.urls.push_back("turn:hostname");
-  server.urls.push_back("turn:hostname2");
-  server.username = "foo";
-  server.password = "bar";
-  servers.push_back(server);
-  EXPECT_EQ(webrtc::RTCErrorType::NONE,
-            webrtc::ParseIceServers(servers, &stun_servers_, &turn_servers_));
-  EXPECT_EQ(2U, turn_servers_.size());
-  EXPECT_NE(turn_servers_[0].priority, turn_servers_[1].priority);
 }
 
 }  // namespace webrtc

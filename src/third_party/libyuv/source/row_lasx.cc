@@ -543,8 +543,8 @@ void I422ToARGB4444Row_LASX(const uint8_t* src_y,
   __m256i vec_yb, vec_yg, vec_ub, vec_vr, vec_ug, vec_vg;
   __m256i vec_ubvr, vec_ugvg;
   __m256i const_0x80 = __lasx_xvldi(0x80);
-  __m256i alpha = {0xF000F000F000F000, 0xF000F000F000F000, 0xF000F000F000F000,
-                   0xF000F000F000F000};
+  __m256i alpha = (__m256i)v4u64{0xF000F000F000F000, 0xF000F000F000F000,
+                                 0xF000F000F000F000, 0xF000F000F000F000};
   __m256i mask = {0x00F000F000F000F0, 0x00F000F000F000F0, 0x00F000F000F000F0,
                   0x00F000F000F000F0};
 
@@ -595,8 +595,8 @@ void I422ToARGB1555Row_LASX(const uint8_t* src_y,
   __m256i vec_yb, vec_yg, vec_ub, vec_vr, vec_ug, vec_vg;
   __m256i vec_ubvr, vec_ugvg;
   __m256i const_0x80 = __lasx_xvldi(0x80);
-  __m256i alpha = {0x8000800080008000, 0x8000800080008000, 0x8000800080008000,
-                   0x8000800080008000};
+  __m256i alpha = (__m256i)v4u64{0x8000800080008000, 0x8000800080008000,
+                                 0x8000800080008000, 0x8000800080008000};
 
   YUVTORGB_SETUP(yuvconstants, vec_ub, vec_vr, vec_ug, vec_vg, vec_yg, vec_yb);
   vec_ubvr = __lasx_xvilvl_h(vec_ub, vec_vr);
@@ -775,40 +775,6 @@ void UYVYToUV422Row_LASX(const uint8_t* src_uyvy,
   }
 }
 
-void ARGBToYRow_LASX(const uint8_t* src_argb0, uint8_t* dst_y, int width) {
-  int x;
-  int len = width / 32;
-  __m256i src0, src1, src2, src3, vec0, vec1, vec2, vec3;
-  __m256i tmp0, tmp1, dst0;
-  __m256i const_19 = __lasx_xvldi(0x19);
-  __m256i const_42 = __lasx_xvldi(0x42);
-  __m256i const_81 = __lasx_xvldi(0x81);
-  __m256i const_1080 = {0x1080108010801080, 0x1080108010801080,
-                        0x1080108010801080, 0x1080108010801080};
-  __m256i control = {0x0000000400000000, 0x0000000500000001, 0x0000000600000002,
-                     0x0000000700000003};
-
-  for (x = 0; x < len; x++) {
-    DUP4_ARG2(__lasx_xvld, src_argb0, 0, src_argb0, 32, src_argb0, 64,
-              src_argb0, 96, src0, src1, src2, src3);
-    vec0 = __lasx_xvpickev_b(src1, src0);
-    vec1 = __lasx_xvpickev_b(src3, src2);
-    vec2 = __lasx_xvpickod_b(src1, src0);
-    vec3 = __lasx_xvpickod_b(src3, src2);
-    tmp0 = __lasx_xvmaddwev_h_bu(const_1080, vec0, const_19);
-    tmp1 = __lasx_xvmaddwev_h_bu(const_1080, vec1, const_19);
-    tmp0 = __lasx_xvmaddwev_h_bu(tmp0, vec2, const_81);
-    tmp1 = __lasx_xvmaddwev_h_bu(tmp1, vec3, const_81);
-    tmp0 = __lasx_xvmaddwod_h_bu(tmp0, vec0, const_42);
-    tmp1 = __lasx_xvmaddwod_h_bu(tmp1, vec1, const_42);
-    dst0 = __lasx_xvssrani_b_h(tmp1, tmp0, 8);
-    dst0 = __lasx_xvperm_w(dst0, control);
-    __lasx_xvst(dst0, dst_y, 0);
-    src_argb0 += 128;
-    dst_y += 32;
-  }
-}
-
 void ARGBToUVRow_LASX(const uint8_t* src_argb0,
                       int src_stride_argb,
                       uint8_t* dst_u,
@@ -833,8 +799,8 @@ void ARGBToUVRow_LASX(const uint8_t* src_argb0,
                         0x0009000900090009, 0x0009000900090009};
   __m256i control = {0x0000000400000000, 0x0000000500000001, 0x0000000600000002,
                      0x0000000700000003};
-  __m256i const_0x8080 = {0x8080808080808080, 0x8080808080808080,
-                          0x8080808080808080, 0x8080808080808080};
+  __m256i const_0x8080 = (__m256i)v4u64{0x8080808080808080, 0x8080808080808080,
+                                        0x8080808080808080, 0x8080808080808080};
 
   for (x = 0; x < len; x++) {
     DUP4_ARG2(__lasx_xvld, src_argb0, 0, src_argb0, 32, src_argb0, 64,
@@ -1071,8 +1037,8 @@ void ARGBToUV444Row_LASX(const uint8_t* src_argb,
   __m256i const_38 = __lasx_xvldi(38);
   __m256i const_94 = __lasx_xvldi(94);
   __m256i const_18 = __lasx_xvldi(18);
-  __m256i const_0x8080 = {0x8080808080808080, 0x8080808080808080,
-                          0x8080808080808080, 0x8080808080808080};
+  __m256i const_0x8080 = (__m256i)v4u64{0x8080808080808080, 0x8080808080808080,
+                                        0x8080808080808080, 0x8080808080808080};
   __m256i control = {0x0000000400000000, 0x0000000500000001, 0x0000000600000002,
                      0x0000000700000003};
   for (x = 0; x < len; x++) {
@@ -1182,24 +1148,26 @@ void ARGBAttenuateRow_LASX(const uint8_t* src_argb,
   __m256i b, g, r, a, dst0, dst1;
   __m256i control = {0x0005000100040000, 0x0007000300060002, 0x0005000100040000,
                      0x0007000300060002};
+  __m256i zero = __lasx_xvldi(0);
+  __m256i const_add = __lasx_xvldi(0x8ff);
 
   for (x = 0; x < len; x++) {
     DUP2_ARG2(__lasx_xvld, src_argb, 0, src_argb, 32, src0, src1);
     tmp0 = __lasx_xvpickev_b(src1, src0);
     tmp1 = __lasx_xvpickod_b(src1, src0);
-    b = __lasx_xvpackev_b(tmp0, tmp0);
-    r = __lasx_xvpackod_b(tmp0, tmp0);
-    g = __lasx_xvpackev_b(tmp1, tmp1);
-    a = __lasx_xvpackod_b(tmp1, tmp1);
-    reg0 = __lasx_xvmulwev_w_hu(b, a);
-    reg1 = __lasx_xvmulwod_w_hu(b, a);
-    reg2 = __lasx_xvmulwev_w_hu(r, a);
-    reg3 = __lasx_xvmulwod_w_hu(r, a);
-    reg4 = __lasx_xvmulwev_w_hu(g, a);
-    reg5 = __lasx_xvmulwod_w_hu(g, a);
-    reg0 = __lasx_xvssrani_h_w(reg1, reg0, 24);
-    reg2 = __lasx_xvssrani_h_w(reg3, reg2, 24);
-    reg4 = __lasx_xvssrani_h_w(reg5, reg4, 24);
+    b = __lasx_xvpackev_b(zero, tmp0);
+    r = __lasx_xvpackod_b(zero, tmp0);
+    g = __lasx_xvpackev_b(zero, tmp1);
+    a = __lasx_xvpackod_b(zero, tmp1);
+    reg0 = __lasx_xvmaddwev_w_hu(const_add, b, a);
+    reg1 = __lasx_xvmaddwod_w_hu(const_add, b, a);
+    reg2 = __lasx_xvmaddwev_w_hu(const_add, r, a);
+    reg3 = __lasx_xvmaddwod_w_hu(const_add, r, a);
+    reg4 = __lasx_xvmaddwev_w_hu(const_add, g, a);
+    reg5 = __lasx_xvmaddwod_w_hu(const_add, g, a);
+    reg0 = __lasx_xvssrani_h_w(reg1, reg0, 8);
+    reg2 = __lasx_xvssrani_h_w(reg3, reg2, 8);
+    reg4 = __lasx_xvssrani_h_w(reg5, reg4, 8);
     reg0 = __lasx_xvshuf_h(control, reg0, reg0);
     reg2 = __lasx_xvshuf_h(control, reg2, reg2);
     reg4 = __lasx_xvshuf_h(control, reg4, reg4);
@@ -1216,7 +1184,7 @@ void ARGBAttenuateRow_LASX(const uint8_t* src_argb,
 
 void ARGBToRGB565DitherRow_LASX(const uint8_t* src_argb,
                                 uint8_t* dst_rgb,
-                                const uint32_t dither4,
+                                uint32_t dither4,
                                 int width) {
   int x;
   int len = width / 16;
@@ -1643,8 +1611,8 @@ void ARGB1555ToUVRow_LASX(const uint8_t* src_argb1555,
   __m256i const_38 = __lasx_xvldi(0x413);
   __m256i const_94 = __lasx_xvldi(0x42F);
   __m256i const_18 = __lasx_xvldi(0x409);
-  __m256i const_8080 = {0x8080808080808080, 0x8080808080808080,
-                        0x8080808080808080, 0x8080808080808080};
+  __m256i const_8080 = (__m256i)v4u64{0x8080808080808080, 0x8080808080808080,
+                                      0x8080808080808080, 0x8080808080808080};
 
   for (x = 0; x < len; x++) {
     DUP4_ARG2(__lasx_xvld, src_argb1555, 0, src_argb1555, 32, next_argb1555, 0,
@@ -1760,8 +1728,8 @@ void RGB565ToUVRow_LASX(const uint8_t* src_rgb565,
   __m256i const_38 = __lasx_xvldi(0x413);
   __m256i const_94 = __lasx_xvldi(0x42F);
   __m256i const_18 = __lasx_xvldi(0x409);
-  __m256i const_8080 = {0x8080808080808080, 0x8080808080808080,
-                        0x8080808080808080, 0x8080808080808080};
+  __m256i const_8080 = (__m256i)v4u64{0x8080808080808080, 0x8080808080808080,
+                                      0x8080808080808080, 0x8080808080808080};
 
   for (x = 0; x < len; x++) {
     DUP4_ARG2(__lasx_xvld, src_rgb565, 0, src_rgb565, 32, next_rgb565, 0,
@@ -1811,48 +1779,6 @@ void RGB565ToUVRow_LASX(const uint8_t* src_rgb565,
   }
 }
 
-void RGB24ToYRow_LASX(const uint8_t* src_rgb24, uint8_t* dst_y, int width) {
-  int x;
-  int len = width / 32;
-  __m256i src0, src1, src2;
-  __m256i tmp0, tmp1, tmp2, tmp3;
-  __m256i reg0, reg1, reg2, dst0;
-  __m256i const_129 = __lasx_xvldi(129);
-  __m256i const_br = {0x4219421942194219, 0x4219421942194219,
-                      0x4219421942194219, 0x4219421942194219};
-  __m256i const_1080 = {0x1080108010801080, 0x1080108010801080,
-                        0x1080108010801080, 0x1080108010801080};
-  __m256i shuff0 = {0x0B09080605030200, 0x17151412110F0E0C, 0x0B09080605030200,
-                    0x17151412110F0E0C};
-  __m256i shuff1 = {0x0301001E1D1B1A18, 0x0F0D0C0A09070604, 0x0301001E1D1B1A18,
-                    0x0F0D0C0A09070604};
-  __m256i shuff2 = {0x000A000700040001, 0x001600130010000D, 0x000A000700040001,
-                    0x001600130010000D};
-  __m256i shuff3 = {0x0002001F001C0019, 0x000E000B00080005, 0x0002001F001C0019,
-                    0x000E000B00080005};
-
-  for (x = 0; x < len; x++) {
-    reg0 = __lasx_xvld(src_rgb24, 0);
-    reg1 = __lasx_xvld(src_rgb24, 32);
-    reg2 = __lasx_xvld(src_rgb24, 64);
-    src0 = __lasx_xvpermi_q(reg1, reg0, 0x30);
-    src1 = __lasx_xvpermi_q(reg2, reg0, 0x21);
-    src2 = __lasx_xvpermi_q(reg2, reg1, 0x30);
-    tmp0 = __lasx_xvshuf_b(src1, src0, shuff0);
-    tmp1 = __lasx_xvshuf_b(src1, src2, shuff1);
-    tmp2 = __lasx_xvshuf_b(src1, src0, shuff2);
-    tmp3 = __lasx_xvshuf_b(src1, src2, shuff3);
-    reg0 = __lasx_xvmaddwev_h_bu(const_1080, tmp2, const_129);
-    reg1 = __lasx_xvmaddwev_h_bu(const_1080, tmp3, const_129);
-    reg0 = __lasx_xvdp2add_h_bu(reg0, const_br, tmp0);
-    reg1 = __lasx_xvdp2add_h_bu(reg1, const_br, tmp1);
-    dst0 = __lasx_xvpickod_b(reg1, reg0);
-    __lasx_xvst(dst0, dst_y, 0);
-    dst_y += 32;
-    src_rgb24 += 96;
-  }
-}
-
 void RGB24ToUVRow_LASX(const uint8_t* src_rgb24,
                        int src_stride_rgb24,
                        uint8_t* dst_u,
@@ -1869,8 +1795,8 @@ void RGB24ToUVRow_LASX(const uint8_t* src_rgb24,
   __m256i const_38 = __lasx_xvldi(0x413);
   __m256i const_94 = __lasx_xvldi(0x42F);
   __m256i const_18 = __lasx_xvldi(0x409);
-  __m256i const_8080 = {0x8080808080808080, 0x8080808080808080,
-                        0x8080808080808080, 0x8080808080808080};
+  __m256i const_8080 = (__m256i)v4u64{0x8080808080808080, 0x8080808080808080,
+                                      0x8080808080808080, 0x8080808080808080};
   __m256i shuff0_b = {0x15120F0C09060300, 0x00000000001E1B18,
                       0x15120F0C09060300, 0x00000000001E1B18};
   __m256i shuff1_b = {0x0706050403020100, 0x1D1A1714110A0908,
@@ -1916,48 +1842,6 @@ void RGB24ToUVRow_LASX(const uint8_t* src_rgb24,
   }
 }
 
-void RAWToYRow_LASX(const uint8_t* src_raw, uint8_t* dst_y, int width) {
-  int x;
-  int len = width / 32;
-  __m256i src0, src1, src2;
-  __m256i tmp0, tmp1, tmp2, tmp3;
-  __m256i reg0, reg1, reg2, dst0;
-  __m256i const_129 = __lasx_xvldi(129);
-  __m256i const_br = {0x1942194219421942, 0x1942194219421942,
-                      0x1942194219421942, 0x1942194219421942};
-  __m256i const_1080 = {0x1080108010801080, 0x1080108010801080,
-                        0x1080108010801080, 0x1080108010801080};
-  __m256i shuff0 = {0x0B09080605030200, 0x17151412110F0E0C, 0x0B09080605030200,
-                    0x17151412110F0E0C};
-  __m256i shuff1 = {0x0301001E1D1B1A18, 0x0F0D0C0A09070604, 0x0301001E1D1B1A18,
-                    0x0F0D0C0A09070604};
-  __m256i shuff2 = {0x000A000700040001, 0x001600130010000D, 0x000A000700040001,
-                    0x001600130010000D};
-  __m256i shuff3 = {0x0002001F001C0019, 0x000E000B00080005, 0x0002001F001C0019,
-                    0x000E000B00080005};
-
-  for (x = 0; x < len; x++) {
-    reg0 = __lasx_xvld(src_raw, 0);
-    reg1 = __lasx_xvld(src_raw, 32);
-    reg2 = __lasx_xvld(src_raw, 64);
-    src0 = __lasx_xvpermi_q(reg1, reg0, 0x30);
-    src1 = __lasx_xvpermi_q(reg2, reg0, 0x21);
-    src2 = __lasx_xvpermi_q(reg2, reg1, 0x30);
-    tmp0 = __lasx_xvshuf_b(src1, src0, shuff0);
-    tmp1 = __lasx_xvshuf_b(src1, src2, shuff1);
-    tmp2 = __lasx_xvshuf_b(src1, src0, shuff2);
-    tmp3 = __lasx_xvshuf_b(src1, src2, shuff3);
-    reg0 = __lasx_xvmaddwev_h_bu(const_1080, tmp2, const_129);
-    reg1 = __lasx_xvmaddwev_h_bu(const_1080, tmp3, const_129);
-    reg0 = __lasx_xvdp2add_h_bu(reg0, const_br, tmp0);
-    reg1 = __lasx_xvdp2add_h_bu(reg1, const_br, tmp1);
-    dst0 = __lasx_xvpickod_b(reg1, reg0);
-    __lasx_xvst(dst0, dst_y, 0);
-    dst_y += 32;
-    src_raw += 96;
-  }
-}
-
 void RAWToUVRow_LASX(const uint8_t* src_raw,
                      int src_stride_raw,
                      uint8_t* dst_u,
@@ -1974,8 +1858,8 @@ void RAWToUVRow_LASX(const uint8_t* src_raw,
   __m256i const_38 = __lasx_xvldi(0x413);
   __m256i const_94 = __lasx_xvldi(0x42F);
   __m256i const_18 = __lasx_xvldi(0x409);
-  __m256i const_8080 = {0x8080808080808080, 0x8080808080808080,
-                        0x8080808080808080, 0x8080808080808080};
+  __m256i const_8080 = (__m256i)v4u64{0x8080808080808080, 0x8080808080808080,
+                                      0x8080808080808080, 0x8080808080808080};
   __m256i shuff0_r = {0x15120F0C09060300, 0x00000000001E1B18,
                       0x15120F0C09060300, 0x00000000001E1B18};
   __m256i shuff1_r = {0x0706050403020100, 0x1D1A1714110A0908,
@@ -2118,36 +2002,231 @@ void NV21ToARGBRow_LASX(const uint8_t* src_y,
   }
 }
 
-void ARGBToYJRow_LASX(const uint8_t* src_argb, uint8_t* dst_y, int width) {
-  int x;
-  int len = width / 32;
-  __m256i src0, src1, src2, src3, dst0;
-  __m256i tmp0, tmp1, tmp2, tmp3;
-  __m256i reg0, reg1;
-  __m256i const_128 = __lasx_xvldi(0x480);
-  __m256i const_150 = __lasx_xvldi(0x96);
-  __m256i const_br = {0x4D1D4D1D4D1D4D1D, 0x4D1D4D1D4D1D4D1D,
-                      0x4D1D4D1D4D1D4D1D, 0x4D1D4D1D4D1D4D1D};
-  __m256i shuff = {0x0000000400000000, 0x0000000500000001, 0x0000000600000002,
-                   0x0000000700000003};
+#ifndef RgbConstants
+struct RgbConstants {
+  uint8_t kRGBToY[4];
+  uint16_t kAddY;
+  uint16_t pad;
+};
+#define RgbConstants RgbConstants
 
-  for (x = 0; x < len; x++) {
-    DUP4_ARG2(__lasx_xvld, src_argb, 0, src_argb, 32, src_argb, 64, src_argb,
-              96, src0, src1, src2, src3);
-    tmp0 = __lasx_xvpickev_b(src1, src0);
-    tmp1 = __lasx_xvpickod_b(src1, src0);
-    tmp2 = __lasx_xvpickev_b(src3, src2);
-    tmp3 = __lasx_xvpickod_b(src3, src2);
-    reg0 = __lasx_xvmaddwev_h_bu(const_128, tmp1, const_150);
-    reg1 = __lasx_xvmaddwev_h_bu(const_128, tmp3, const_150);
-    reg0 = __lasx_xvdp2add_h_bu(reg0, const_br, tmp0);
-    reg1 = __lasx_xvdp2add_h_bu(reg1, const_br, tmp2);
-    dst0 = __lasx_xvpickod_b(reg1, reg0);
-    dst0 = __lasx_xvperm_w(dst0, shuff);
-    __lasx_xvst(dst0, dst_y, 0);
-    dst_y += 32;
-    src_argb += 128;
-  }
+// RGB to JPeg coefficients
+// B * 0.1140 coefficient = 29
+// G * 0.5870 coefficient = 150
+// R * 0.2990 coefficient = 77
+// Add 0.5 = 0x80
+static const struct RgbConstants kRgb24JPEGConstants = {{29, 150, 77, 0},
+                                                        128,
+                                                        0};
+
+static const struct RgbConstants kRawJPEGConstants = {{77, 150, 29, 0}, 128, 0};
+
+// RGB to BT.601 coefficients
+// B * 0.1016 coefficient = 25
+// G * 0.5078 coefficient = 129
+// R * 0.2578 coefficient = 66
+// Add 16.5 = 0x1080
+
+static const struct RgbConstants kRgb24I601Constants = {{25, 129, 66, 0},
+                                                        0x1080,
+                                                        0};
+
+static const struct RgbConstants kRawI601Constants = {{66, 129, 25, 0},
+                                                      0x1080,
+                                                      0};
+#endif  // RgbConstants
+
+// ARGB expects first 3 values to contain RGB and 4th value is ignored.
+static void ARGBToYMatrixRow_LASX(const uint8_t* src_argb,
+                                  uint8_t* dst_y,
+                                  int width,
+                                  const struct RgbConstants* rgbconstants) {
+  int32_t shuff[8] = {0, 4, 1, 5, 2, 6, 3, 7};
+  asm volatile(
+      "xvldrepl.b      $xr0,  %3,    0             \n\t"  // load rgbconstants
+      "xvldrepl.b      $xr1,  %3,    1             \n\t"  // load rgbconstants
+      "xvldrepl.b      $xr2,  %3,    2             \n\t"  // load rgbconstants
+      "xvldrepl.h      $xr3,  %3,    4             \n\t"  // load rgbconstants
+      "xvld            $xr20, %4,    0             \n\t"  // load shuff
+      "1:                                          \n\t"
+      "xvld            $xr4,  %0,    0             \n\t"
+      "xvld            $xr5,  %0,    32            \n\t"
+      "xvld            $xr6,  %0,    64            \n\t"
+      "xvld            $xr7,  %0,    96            \n\t"  // load 32 pixels of
+                                                          // ARGB
+      "xvor.v          $xr12, $xr3,  $xr3          \n\t"
+      "xvor.v          $xr13, $xr3,  $xr3          \n\t"
+      "addi.d          %2,    %2,    -32           \n\t"  // 32 processed per
+                                                          // loop.
+      "xvpickev.b      $xr8,  $xr5,  $xr4          \n\t"  // BR
+      "xvpickev.b      $xr10, $xr7,  $xr6          \n\t"
+      "xvpickod.b      $xr9,  $xr5,  $xr4          \n\t"  // GA
+      "xvpickod.b      $xr11, $xr7,  $xr6          \n\t"
+      "xvmaddwev.h.bu  $xr12, $xr8,  $xr0          \n\t"  // B
+      "xvmaddwev.h.bu  $xr13, $xr10, $xr0          \n\t"
+      "xvmaddwev.h.bu  $xr12, $xr9,  $xr1          \n\t"  // G
+      "xvmaddwev.h.bu  $xr13, $xr11, $xr1          \n\t"
+      "xvmaddwod.h.bu  $xr12, $xr8,  $xr2          \n\t"  // R
+      "xvmaddwod.h.bu  $xr13, $xr10, $xr2          \n\t"
+      "addi.d          %0,    %0,    128           \n\t"
+      "xvpickod.b      $xr10, $xr13, $xr12         \n\t"
+      "xvperm.w        $xr11, $xr10, $xr20         \n\t"
+      "xvst            $xr11, %1,    0             \n\t"
+      "addi.d          %1,    %1,    32            \n\t"
+      "bnez            %2,    1b                   \n\t"
+      : "+&r"(src_argb),  // %0
+        "+&r"(dst_y),     // %1
+        "+&r"(width)      // %2
+      : "r"(rgbconstants), "r"(shuff)
+      : "memory");
+}
+
+void ARGBToYRow_LASX(const uint8_t* src_argb, uint8_t* dst_y, int width) {
+  ARGBToYMatrixRow_LASX(src_argb, dst_y, width, &kRgb24I601Constants);
+}
+
+void ARGBToYJRow_LASX(const uint8_t* src_argb, uint8_t* dst_yj, int width) {
+  ARGBToYMatrixRow_LASX(src_argb, dst_yj, width, &kRgb24JPEGConstants);
+}
+
+void ABGRToYRow_LASX(const uint8_t* src_abgr, uint8_t* dst_y, int width) {
+  ARGBToYMatrixRow_LASX(src_abgr, dst_y, width, &kRawI601Constants);
+}
+
+void ABGRToYJRow_LASX(const uint8_t* src_abgr, uint8_t* dst_yj, int width) {
+  ARGBToYMatrixRow_LASX(src_abgr, dst_yj, width, &kRawJPEGConstants);
+}
+
+// RGBA expects first value to be A and ignored, then 3 values to contain RGB.
+// Same code as ARGB, except the LD4
+static void RGBAToYMatrixRow_LASX(const uint8_t* src_rgba,
+                                  uint8_t* dst_y,
+                                  int width,
+                                  const struct RgbConstants* rgbconstants) {
+  int32_t shuff[8] = {0, 4, 1, 5, 2, 6, 3, 7};
+  asm volatile(
+      "xvldrepl.b      $xr0,  %3,    0             \n\t"  // load rgbconstants
+      "xvldrepl.b      $xr1,  %3,    1             \n\t"  // load rgbconstants
+      "xvldrepl.b      $xr2,  %3,    2             \n\t"  // load rgbconstants
+      "xvldrepl.h      $xr3,  %3,    4             \n\t"  // load rgbconstants
+      "xvld            $xr20, %4,    0             \n\t"  // load shuff
+      "1:                                          \n\t"
+      "xvld            $xr4,  %0,    0             \n\t"
+      "xvld            $xr5,  %0,    32            \n\t"
+      "xvld            $xr6,  %0,    64            \n\t"
+      "xvld            $xr7,  %0,    96            \n\t"  // load 32 pixels of
+                                                          // RGBA
+      "xvor.v          $xr12, $xr3,  $xr3          \n\t"
+      "xvor.v          $xr13, $xr3,  $xr3          \n\t"
+      "addi.d          %2,    %2,    -32           \n\t"  // 32 processed per
+                                                          // loop.
+      "xvpickev.b      $xr8,  $xr5,  $xr4          \n\t"  // AG
+      "xvpickev.b      $xr10, $xr7,  $xr6          \n\t"
+      "xvpickod.b      $xr9,  $xr5,  $xr4          \n\t"  // BR
+      "xvpickod.b      $xr11, $xr7,  $xr6          \n\t"
+      "xvmaddwev.h.bu  $xr12, $xr9,  $xr0          \n\t"  // B
+      "xvmaddwev.h.bu  $xr13, $xr11, $xr0          \n\t"
+      "xvmaddwod.h.bu  $xr12, $xr8,  $xr1          \n\t"  // G
+      "xvmaddwod.h.bu  $xr13, $xr10, $xr1          \n\t"
+      "xvmaddwod.h.bu  $xr12, $xr9,  $xr2          \n\t"  // R
+      "xvmaddwod.h.bu  $xr13, $xr11, $xr2          \n\t"
+      "addi.d          %0,    %0,    128           \n\t"
+      "xvpickod.b      $xr10, $xr13, $xr12         \n\t"
+      "xvperm.w        $xr11, $xr10, $xr20         \n\t"
+      "xvst            $xr11, %1,    0             \n\t"
+      "addi.d          %1,    %1,    32            \n\t"
+      "bnez            %2,    1b                   \n\t"
+      : "+&r"(src_rgba),  // %0
+        "+&r"(dst_y),     // %1
+        "+&r"(width)      // %2
+      : "r"(rgbconstants), "r"(shuff)
+      : "memory");
+}
+
+void RGBAToYRow_LASX(const uint8_t* src_rgba, uint8_t* dst_y, int width) {
+  RGBAToYMatrixRow_LASX(src_rgba, dst_y, width, &kRgb24I601Constants);
+}
+
+void RGBAToYJRow_LASX(const uint8_t* src_rgba, uint8_t* dst_yj, int width) {
+  RGBAToYMatrixRow_LASX(src_rgba, dst_yj, width, &kRgb24JPEGConstants);
+}
+
+void BGRAToYRow_LASX(const uint8_t* src_bgra, uint8_t* dst_y, int width) {
+  RGBAToYMatrixRow_LASX(src_bgra, dst_y, width, &kRawI601Constants);
+}
+
+static void RGBToYMatrixRow_LASX(const uint8_t* src_rgba,
+                                 uint8_t* dst_y,
+                                 int width,
+                                 const struct RgbConstants* rgbconstants) {
+  int8_t shuff[128] = {
+      0,  2,  3,  5,  6,  8, 9,  11, 12, 14, 15, 17, 18, 20, 21, 23,
+      0,  2,  3,  5,  6,  8, 9,  11, 12, 14, 15, 17, 18, 20, 21, 23,
+      24, 26, 27, 29, 30, 0, 1,  3,  4,  6,  7,  9,  10, 12, 13, 15,
+      24, 26, 27, 29, 30, 0, 1,  3,  4,  6,  7,  9,  10, 12, 13, 15,
+      1,  0,  4,  0,  7,  0, 10, 0,  13, 0,  16, 0,  19, 0,  22, 0,
+      1,  0,  4,  0,  7,  0, 10, 0,  13, 0,  16, 0,  19, 0,  22, 0,
+      25, 0,  28, 0,  31, 0, 2,  0,  5,  0,  8,  0,  11, 0,  14, 0,
+      25, 0,  28, 0,  31, 0, 2,  0,  5,  0,  8,  0,  11, 0,  14, 0};
+  asm volatile(
+      "xvldrepl.b      $xr0,  %3,    0             \n\t"  // load rgbconstants
+      "xvldrepl.b      $xr1,  %3,    1             \n\t"  // load rgbconstants
+      "xvldrepl.b      $xr2,  %3,    2             \n\t"  // load rgbconstants
+      "xvldrepl.h      $xr3,  %3,    4             \n\t"  // load rgbconstants
+      "xvld            $xr4,  %4,    0             \n\t"  // load shuff
+      "xvld            $xr5,  %4,    32            \n\t"
+      "xvld            $xr6,  %4,    64            \n\t"
+      "xvld            $xr7,  %4,    96            \n\t"
+      "1:                                          \n\t"
+      "xvld            $xr8,  %0,    0             \n\t"
+      "xvld            $xr9,  %0,    32            \n\t"
+      "xvld            $xr10, %0,    64            \n\t"  // load 32 pixels of
+                                                          // RGB
+      "xvor.v          $xr12, $xr3,  $xr3          \n\t"
+      "xvor.v          $xr13, $xr3,  $xr3          \n\t"
+      "xvor.v          $xr11, $xr9,  $xr9          \n\t"
+      "addi.d          %2,    %2,    -32           \n\t"  // 32 processed per
+                                                          // loop.
+      "xvpermi.q       $xr9,  $xr8,  0x30          \n\t"  // src0
+      "xvpermi.q       $xr8,  $xr10, 0x03          \n\t"  // src1
+      "xvpermi.q       $xr10, $xr11, 0x30          \n\t"  // src2
+      "xvshuf.b        $xr14, $xr8,  $xr9,  $xr4   \n\t"
+      "xvshuf.b        $xr15, $xr8,  $xr10, $xr5   \n\t"
+      "xvshuf.b        $xr16, $xr8,  $xr9,  $xr6   \n\t"
+      "xvshuf.b        $xr17, $xr8,  $xr10, $xr7   \n\t"
+      "xvmaddwev.h.bu  $xr12, $xr16, $xr1          \n\t"  // G
+      "xvmaddwev.h.bu  $xr13, $xr17, $xr1          \n\t"
+      "xvmaddwev.h.bu  $xr12, $xr14, $xr0          \n\t"  // B
+      "xvmaddwev.h.bu  $xr13, $xr15, $xr0          \n\t"
+      "xvmaddwod.h.bu  $xr12, $xr14, $xr2          \n\t"  // R
+      "xvmaddwod.h.bu  $xr13, $xr15, $xr2          \n\t"
+      "addi.d          %0,    %0,    96            \n\t"
+      "xvpickod.b      $xr10, $xr13, $xr12         \n\t"
+      "xvst            $xr10, %1,    0             \n\t"
+      "addi.d          %1,    %1,    32            \n\t"
+      "bnez            %2,    1b                   \n\t"
+      : "+&r"(src_rgba),    // %0
+        "+&r"(dst_y),       // %1
+        "+&r"(width)        // %2
+      : "r"(rgbconstants),  // %3
+        "r"(shuff)          // %4
+      : "memory");
+}
+
+void RGB24ToYJRow_LASX(const uint8_t* src_rgb24, uint8_t* dst_yj, int width) {
+  RGBToYMatrixRow_LASX(src_rgb24, dst_yj, width, &kRgb24JPEGConstants);
+}
+
+void RAWToYJRow_LASX(const uint8_t* src_raw, uint8_t* dst_yj, int width) {
+  RGBToYMatrixRow_LASX(src_raw, dst_yj, width, &kRawJPEGConstants);
+}
+
+void RGB24ToYRow_LASX(const uint8_t* src_rgb24, uint8_t* dst_y, int width) {
+  RGBToYMatrixRow_LASX(src_rgb24, dst_y, width, &kRgb24I601Constants);
+}
+
+void RAWToYRow_LASX(const uint8_t* src_raw, uint8_t* dst_y, int width) {
+  RGBToYMatrixRow_LASX(src_raw, dst_y, width, &kRawI601Constants);
 }
 
 void ARGBToUVJRow_LASX(const uint8_t* src_argb,
@@ -2168,8 +2247,8 @@ void ARGBToUVJRow_LASX(const uint8_t* src_argb,
   __m256i const_21 = __lasx_xvldi(0x415);
   __m256i const_53 = __lasx_xvldi(0x435);
   __m256i const_10 = __lasx_xvldi(0x40A);
-  __m256i const_8080 = {0x8080808080808080, 0x8080808080808080,
-                        0x8080808080808080, 0x8080808080808080};
+  __m256i const_8080 = (__m256i)v4u64{0x8080808080808080, 0x8080808080808080,
+                                      0x8080808080808080, 0x8080808080808080};
   __m256i shuff = {0x1614060412100200, 0x1E1C0E0C1A180A08, 0x1715070513110301,
                    0x1F1D0F0D1B190B09};
 
@@ -2221,6 +2300,17 @@ void ARGBToUVJRow_LASX(const uint8_t* src_argb,
     next_argb += 128;
   }
 }
+
+// undef for unified sources build
+#undef ALPHA_VAL
+#undef YUVTORGB_SETUP
+#undef READYUV422_D
+#undef READYUV422
+#undef YUVTORGB_D
+#undef YUVTORGB
+#undef STOREARGB_D
+#undef STOREARGB
+#undef RGBTOUV
 
 #ifdef __cplusplus
 }  // extern "C"

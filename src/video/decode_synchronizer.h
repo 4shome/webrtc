@@ -15,10 +15,10 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <set>
 #include <utility>
 
-#include "absl/types/optional.h"
 #include "api/metronome/metronome.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/task_queue_base.h"
@@ -53,12 +53,12 @@ namespace webrtc {
 //
 // DecodeSynchronizer is single threaded - all method calls must run on the
 // `worker_queue_`.
-class DecodeSynchronizer : private Metronome::TickListener {
+class DecodeSynchronizer {
  public:
   DecodeSynchronizer(Clock* clock,
                      Metronome* metronome,
                      TaskQueueBase* worker_queue);
-  ~DecodeSynchronizer() override;
+  ~DecodeSynchronizer();
   DecodeSynchronizer(const DecodeSynchronizer&) = delete;
   DecodeSynchronizer& operator=(const DecodeSynchronizer&) = delete;
 
@@ -103,7 +103,7 @@ class DecodeSynchronizer : private Metronome::TickListener {
     Timestamp LatestDecodeTime();
 
     // FrameDecodeScheduler implementation.
-    absl::optional<uint32_t> ScheduledRtpTimestamp() override;
+    std::optional<uint32_t> ScheduledRtpTimestamp() override;
     void ScheduleFrame(uint32_t rtp,
                        FrameDecodeTiming::FrameSchedule schedule,
                        FrameReleaseCallback cb) override;
@@ -112,16 +112,15 @@ class DecodeSynchronizer : private Metronome::TickListener {
 
    private:
     DecodeSynchronizer* sync_;
-    absl::optional<ScheduledFrame> next_frame_;
+    std::optional<ScheduledFrame> next_frame_;
     bool stopped_ = false;
   };
 
   void OnFrameScheduled(SynchronizedFrameDecodeScheduler* scheduler);
   void RemoveFrameScheduler(SynchronizedFrameDecodeScheduler* scheduler);
 
-  // Metronome::TickListener implementation.
-  void OnTick() override;
-  TaskQueueBase* OnTickTaskQueue() override;
+  void ScheduleNextTick();
+  void OnTick();
 
   Clock* const clock_;
   TaskQueueBase* const worker_queue_;
@@ -130,6 +129,8 @@ class DecodeSynchronizer : private Metronome::TickListener {
   Timestamp expected_next_tick_ = Timestamp::PlusInfinity();
   std::set<SynchronizedFrameDecodeScheduler*> schedulers_
       RTC_GUARDED_BY(worker_queue_);
+  bool tick_scheduled_ = false;
+  ScopedTaskSafetyDetached safety_;
 };
 
 }  // namespace webrtc

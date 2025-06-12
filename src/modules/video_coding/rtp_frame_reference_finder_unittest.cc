@@ -8,19 +8,27 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "modules/video_coding/rtp_frame_reference_finder.h"
+
+#include <cstdint>
 #include <cstring>
-#include <limits>
 #include <map>
+#include <memory>
+#include <optional>
 #include <set>
 #include <utility>
-#include <vector>
 
-#include "modules/video_coding/frame_object.h"
-#include "modules/video_coding/packet_buffer.h"
-#include "modules/video_coding/rtp_frame_reference_finder.h"
+#include "api/rtp_packet_infos.h"
+#include "api/video/encoded_frame.h"
+#include "api/video/encoded_image.h"
+#include "api/video/video_codec_type.h"
+#include "api/video/video_content_type.h"
+#include "api/video/video_frame_type.h"
+#include "api/video/video_rotation.h"
+#include "api/video/video_timing.h"
+#include "modules/rtp_rtcp/source/frame_object.h"
+#include "modules/rtp_rtcp/source/rtp_video_header.h"
 #include "rtc_base/random.h"
-#include "rtc_base/ref_count.h"
-#include "system_wrappers/include/clock.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -53,7 +61,8 @@ std::unique_ptr<RtpFrameObject> CreateFrame(
       kVideoRotation_0,
       VideoContentType::UNSPECIFIED,
       video_header,
-      /*color_space=*/absl::nullopt,
+      /*color_space=*/std::nullopt,
+      /*frame_instrumentation_data=*/std::nullopt,
       RtpPacketInfos(),
       EncodedImageBuffer::Create(/*size=*/0));
   // clang-format on
@@ -147,7 +156,7 @@ class TestRtpFrameReferenceFinder : public ::testing::Test {
     RefsToSet(m, refs...);
   }
 
-  void RefsToSet(std::set<int64_t>* m) const {}
+  void RefsToSet(std::set<int64_t>* /* m */) const {}
 
   Random rand_;
   std::unique_ptr<RtpFrameReferenceFinder> reference_finder_;

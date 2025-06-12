@@ -13,6 +13,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <algorithm>
 
 #include "modules/audio_processing/ns/fast_math.h"
@@ -29,10 +30,10 @@ WienerFilter::WienerFilter(const SuppressionParams& suppression_params)
 
 void WienerFilter::Update(
     int32_t num_analyzed_frames,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> noise_spectrum,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> prev_noise_spectrum,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> parametric_noise_spectrum,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> signal_spectrum) {
+    ArrayView<const float, kFftSizeBy2Plus1> noise_spectrum,
+    ArrayView<const float, kFftSizeBy2Plus1> prev_noise_spectrum,
+    ArrayView<const float, kFftSizeBy2Plus1> parametric_noise_spectrum,
+    ArrayView<const float, kFftSizeBy2Plus1> signal_spectrum) {
   for (size_t i = 0; i < kFftSizeBy2Plus1; ++i) {
     // Previous estimate based on previous frame with gain filter.
     float prev_tsa = spectrum_prev_process_[i] /

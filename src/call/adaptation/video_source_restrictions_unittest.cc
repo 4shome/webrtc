@@ -10,8 +10,10 @@
 
 #include "call/adaptation/video_source_restrictions.h"
 
-#include "test/gtest.h"
+#include <cstddef>
+#include <optional>
 
+#include "test/gtest.h"
 namespace webrtc {
 
 namespace {
@@ -19,19 +21,19 @@ namespace {
 const size_t kHdPixels = 1280 * 720;
 
 const VideoSourceRestrictions kUnlimited;
-const VideoSourceRestrictions k15fps(absl::nullopt, absl::nullopt, 15.0);
-const VideoSourceRestrictions kHd(kHdPixels, kHdPixels, absl::nullopt);
+const VideoSourceRestrictions k15fps(std::nullopt, std::nullopt, 15.0);
+const VideoSourceRestrictions kHd(kHdPixels, kHdPixels, std::nullopt);
 const VideoSourceRestrictions kHd15fps(kHdPixels, kHdPixels, 15.0);
 const VideoSourceRestrictions kVga7fps(kHdPixels / 2, kHdPixels / 2, 7.0);
 
 VideoSourceRestrictions RestrictionsFromMaxPixelsPerFrame(
     size_t max_pixels_per_frame) {
-  return VideoSourceRestrictions(max_pixels_per_frame, absl::nullopt,
-                                 absl::nullopt);
+  return VideoSourceRestrictions(max_pixels_per_frame, std::nullopt,
+                                 std::nullopt);
 }
 
 VideoSourceRestrictions RestrictionsFromMaxFrameRate(double max_frame_rate) {
-  return VideoSourceRestrictions(absl::nullopt, absl::nullopt, max_frame_rate);
+  return VideoSourceRestrictions(std::nullopt, std::nullopt, max_frame_rate);
 }
 
 }  // namespace
@@ -124,6 +126,23 @@ TEST(VideoSourceRestrictions,
   // One changed framerate, the other resolution; not an increase or decrease.
   EXPECT_FALSE(DidRestrictionsIncrease(kHd, k15fps));
   EXPECT_FALSE(DidRestrictionsDecrease(kHd, k15fps));
+}
+
+TEST(VideoSourceRestrictions, UpdateMin) {
+  VideoSourceRestrictions one(kHdPixels / 2, kHdPixels, 7.0);
+  VideoSourceRestrictions two(kHdPixels, kHdPixels / 3, 15.0);
+
+  one.UpdateMin(two);
+
+  EXPECT_EQ(one.max_pixels_per_frame(), kHdPixels / 2);
+  EXPECT_EQ(one.target_pixels_per_frame(), kHdPixels / 3);
+  EXPECT_EQ(one.max_frame_rate(), 7.0);
+
+  two.UpdateMin(one);
+
+  EXPECT_EQ(two.max_pixels_per_frame(), kHdPixels / 2);
+  EXPECT_EQ(two.target_pixels_per_frame(), kHdPixels / 3);
+  EXPECT_EQ(two.max_frame_rate(), 7.0);
 }
 
 }  // namespace webrtc

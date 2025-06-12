@@ -15,7 +15,9 @@ import android.os.Process;
 import androidx.annotation.Nullable;
 import java.util.List;
 import org.webrtc.Logging.Severity;
+import org.webrtc.MediaStreamTrack;
 import org.webrtc.PeerConnection;
+import org.webrtc.RtpCapabilities;
 import org.webrtc.audio.AudioDeviceModule;
 import org.webrtc.audio.JavaAudioDeviceModule;
 
@@ -134,13 +136,13 @@ public class PeerConnectionFactory {
     // Keep in sync with webrtc/rtc_base/network.h!
     //
     // These bit fields are defined for `networkIgnoreMask` below.
-    static final int ADAPTER_TYPE_UNKNOWN = 0;
-    static final int ADAPTER_TYPE_ETHERNET = 1 << 0;
-    static final int ADAPTER_TYPE_WIFI = 1 << 1;
-    static final int ADAPTER_TYPE_CELLULAR = 1 << 2;
-    static final int ADAPTER_TYPE_VPN = 1 << 3;
-    static final int ADAPTER_TYPE_LOOPBACK = 1 << 4;
-    static final int ADAPTER_TYPE_ANY = 1 << 5;
+    public static final int ADAPTER_TYPE_UNKNOWN = 0;
+    public static final int ADAPTER_TYPE_ETHERNET = 1 << 0;
+    public static final int ADAPTER_TYPE_WIFI = 1 << 1;
+    public static final int ADAPTER_TYPE_CELLULAR = 1 << 2;
+    public static final int ADAPTER_TYPE_VPN = 1 << 3;
+    public static final int ADAPTER_TYPE_LOOPBACK = 1 << 4;
+    public static final int ADAPTER_TYPE_ANY = 1 << 5;
 
     public int networkIgnoreMask;
     public boolean disableEncryption;
@@ -289,6 +291,7 @@ public class PeerConnectionFactory {
    * PeerConnectionFactory. Replaces all the old initialization methods. Must not be called while
    * a PeerConnectionFactory is alive.
    */
+  @SuppressWarnings("EnumOrdinal")
   public static void initialize(InitializationOptions options) {
     ContextUtils.initialize(options.applicationContext);
     NativeLibrary.initialize(options.nativeLibraryLoader, options.nativeLibraryName);
@@ -436,10 +439,10 @@ public class PeerConnectionFactory {
 
   /**
    * Create video source with given parameters. If alignTimestamps is false, the caller is
-   * responsible for aligning the frame timestamps to rtc::TimeNanos(). This can be used to achieve
+   * responsible for aligning the frame timestamps to webrtc::TimeNanos(). This can be used to achieve
    * higher accuracy if there is a big delay between frame creation and frames being delivered to
    * the returned video source. If alignTimestamps is true, timestamps will be aligned to
-   * rtc::TimeNanos() when they arrive to the returned video source.
+   * webrtc::TimeNanos() when they arrive to the returned video source.
    */
   public VideoSource createVideoSource(boolean isScreencast, boolean alignTimestamps) {
     checkPeerConnectionFactoryExists();
@@ -469,6 +472,16 @@ public class PeerConnectionFactory {
   public AudioTrack createAudioTrack(String id, AudioSource source) {
     checkPeerConnectionFactoryExists();
     return new AudioTrack(nativeCreateAudioTrack(nativeFactory, id, source.getNativeAudioSource()));
+  }
+
+  public RtpCapabilities getRtpReceiverCapabilities(MediaStreamTrack.MediaType mediaType) {
+    checkPeerConnectionFactoryExists();
+    return nativeGetRtpReceiverCapabilities(nativeFactory, mediaType);
+  }
+
+  public RtpCapabilities getRtpSenderCapabilities(MediaStreamTrack.MediaType mediaType) {
+    checkPeerConnectionFactoryExists();
+    return nativeGetRtpSenderCapabilities(nativeFactory, mediaType);
   }
 
   // Starts recording an AEC dump. Ownership of the file is transfered to the
@@ -615,4 +628,8 @@ public class PeerConnectionFactory {
   private static native void nativeInjectLoggable(JNILogging jniLogging, int severity);
   private static native void nativeDeleteLoggable();
   private static native void nativePrintStackTrace(int tid);
+  private static native RtpCapabilities nativeGetRtpSenderCapabilities(
+      long factory, MediaStreamTrack.MediaType mediaType);
+  private static native RtpCapabilities nativeGetRtpReceiverCapabilities(
+      long factory, MediaStreamTrack.MediaType mediaType);
 }

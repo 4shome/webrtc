@@ -10,8 +10,12 @@
 
 #include "call/rtp_stream_receiver_controller.h"
 
+#include <cstdint>
 #include <memory>
 
+#include "api/sequence_checker.h"
+#include "call/rtp_packet_sink_interface.h"
+#include "call/rtp_stream_receiver_controller_interface.h"
 #include "rtc_base/logging.h"
 
 namespace webrtc {
@@ -48,6 +52,12 @@ RtpStreamReceiverController::CreateReceiver(uint32_t ssrc,
 bool RtpStreamReceiverController::OnRtpPacket(const RtpPacketReceived& packet) {
   RTC_DCHECK_RUN_ON(&demuxer_sequence_);
   return demuxer_.OnRtpPacket(packet);
+}
+
+void RtpStreamReceiverController::OnRecoveredPacket(
+    const RtpPacketReceived& packet) {
+  RTC_DCHECK_RUN_ON(&demuxer_sequence_);
+  demuxer_.OnRtpPacket(packet);
 }
 
 bool RtpStreamReceiverController::AddSink(uint32_t ssrc,

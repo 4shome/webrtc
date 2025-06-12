@@ -175,9 +175,8 @@ TEST(AudioNetworkAdaptorImplTest,
 TEST(AudioNetworkAdaptorImplTest,
      DumpEncoderRuntimeConfigIsCalledOnGetEncoderRuntimeConfig) {
   test::ScopedFieldTrials override_field_trials(
-      "WebRTC-Audio-BitrateAdaptation/Enabled/WebRTC-Audio-FecAdaptation/"
-      "Enabled/");
-  rtc::ScopedFakeClock fake_clock;
+      "WebRTC-Audio-FecAdaptation/Enabled/");
+  ScopedFakeClock fake_clock;
   fake_clock.AdvanceTime(TimeDelta::Millis(kClockInitialTimeMs));
   auto states = CreateAudioNetworkAdaptor();
   AudioEncoderRuntimeConfig config;
@@ -195,7 +194,7 @@ TEST(AudioNetworkAdaptorImplTest,
 
 TEST(AudioNetworkAdaptorImplTest,
      DumpNetworkMetricsIsCalledOnSetNetworkMetrics) {
-  rtc::ScopedFakeClock fake_clock;
+  ScopedFakeClock fake_clock;
   fake_clock.AdvanceTime(TimeDelta::Millis(kClockInitialTimeMs));
 
   auto states = CreateAudioNetworkAdaptor();
@@ -248,8 +247,7 @@ TEST(AudioNetworkAdaptorImplTest,
 
 TEST(AudioNetworkAdaptorImplTest, LogRuntimeConfigOnGetEncoderRuntimeConfig) {
   test::ScopedFieldTrials override_field_trials(
-      "WebRTC-Audio-BitrateAdaptation/Enabled/WebRTC-Audio-FecAdaptation/"
-      "Enabled/");
+      "WebRTC-Audio-FecAdaptation/Enabled/");
   auto states = CreateAudioNetworkAdaptor();
 
   AudioEncoderRuntimeConfig config;

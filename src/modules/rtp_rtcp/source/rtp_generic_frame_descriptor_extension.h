@@ -21,19 +21,22 @@
 
 namespace webrtc {
 
+// Trait to read/write the generic frame descriptor, the early version of the
+// dependency descriptor extension. Usage of this rtp header extension is
+// discouraged in favor of the dependency descriptor.
 class RtpGenericFrameDescriptorExtension00 {
  public:
   using value_type = RtpGenericFrameDescriptor;
-  static constexpr RTPExtensionType kId = kRtpExtensionGenericFrameDescriptor00;
+  static constexpr RTPExtensionType kId = kRtpExtensionGenericFrameDescriptor;
   static constexpr absl::string_view Uri() {
     return RtpExtension::kGenericFrameDescriptorUri00;
   }
   static constexpr int kMaxSizeBytes = 16;
 
-  static bool Parse(rtc::ArrayView<const uint8_t> data,
+  static bool Parse(ArrayView<const uint8_t> data,
                     RtpGenericFrameDescriptor* descriptor);
   static size_t ValueSize(const RtpGenericFrameDescriptor& descriptor);
-  static bool Write(rtc::ArrayView<uint8_t> data,
+  static bool Write(ArrayView<uint8_t> data,
                     const RtpGenericFrameDescriptor& descriptor);
 };
 

@@ -47,7 +47,7 @@ class AudioMultiVectorTest : public ::testing::TestWithParam<size_t> {
     // And so on.
     for (size_t i = 0; i < array_length(); ++i) {
       for (size_t j = 1; j <= num_channels_; ++j) {
-        *ptr = rtc::checked_cast<int16_t>(j * 100 + i);
+        *ptr = checked_cast<int16_t>(j * 100 + i);
         ++ptr;
       }
     }
@@ -307,6 +307,12 @@ TEST_P(AudioMultiVectorTest, CopyChannel) {
     // Verify that the last and the first channels are identical.
     EXPECT_EQ(vec[0][i], vec[num_channels_ - 1][i]);
   }
+}
+
+TEST_P(AudioMultiVectorTest, PushBackEmptyArray) {
+  AudioMultiVector vec(num_channels_);
+  vec.PushBackInterleaved({});
+  EXPECT_TRUE(vec.Empty());
 }
 
 INSTANTIATE_TEST_SUITE_P(TestNumChannels,

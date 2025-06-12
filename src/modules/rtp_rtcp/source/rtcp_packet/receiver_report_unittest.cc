@@ -10,8 +10,13 @@
 
 #include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <utility>
+#include <vector>
 
+#include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
+#include "rtc_base/buffer.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/rtcp_packet_parser.h"
@@ -51,7 +56,7 @@ TEST(RtcpPacketReceiverReportTest, ParseWithOneReportBlock) {
   const ReportBlock& rb = parsed.report_blocks().front();
   EXPECT_EQ(kRemoteSsrc, rb.source_ssrc());
   EXPECT_EQ(kFractionLost, rb.fraction_lost());
-  EXPECT_EQ(kCumulativeLost, rb.cumulative_lost_signed());
+  EXPECT_EQ(kCumulativeLost, rb.cumulative_lost());
   EXPECT_EQ(kExtHighestSeqNum, rb.extended_high_seq_num());
   EXPECT_EQ(kJitter, rb.jitter());
   EXPECT_EQ(kLastSr, rb.last_sr());
@@ -59,7 +64,7 @@ TEST(RtcpPacketReceiverReportTest, ParseWithOneReportBlock) {
 }
 
 TEST(RtcpPacketReceiverReportTest, ParseFailsOnIncorrectSize) {
-  rtc::Buffer damaged_packet(kPacket);
+  Buffer damaged_packet(kPacket);
   damaged_packet[0]++;  // Damage the packet: increase count field.
   ReceiverReport rr;
   EXPECT_FALSE(test::ParseSinglePacket(damaged_packet, &rr));
@@ -78,7 +83,7 @@ TEST(RtcpPacketReceiverReportTest, CreateWithOneReportBlock) {
   rb.SetDelayLastSr(kDelayLastSr);
   rr.AddReportBlock(rb);
 
-  rtc::Buffer raw = rr.Build();
+  Buffer raw = rr.Build();
 
   EXPECT_THAT(make_tuple(raw.data(), raw.size()), ElementsAreArray(kPacket));
 }
@@ -87,7 +92,7 @@ TEST(RtcpPacketReceiverReportTest, CreateAndParseWithoutReportBlocks) {
   ReceiverReport rr;
   rr.SetSenderSsrc(kSenderSsrc);
 
-  rtc::Buffer raw = rr.Build();
+  Buffer raw = rr.Build();
   ReceiverReport parsed;
   EXPECT_TRUE(test::ParseSinglePacket(raw, &parsed));
 
@@ -106,7 +111,7 @@ TEST(RtcpPacketReceiverReportTest, CreateAndParseWithTwoReportBlocks) {
   EXPECT_TRUE(rr.AddReportBlock(rb1));
   EXPECT_TRUE(rr.AddReportBlock(rb2));
 
-  rtc::Buffer raw = rr.Build();
+  Buffer raw = rr.Build();
   ReceiverReport parsed;
   EXPECT_TRUE(test::ParseSinglePacket(raw, &parsed));
 

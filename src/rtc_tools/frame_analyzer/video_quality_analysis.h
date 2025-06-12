@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "api/scoped_refptr.h"
+#include "api/test/metrics/metrics_logger.h"
 #include "api/video/video_frame_buffer.h"
 #include "rtc_tools/video_file_reader.h"
 
@@ -52,29 +53,26 @@ struct ResultsContainer {
 // position in the original video. We also need to provide a map from test frame
 // indices to reference frame indices.
 std::vector<AnalysisResult> RunAnalysis(
-    const rtc::scoped_refptr<webrtc::test::Video>& reference_video,
-    const rtc::scoped_refptr<webrtc::test::Video>& test_video,
+    const scoped_refptr<webrtc::test::Video>& reference_video,
+    const scoped_refptr<webrtc::test::Video>& test_video,
     const std::vector<size_t>& test_frame_indices);
 
 // Compute PSNR for an I420 buffer (all planes). The max return value (in the
 // case where the test and reference frames are exactly the same) will be 48.
-double Psnr(const rtc::scoped_refptr<I420BufferInterface>& ref_buffer,
-            const rtc::scoped_refptr<I420BufferInterface>& test_buffer);
+double Psnr(const scoped_refptr<I420BufferInterface>& ref_buffer,
+            const scoped_refptr<I420BufferInterface>& test_buffer);
 
 // Compute SSIM for an I420 buffer (all planes). The max return value (in the
 // case where the test and reference frames are exactly the same) will be 1.
-double Ssim(const rtc::scoped_refptr<I420BufferInterface>& ref_buffer,
-            const rtc::scoped_refptr<I420BufferInterface>& test_buffer);
+double Ssim(const scoped_refptr<I420BufferInterface>& ref_buffer,
+            const scoped_refptr<I420BufferInterface>& test_buffer);
 
 // Prints the result from the analysis in Chromium performance
 // numbers compatible format to stdout. If the results object contains no frames
 // no output will be written.
-void PrintAnalysisResults(const std::string& label, ResultsContainer* results);
-
-// Similar to the above, but will print to the specified file handle.
-void PrintAnalysisResults(FILE* output,
-                          const std::string& label,
-                          ResultsContainer* results);
+void PrintAnalysisResults(const std::string& label,
+                          ResultsContainer& results,
+                          MetricsLogger& logger);
 
 struct Cluster {
   // Corresponding reference frame index for this cluster.

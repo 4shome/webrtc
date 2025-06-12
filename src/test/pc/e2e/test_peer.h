@@ -11,23 +11,34 @@
 #ifndef TEST_PC_E2E_TEST_PEER_H_
 #define TEST_PC_E2E_TEST_PEER_H_
 
+#include <cstddef>
 #include <memory>
+#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
-#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
-#include "api/function_view.h"
+#include "api/data_channel_interface.h"
+#include "api/jsep.h"
+#include "api/media_stream_interface.h"
+#include "api/media_types.h"
+#include "api/peer_connection_interface.h"
+#include "api/rtp_sender_interface.h"
+#include "api/rtp_transceiver_interface.h"
 #include "api/scoped_refptr.h"
-#include "api/sequence_checker.h"
-#include "api/set_remote_description_observer_interface.h"
+#include "api/stats/rtc_stats_collector_callback.h"
+#include "api/stats/rtc_stats_report.h"
 #include "api/task_queue/pending_task_safety_flag.h"
-#include "api/test/frame_generator_interface.h"
-#include "api/test/peerconnection_quality_test_fixture.h"
+#include "api/test/pclf/media_configuration.h"
+#include "api/test/pclf/media_quality_test_params.h"
+#include "api/test/pclf/peer_configurer.h"
 #include "pc/peer_connection_wrapper.h"
-#include "rtc_base/logging.h"
+#include "pc/test/mock_peer_connection_observers.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/synchronization/mutex.h"
-#include "test/pc/e2e/peer_configurer.h"
-#include "test/pc/e2e/peer_connection_quality_test_params.h"
+#include "rtc_base/thread.h"
+#include "rtc_base/thread_annotations.h"
 #include "test/pc/e2e/stats_provider.h"
 
 namespace webrtc {
@@ -41,16 +52,15 @@ class TestPeer final : public StatsProvider {
   const Params& params() const { return params_; }
 
   ConfigurableParams configurable_params() const;
-  void AddVideoConfig(PeerConnectionE2EQualityTestFixture::VideoConfig config);
+  void AddVideoConfig(VideoConfig config);
   // Removes video config with specified name. Crashes if the config with
   // specified name isn't found.
   void RemoveVideoConfig(absl::string_view stream_label);
-  void SetVideoSubscription(
-      PeerConnectionE2EQualityTestFixture::VideoSubscription subscription);
+  void SetVideoSubscription(VideoSubscription subscription);
 
   void GetStats(RTCStatsCollectorCallback* callback) override;
 
-  PeerConfigurerImpl::VideoSource ReleaseVideoSource(size_t i) {
+  PeerConfigurer::VideoSource ReleaseVideoSource(size_t i) {
     RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return std::move(video_sources_[i]);
   }
@@ -70,8 +80,7 @@ class TestPeer final : public StatsProvider {
 
   // Tell underlying `PeerConnection` to create an Offer.
   // `observer` will be invoked on the signaling thread when offer is created.
-  void CreateOffer(
-      rtc::scoped_refptr<CreateSessionDescriptionObserver> observer) {
+  void CreateOffer(scoped_refptr<CreateSessionDescriptionObserver> observer) {
     RTC_CHECK(wrapper_) << "TestPeer is already closed";
     pc()->CreateOffer(observer.get(), params_.rtc_offer_answer_options);
   }
@@ -95,24 +104,25 @@ class TestPeer final : public StatsProvider {
   bool SetRemoteDescription(std::unique_ptr<SessionDescriptionInterface> desc,
                             std::string* error_out = nullptr);
 
-  rtc::scoped_refptr<RtpTransceiverInterface> AddTransceiver(
-      cricket::MediaType media_type,
+  scoped_refptr<RtpTransceiverInterface> AddTransceiver(
+      webrtc::MediaType media_type,
       const RtpTransceiverInit& init) {
     RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->AddTransceiver(media_type, init);
   }
 
-  rtc::scoped_refptr<RtpSenderInterface> AddTrack(
-      rtc::scoped_refptr<MediaStreamTrackInterface> track,
+  scoped_refptr<RtpSenderInterface> AddTrack(
+      scoped_refptr<MediaStreamTrackInterface> track,
       const std::vector<std::string>& stream_ids = {}) {
     RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->AddTrack(track, stream_ids);
   }
 
-  rtc::scoped_refptr<DataChannelInterface> CreateDataChannel(
-      const std::string& label) {
+  scoped_refptr<DataChannelInterface> CreateDataChannel(
+      const std::string& label,
+      const std::optional<DataChannelInit>& config = std::nullopt) {
     RTC_CHECK(wrapper_) << "TestPeer is already closed";
-    return wrapper_->CreateDataChannel(label);
+    return wrapper_->CreateDataChannel(label, config);
   }
 
   PeerConnectionInterface::SignalingState signaling_state() {
@@ -130,16 +140,14 @@ class TestPeer final : public StatsProvider {
     return wrapper_->IsIceConnected();
   }
 
-  rtc::scoped_refptr<const RTCStatsReport> GetStats() {
+  scoped_refptr<const RTCStatsReport> GetStats() {
     RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->GetStats();
   }
 
   void DetachAecDump() {
     RTC_CHECK(wrapper_) << "TestPeer is already closed";
-    if (audio_processing_) {
-      audio_processing_->DetachAecDump();
-    }
+    wrapper_->pc_factory()->StopAecDump();
   }
 
   // Adds provided `candidates` to the owned peer connection.
@@ -152,14 +160,13 @@ class TestPeer final : public StatsProvider {
 
  protected:
   friend class TestPeerFactory;
-  TestPeer(rtc::scoped_refptr<PeerConnectionFactoryInterface> pc_factory,
-           rtc::scoped_refptr<PeerConnectionInterface> pc,
+  TestPeer(scoped_refptr<PeerConnectionFactoryInterface> pc_factory,
+           scoped_refptr<PeerConnectionInterface> pc,
            std::unique_ptr<MockPeerConnectionObserver> observer,
            Params params,
            ConfigurableParams configurable_params,
-           std::vector<PeerConfigurerImpl::VideoSource> video_sources,
-           rtc::scoped_refptr<AudioProcessing> audio_processing,
-           std::unique_ptr<rtc::Thread> worker_thread);
+           std::vector<PeerConfigurer::VideoSource> video_sources,
+           std::unique_ptr<Thread> worker_thread);
 
  private:
   const Params params_;
@@ -169,14 +176,14 @@ class TestPeer final : public StatsProvider {
 
   // Safety flag to protect all tasks posted on the signaling thread to not be
   // executed after `wrapper_` object is destructed.
-  rtc::scoped_refptr<PendingTaskSafetyFlag> signaling_thread_task_safety_ =
-      nullptr;
+  scoped_refptr<PendingTaskSafetyFlag> signaling_thread_task_safety_ = nullptr;
 
   // Keeps ownership of worker thread. It has to be destroyed after `wrapper_`.
-  std::unique_ptr<rtc::Thread> worker_thread_;
+  // `worker_thread_`can be null if the Peer use only one thread as both the
+  // worker thread and network thread.
+  std::unique_ptr<Thread> worker_thread_;
   std::unique_ptr<PeerConnectionWrapper> wrapper_;
-  std::vector<PeerConfigurerImpl::VideoSource> video_sources_;
-  rtc::scoped_refptr<AudioProcessing> audio_processing_;
+  std::vector<PeerConfigurer::VideoSource> video_sources_;
 
   std::vector<std::unique_ptr<IceCandidateInterface>> remote_ice_candidates_;
 };

@@ -106,10 +106,11 @@ std::vector<VideoStream> CreateVideoStreams(
 DefaultVideoStreamFactory::DefaultVideoStreamFactory() {}
 
 std::vector<VideoStream> DefaultVideoStreamFactory::CreateEncoderStreams(
-    int width,
-    int height,
+    const FieldTrialsView& /*field_trials*/,
+    int frame_width,
+    int frame_height,
     const webrtc::VideoEncoderConfig& encoder_config) {
-  return CreateVideoStreams(width, height, encoder_config);
+  return CreateVideoStreams(frame_width, frame_height, encoder_config);
 }
 
 void FillEncoderConfiguration(VideoCodecType codec_type,
@@ -120,7 +121,7 @@ void FillEncoderConfiguration(VideoCodecType codec_type,
   configuration->codec_type = codec_type;
   configuration->number_of_streams = num_streams;
   configuration->video_stream_factory =
-      rtc::make_ref_counted<DefaultVideoStreamFactory>();
+      make_ref_counted<DefaultVideoStreamFactory>();
   configuration->max_bitrate_bps = 0;
   configuration->frame_drop_enabled = true;
   configuration->simulcast_layers = std::vector<VideoStream>(num_streams);

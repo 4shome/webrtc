@@ -17,19 +17,27 @@
 #include "api/scoped_refptr.h"
 #include "modules/video_capture/video_capture.h"
 #include "modules/video_capture/video_capture_defines.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
-class VideoCaptureFactory {
+class VideoCaptureOptions;
+
+class RTC_EXPORT VideoCaptureFactory {
  public:
   // Create a video capture module object
   // id - unique identifier of this video capture module object.
   // deviceUniqueIdUTF8 - name of the device.
   //                      Available names can be found by using GetDeviceName
-  static rtc::scoped_refptr<VideoCaptureModule> Create(
+  static scoped_refptr<VideoCaptureModule> Create(
+      const char* deviceUniqueIdUTF8);
+  static scoped_refptr<VideoCaptureModule> Create(
+      VideoCaptureOptions* options,
       const char* deviceUniqueIdUTF8);
 
   static VideoCaptureModule::DeviceInfo* CreateDeviceInfo();
+  static VideoCaptureModule::DeviceInfo* CreateDeviceInfo(
+      VideoCaptureOptions* options);
 
  private:
   ~VideoCaptureFactory();
