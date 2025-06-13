@@ -1669,4 +1669,15 @@ SctpDataContentDescription* GetFirstSctpDataContentDescription(
   return desc ? desc->as_sctp() : nullptr;
 }
 
+namespace {
+
+const Codec* FindVideoCodec(const Codecs& codecs, const Codec& codec) {
+    for (const auto& c : codecs) {
+        if (c.name == codec.name) return &c;
+    }
+    return nullptr;
+}
+
+}
+
 }  // namespace webrtc

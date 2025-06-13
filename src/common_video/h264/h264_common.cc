@@ -9,6 +9,7 @@
  */
 
 #include "common_video/h264/h264_common.h"
+#include "rtc_base/logging.h"
 
 #include <cstdint>
 

@@ -1812,6 +1812,7 @@ void P2PTransportChannel::SwitchSelectedConnectionInternal(
   // Create event for candidate pair change.
   if (selected_connection_) {
     CandidatePairChangeEvent pair_change;
+    pair_change.state = conn->state();
     pair_change.reason = IceSwitchReasonToString(reason);
     pair_change.selected_candidate_pair = *GetSelectedCandidatePair();
     pair_change.last_data_received_ms =

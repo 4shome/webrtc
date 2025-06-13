@@ -25,6 +25,7 @@
 namespace webrtc {
 class TurnCustomizer;
 class FieldTrialsView;
+class TurnPort;
 }  // namespace webrtc
 
 namespace webrtc {
@@ -39,6 +40,7 @@ struct CreateRelayPortArgs {
   const RelayServerConfig* config;
   std::string username;
   std::string password;
+  ProtocolType peer_transport;
   TurnCustomizer* turn_customizer = nullptr;
   // Relative priority of candidates from this TURN server in relation
   // to the candidates from other servers. Required because ICE priorities
@@ -53,13 +55,13 @@ class RelayPortFactoryInterface {
 
   // This variant is used for UDP connection to the relay server
   // using a already existing shared socket.
-  virtual std::unique_ptr<Port> Create(const CreateRelayPortArgs& args,
-                                       AsyncPacketSocket* udp_socket) = 0;
+  virtual std::unique_ptr<TurnPort> Create(const CreateRelayPortArgs& args,
+                                           AsyncPacketSocket* udp_socket) = 0;
 
   // This variant is used for the other cases.
-  virtual std::unique_ptr<Port> Create(const CreateRelayPortArgs& args,
-                                       int min_port,
-                                       int max_port) = 0;
+  virtual std::unique_ptr<TurnPort> Create(const CreateRelayPortArgs& args,
+                                           int min_port,
+                                           int max_port) = 0;
 };
 
 }  //  namespace webrtc
