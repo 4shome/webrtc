@@ -108,6 +108,7 @@ constexpr ScalabilityModeParameters kScalabilityModeParams[] = {
         .num_spatial_layers = 2,
         .num_temporal_layers = 2,
         .inter_layer_pred = InterLayerPredMode::kOnKeyPic,
+        .ratio = ScalabilityModeResolutionRatio::kThreeToTwo,
         .shift = true},
     ScalabilityModeParameters{
         .scalability_mode = ScalabilityMode::kL2T3,

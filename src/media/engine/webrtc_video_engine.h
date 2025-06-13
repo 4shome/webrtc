@@ -402,6 +402,7 @@ class WebRtcVideoSendChannel : public MediaChannelUtil,
     DegradationPreference GetDegradationPreference() const
         RTC_EXCLUSIVE_LOCKS_REQUIRED(&thread_checker_);
 
+    const std::string id_;
     RTC_NO_UNIQUE_ADDRESS SequenceChecker thread_checker_;
     TaskQueueBase* const worker_thread_;
     const std::vector<uint32_t> ssrcs_ RTC_GUARDED_BY(&thread_checker_);

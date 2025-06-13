@@ -37,9 +37,10 @@ bool ValidateSimulcastLayers(const std::vector<RidDescription>& rids,
 
 void MediaDescriptionOptions::AddAudioSender(
     const std::string& track_id,
-    const std::vector<std::string>& stream_ids) {
+    const std::vector<std::string>& stream_ids,
+    const Codecs& codecs) {
   RTC_DCHECK(type == MediaType::AUDIO);
-  AddSenderInternal(track_id, stream_ids, {}, SimulcastLayerList(), 1);
+  AddSenderInternal(track_id, stream_ids, {}, SimulcastLayerList(), 1, codecs, {});
 }
 
 void MediaDescriptionOptions::AddVideoSender(
@@ -47,13 +48,14 @@ void MediaDescriptionOptions::AddVideoSender(
     const std::vector<std::string>& stream_ids,
     const std::vector<RidDescription>& rids,
     const SimulcastLayerList& simulcast_layers,
-    int num_sim_layers) {
+    int num_sim_layers,
+    const Codecs& codecs) {
   RTC_DCHECK(type == MediaType::VIDEO);
   RTC_DCHECK(rids.empty() || num_sim_layers == 0)
       << "RIDs are the compliant way to indicate simulcast.";
   RTC_DCHECK(ValidateSimulcastLayers(rids, simulcast_layers));
   AddSenderInternal(track_id, stream_ids, rids, simulcast_layers,
-                    num_sim_layers);
+                    num_sim_layers, {}, codecs);
 }
 
 void MediaDescriptionOptions::AddSenderInternal(
@@ -61,7 +63,8 @@ void MediaDescriptionOptions::AddSenderInternal(
     const std::vector<std::string>& stream_ids,
     const std::vector<RidDescription>& rids,
     const SimulcastLayerList& simulcast_layers,
-    int num_sim_layers) {
+    int num_sim_layers,
+     const Codecs& audio_codecs, const Codecs& video_codecs) {
   // TODO(steveanton): Support any number of stream ids.
   RTC_CHECK(stream_ids.size() == 1U);
   SenderOptions options;
@@ -70,6 +73,8 @@ void MediaDescriptionOptions::AddSenderInternal(
   options.simulcast_layers = simulcast_layers;
   options.rids = rids;
   options.num_sim_layers = num_sim_layers;
+  options.audio_codecs = audio_codecs;
+  options.video_codecs = video_codecs;
   sender_options.push_back(options);
 }
 

@@ -107,6 +107,17 @@ class RtpSenderInternal : public RtpSenderInterface {
   virtual std::vector<Codec> GetSendCodecs() const = 0;
 
   virtual void NotifyFirstPacketSent() = 0;
+
+  void AddVideoCodecType(VideoCodecType vct) override {
+    vcts_.push_back(vct);
+  }
+
+  std::vector<VideoCodecType> GetVideoCodecTypes() override {
+    return vcts_;
+  }
+
+ private:
+  std::vector<VideoCodecType> vcts_;
 };
 
 // Shared implementation for RtpSenderInternal interface.

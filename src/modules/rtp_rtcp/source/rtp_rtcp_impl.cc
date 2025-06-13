@@ -152,7 +152,7 @@ void ModuleRtpRtcpImpl::Process() {
     if (rtcp_receiver_.RtcpRrTimeout()) {
       RTC_LOG_F(LS_WARNING) << "Timeout: No RTCP RR received.";
     } else if (rtcp_receiver_.RtcpRrSequenceNumberTimeout()) {
-      RTC_LOG_F(LS_WARNING) << "Timeout: No increase in RTCP RR extended "
+      RTC_LOG_F(LS_VERBOSE) << "Timeout: No increase in RTCP RR extended "
                                "highest sequence number.";
     }
   } else {
@@ -345,8 +345,10 @@ bool ModuleRtpRtcpImpl::OnSendingRtpFrame(uint32_t timestamp,
                                           int64_t capture_time_ms,
                                           int payload_type,
                                           bool force_sender_report) {
-  if (!Sending())
+  if (!Sending()) {
+    RTC_LOG(LS_WARNING) << "ModuleRtpRtcpImpl::OnSendingRtpFrame not sending.";
     return false;
+  }
 
   // TODO(bugs.webrtc.org/12873): Migrate this method and it's users to use
   // optional Timestamps.

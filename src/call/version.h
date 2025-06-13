@@ -11,6 +11,8 @@
 #ifndef CALL_VERSION_H_
 #define CALL_VERSION_H_
 
+#define WEBRTC_VERSION 137
+
 // LoadWebRTCVersionInRegistry is a helper function that loads the pointer to
 // the WebRTC version string into a register. While this function doesn't do
 // anything useful, it is needed in order to avoid that compiler optimizations

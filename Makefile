@@ -33,7 +33,6 @@ C_SRCS/armv7l=src/common_audio/signal_processing/cross_correlation_neon.c \
               src/modules/audio_coding/codecs/isac/fix/source/lattice_neon.c \
               src/modules/audio_coding/codecs/isac/fix/source/transform_neon.c
 
-
 C_SRCS/aarch64=src/common_audio/signal_processing/cross_correlation_neon.c \
                src/common_audio/signal_processing/downsample_fast_neon.c \
                src/common_audio/signal_processing/min_max_operations_neon.c \
@@ -58,7 +57,6 @@ C_SRCS=src/common_audio/ring_buffer.c \
        src/common_audio/signal_processing/filter_ma_fast_q12.c \
        src/common_audio/signal_processing/get_hanning_window.c \
        src/common_audio/signal_processing/get_scaling_square.c \
-       src/common_audio/signal_processing/ilbc_specific_functions.c \
        src/common_audio/signal_processing/levinson_durbin.c \
        src/common_audio/signal_processing/lpc_to_refl_coef.c \
        src/common_audio/signal_processing/min_max_operations.c \
@@ -75,6 +73,7 @@ C_SRCS=src/common_audio/ring_buffer.c \
        src/common_audio/signal_processing/splitting_filter.c \
        src/common_audio/signal_processing/spl_sqrt.c \
        src/common_audio/signal_processing/sqrt_of_one_minus_x_squared.c \
+       src/common_audio/signal_processing/vector_operations.c \
        src/common_audio/signal_processing/vector_scaling_operations.c \
        src/common_audio/third_party/spl_sqrt_floor/spl_sqrt_floor.c \
        src/common_audio/vad/webrtc_vad.c \
@@ -82,133 +81,13 @@ C_SRCS=src/common_audio/ring_buffer.c \
        src/common_audio/vad/vad_filterbank.c \
        src/common_audio/vad/vad_gmm.c \
        src/common_audio/vad/vad_sp.c \
-       src/modules/audio_coding/codecs/ilbc/abs_quant.c \
-       src/modules/audio_coding/codecs/ilbc/abs_quant_loop.c \
-       src/modules/audio_coding/codecs/ilbc/augmented_cb_corr.c \
-       src/modules/audio_coding/codecs/ilbc/bw_expand.c \
-       src/modules/audio_coding/codecs/ilbc/cb_construct.c \
-       src/modules/audio_coding/codecs/ilbc/cb_mem_energy.c \
-       src/modules/audio_coding/codecs/ilbc/cb_mem_energy_augmentation.c \
-       src/modules/audio_coding/codecs/ilbc/cb_mem_energy_calc.c \
-       src/modules/audio_coding/codecs/ilbc/cb_search.c \
-       src/modules/audio_coding/codecs/ilbc/cb_search_core.c \
-       src/modules/audio_coding/codecs/ilbc/cb_update_best_index.c \
-       src/modules/audio_coding/codecs/ilbc/chebyshev.c \
-       src/modules/audio_coding/codecs/ilbc/comp_corr.c \
-       src/modules/audio_coding/codecs/ilbc/constants.c \
-       src/modules/audio_coding/codecs/ilbc/create_augmented_vec.c \
-       src/modules/audio_coding/codecs/ilbc/decode.c \
-       src/modules/audio_coding/codecs/ilbc/decode_residual.c \
-       src/modules/audio_coding/codecs/ilbc/decoder_interpolate_lsf.c \
-       src/modules/audio_coding/codecs/ilbc/do_plc.c \
-       src/modules/audio_coding/codecs/ilbc/encode.c \
-       src/modules/audio_coding/codecs/ilbc/energy_inverse.c \
-       src/modules/audio_coding/codecs/ilbc/enh_upsample.c \
-       src/modules/audio_coding/codecs/ilbc/enhancer.c \
-       src/modules/audio_coding/codecs/ilbc/enhancer_interface.c \
-       src/modules/audio_coding/codecs/ilbc/filtered_cb_vecs.c \
-       src/modules/audio_coding/codecs/ilbc/frame_classify.c \
-       src/modules/audio_coding/codecs/ilbc/gain_dequant.c \
-       src/modules/audio_coding/codecs/ilbc/gain_quant.c \
-       src/modules/audio_coding/codecs/ilbc/get_cd_vec.c \
-       src/modules/audio_coding/codecs/ilbc/get_lsp_poly.c \
-       src/modules/audio_coding/codecs/ilbc/get_sync_seq.c \
-       src/modules/audio_coding/codecs/ilbc/hp_input.c \
-       src/modules/audio_coding/codecs/ilbc/hp_output.c \
-       src/modules/audio_coding/codecs/ilbc/ilbc.c \
-       src/modules/audio_coding/codecs/ilbc/index_conv_dec.c \
-       src/modules/audio_coding/codecs/ilbc/index_conv_enc.c \
-       src/modules/audio_coding/codecs/ilbc/init_decode.c \
-       src/modules/audio_coding/codecs/ilbc/init_encode.c \
-       src/modules/audio_coding/codecs/ilbc/interpolate.c \
-       src/modules/audio_coding/codecs/ilbc/interpolate_samples.c \
-       src/modules/audio_coding/codecs/ilbc/lpc_encode.c \
-       src/modules/audio_coding/codecs/ilbc/lsf_check.c \
-       src/modules/audio_coding/codecs/ilbc/lsf_interpolate_to_poly_dec.c \
-       src/modules/audio_coding/codecs/ilbc/lsf_interpolate_to_poly_enc.c \
-       src/modules/audio_coding/codecs/ilbc/lsf_to_lsp.c \
-       src/modules/audio_coding/codecs/ilbc/lsf_to_poly.c \
-       src/modules/audio_coding/codecs/ilbc/lsp_to_lsf.c \
-       src/modules/audio_coding/codecs/ilbc/my_corr.c \
-       src/modules/audio_coding/codecs/ilbc/nearest_neighbor.c \
-       src/modules/audio_coding/codecs/ilbc/pack_bits.c \
-       src/modules/audio_coding/codecs/ilbc/poly_to_lsf.c \
-       src/modules/audio_coding/codecs/ilbc/poly_to_lsp.c \
-       src/modules/audio_coding/codecs/ilbc/refiner.c \
-       src/modules/audio_coding/codecs/ilbc/simple_interpolate_lsf.c \
-       src/modules/audio_coding/codecs/ilbc/simple_lpc_analysis.c \
-       src/modules/audio_coding/codecs/ilbc/simple_lsf_dequant.c \
-       src/modules/audio_coding/codecs/ilbc/simple_lsf_quant.c \
-       src/modules/audio_coding/codecs/ilbc/smooth.c \
-       src/modules/audio_coding/codecs/ilbc/smooth_out_data.c \
-       src/modules/audio_coding/codecs/ilbc/sort_sq.c \
-       src/modules/audio_coding/codecs/ilbc/split_vq.c \
-       src/modules/audio_coding/codecs/ilbc/state_construct.c \
-       src/modules/audio_coding/codecs/ilbc/state_search.c \
-       src/modules/audio_coding/codecs/ilbc/swap_bytes.c \
-       src/modules/audio_coding/codecs/ilbc/unpack_bits.c \
-       src/modules/audio_coding/codecs/ilbc/vq3.c \
-       src/modules/audio_coding/codecs/ilbc/vq4.c \
-       src/modules/audio_coding/codecs/ilbc/window32_w32.c \
-       src/modules/audio_coding/codecs/ilbc/xcorr_coef.c \
-       src/modules/audio_coding/codecs/isac/fix/source/arith_routines.c \
-       src/modules/audio_coding/codecs/isac/fix/source/arith_routines_hist.c \
-       src/modules/audio_coding/codecs/isac/fix/source/arith_routines_logist.c \
-       src/modules/audio_coding/codecs/isac/fix/source/bandwidth_estimator.c \
-       src/modules/audio_coding/codecs/isac/fix/source/decode.c \
-       src/modules/audio_coding/codecs/isac/fix/source/decode_bwe.c \
-       src/modules/audio_coding/codecs/isac/fix/source/decode_plc.c \
-       src/modules/audio_coding/codecs/isac/fix/source/encode.c \
-       src/modules/audio_coding/codecs/isac/fix/source/entropy_coding.c \
-       src/modules/audio_coding/codecs/isac/fix/source/fft.c \
-       src/modules/audio_coding/codecs/isac/fix/source/filterbanks.c \
-       src/modules/audio_coding/codecs/isac/fix/source/filterbank_tables.c \
-       src/modules/audio_coding/codecs/isac/fix/source/filters.c \
-       src/modules/audio_coding/codecs/isac/fix/source/initialize.c \
-       src/modules/audio_coding/codecs/isac/fix/source/isacfix.c \
-       src/modules/audio_coding/codecs/isac/fix/source/lattice.c \
-       src/modules/audio_coding/codecs/isac/fix/source/lattice_c.c \
-       src/modules/audio_coding/codecs/isac/fix/source/lpc_masking_model.c \
-       src/modules/audio_coding/codecs/isac/fix/source/lpc_tables.c \
-       src/modules/audio_coding/codecs/isac/fix/source/spectrum_ar_model_tables.c \
-       src/modules/audio_coding/codecs/isac/fix/source/pitch_estimator.c \
-       src/modules/audio_coding/codecs/isac/fix/source/pitch_estimator_c.c \
-       src/modules/audio_coding/codecs/isac/fix/source/pitch_filter.c \
-       src/modules/audio_coding/codecs/isac/fix/source/pitch_filter_c.c \
-       src/modules/audio_coding/codecs/isac/fix/source/pitch_gain_tables.c \
-       src/modules/audio_coding/codecs/isac/fix/source/pitch_lag_tables.c \
-       src/modules/audio_coding/codecs/isac/fix/source/transform.c \
-       src/modules/audio_coding/codecs/isac/fix/source/transform_tables.c \
-       src/modules/audio_coding/codecs/isac/main/source/arith_routines.c \
-       src/modules/audio_coding/codecs/isac/main/source/arith_routines_hist.c \
-       src/modules/audio_coding/codecs/isac/main/source/arith_routines_logist.c \
-       src/modules/audio_coding/codecs/isac/main/source/bandwidth_estimator.c \
-       src/modules/audio_coding/codecs/isac/main/source/crc.c \
-       src/modules/audio_coding/codecs/isac/main/source/decode_bwe.c \
-       src/modules/audio_coding/codecs/isac/main/source/decode.c \
-       src/modules/audio_coding/codecs/isac/main/source/encode.c \
-       src/modules/audio_coding/codecs/isac/main/source/encode_lpc_swb.c \
-       src/modules/audio_coding/codecs/isac/main/source/entropy_coding.c \
-       src/modules/audio_coding/codecs/isac/main/source/filterbanks.c \
-       src/modules/audio_coding/codecs/isac/main/source/filter_functions.c \
-       src/modules/audio_coding/codecs/isac/main/source/intialize.c \
-       src/modules/audio_coding/codecs/isac/main/source/isac.c \
-       src/modules/audio_coding/codecs/isac/main/source/isac_vad.c \
-       src/modules/audio_coding/codecs/isac/main/source/lattice.c \
-       src/modules/audio_coding/codecs/isac/main/source/lpc_analysis.c \
-       src/modules/audio_coding/codecs/isac/main/source/lpc_gain_swb_tables.c \
-       src/modules/audio_coding/codecs/isac/main/source/lpc_shape_swb12_tables.c \
-       src/modules/audio_coding/codecs/isac/main/source/lpc_shape_swb16_tables.c \
-       src/modules/audio_coding/codecs/isac/main/source/lpc_tables.c \
-       src/modules/audio_coding/codecs/isac/main/source/pitch_estimator.c \
-       src/modules/audio_coding/codecs/isac/main/source/pitch_filter.c \
-       src/modules/audio_coding/codecs/isac/main/source/pitch_gain_tables.c \
-       src/modules/audio_coding/codecs/isac/main/source/pitch_lag_tables.c \
-       src/modules/audio_coding/codecs/isac/main/source/spectrum_ar_model_tables.c \
-       src/modules/audio_coding/codecs/isac/main/source/transform.c \
        src/modules/audio_coding/codecs/g711/g711_interface.c \
        src/modules/audio_coding/codecs/g722/g722_interface.c \
        src/modules/audio_coding/codecs/pcm16b/pcm16b.c \
+       src/modules/audio_coding/codecs/isac/main/source/filter_functions.c \
+       src/modules/audio_coding/codecs/isac/main/source/isac_vad.c \
+       src/modules/audio_coding/codecs/isac/main/source/pitch_estimator.c \
+       src/modules/audio_coding/codecs/isac/main/source/pitch_filter.c \
        src/modules/third_party/fft/fft.c \
        src/modules/third_party/g722/g722_decode.c \
        src/modules/third_party/g722/g722_encode.c \
@@ -263,12 +142,10 @@ AVX2_SRCS=src/common_audio/fir_filter_avx2.cc \
 CXX_SRCS/x86_64=src/common_audio/fir_filter_sse.cc \
                 src/common_audio/resampler/sinc_resampler_sse.cc \
                 src/common_audio/third_party/ooura/fft_size_128/ooura_fft_sse2.cc \
-                src/modules/video_processing/util/denoiser_filter_sse2.cc \
 				$(AVX2_SRCS)
 
 CXX_SRCS/i686=src/common_audio/fir_filter_sse.cc \
-              src/common_audio/resampler/sinc_resampler_sse.cc \
-              src/modules/video_processing/util/denoiser_filter_sse2.cc
+              src/common_audio/resampler/sinc_resampler_sse.cc
 
 CXX_SRCS/armv7l=src/common_audio/fir_filter_neon.cc \
                 src/common_audio/resampler/sinc_resampler_neon.cc \
@@ -284,9 +161,11 @@ CXX_SRCS/aarch64=src/common_audio/fir_filter_neon.cc \
 
 CXX_SRCS=src/api/adaptation/resource.cc \
          src/api/audio/audio_frame.cc \
+         src/api/audio/audio_processing.cc \
+         src/api/audio/audio_processing_statistics.cc \
+         src/api/audio/builtin_audio_processing_builder.cc \
          src/api/audio/channel_layout.cc \
          src/api/audio/echo_canceller3_config.cc \
-         src/api/audio/echo_canceller3_config_json.cc \
          src/api/audio/echo_canceller3_factory.cc \
          src/api/audio_codecs/audio_codec_pair_id.cc \
          src/api/audio_codecs/audio_decoder.cc \
@@ -298,10 +177,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/api/audio_codecs/g711/audio_encoder_g711.cc \
          src/api/audio_codecs/g722/audio_decoder_g722.cc \
          src/api/audio_codecs/g722/audio_encoder_g722.cc \
-         src/api/audio_codecs/ilbc/audio_decoder_ilbc.cc \
-         src/api/audio_codecs/ilbc/audio_encoder_ilbc.cc \
-         src/api/audio_codecs/isac/audio_decoder_isac_fix.cc \
-         src/api/audio_codecs/isac/audio_encoder_isac_fix.cc \
          src/api/audio_codecs/L16/audio_decoder_L16.cc \
          src/api/audio_codecs/L16/audio_encoder_L16.cc \
          src/api/audio_codecs/opus/audio_decoder_opus.cc \
@@ -309,19 +184,25 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/api/audio_codecs/opus/audio_encoder_multi_channel_opus_config.cc \
          src/api/audio_codecs/opus/audio_encoder_opus.cc \
          src/api/audio_codecs/opus/audio_encoder_opus_config.cc \
-         src/api/video_codecs/vp9_profile.cc \
          src/api/audio_options.cc \
+         src/api/video_codecs/vp9_profile.cc \
          src/api/call/transport.cc \
          src/api/candidate.cc \
          src/api/create_peerconnection_factory.cc \
          src/api/crypto/crypto_options.cc \
          src/api/data_channel_interface.cc \
          src/api/dtls_transport_interface.cc \
+         src/api/enable_media.cc \
+         src/api/environment/environment_factory.cc \
+         src/api/field_trials_registry.cc \
+         src/api/frame_transformer_interface.cc \
          src/api/jsep.cc \
          src/api/jsep_ice_candidate.cc \
+         src/api/legacy_stats_types.cc \
          src/api/media_stream_interface.cc \
          src/api/media_types.cc \
          src/api/neteq/custom_neteq_factory.cc \
+         src/api/neteq/default_neteq_factory.cc \
          src/api/neteq/default_neteq_controller_factory.cc \
          src/api/neteq/neteq.cc \
          src/api/neteq/tick_timer.cc \
@@ -331,12 +212,12 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/api/rtc_event_log/rtc_event_log.cc \
          src/api/rtc_event_log/rtc_event_log_factory.cc \
          src/api/rtp_headers.cc \
+         src/api/rtp_sender_interface.cc \
          src/api/rtp_packet_info.cc \
          src/api/rtp_parameters.cc \
          src/api/rtp_receiver_interface.cc \
          src/api/rtp_transceiver_interface.cc \
          src/api/sctp_transport_interface.cc \
-         src/api/stats_types.cc \
          src/api/task_queue/default_task_queue_factory_stdlib.cc \
          src/api/task_queue/pending_task_safety_flag.cc \
          src/api/task_queue/task_queue_base.cc \
@@ -376,10 +257,9 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/api/video_codecs/video_codec.cc \
          src/api/video_codecs/video_decoder.cc \
          src/api/video_codecs/video_encoder.cc \
-         src/api/video_codecs/video_encoder_config.cc \
          src/api/video_codecs/sdp_video_format.cc \
          src/api/video_codecs/scalability_mode.cc \
-         src/api/wrapping_async_dns_resolver.cc \
+         src/api/video_codecs/simulcast_stream.cc \
          src/audio/audio_level.cc \
          src/audio/audio_receive_stream.cc \
          src/audio/audio_send_stream.cc \
@@ -409,11 +289,10 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/call/bitrate_allocator.cc \
          src/call/call.cc \
          src/call/call_config.cc \
-         src/call/call_factory.cc \
-         src/call/degraded_call.cc \
          src/call/fake_network_pipe.cc \
          src/call/flexfec_receive_stream.cc \
          src/call/flexfec_receive_stream_impl.cc \
+         src/call/payload_type_picker.cc \
          src/call/receive_time_calculator.cc \
          src/call/rtp_bitrate_configurator.cc \
          src/call/rtp_config.cc \
@@ -423,7 +302,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/call/rtp_transport_controller_send.cc \
          src/call/rtp_video_sender.cc \
          src/call/rtx_receive_stream.cc \
-         src/call/simulated_network.cc \
          src/call/syncable.cc \
          src/call/version.cc \
          src/call/video_receive_stream.cc \
@@ -448,17 +326,17 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/common_audio/wav_file.cc \
          src/common_audio/wav_header.cc \
          src/common_audio/window_generator.cc \
+         src/common_video/corruption_detection_converters.cc \
          src/common_video/bitrate_adjuster.cc \
+         src/common_video/framerate_controller.cc \
          src/common_video/generic_frame_descriptor/generic_frame_info.cc \
          src/common_video/h264/h264_bitstream_parser.cc \
          src/common_video/h264/h264_common.cc \
          src/common_video/h264/pps_parser.cc \
          src/common_video/h264/sps_parser.cc \
          src/common_video/h264/sps_vui_rewriter.cc \
-         src/common_video/incoming_video_stream.cc \
          src/common_video/libyuv/webrtc_libyuv.cc \
          src/common_video/video_frame_buffer.cc \
-         src/common_video/video_render_frames.cc \
          src/logging/rtc_event_log/encoder/var_int.cc \
          src/logging/rtc_event_log/encoder/bit_writer.cc \
          src/logging/rtc_event_log/encoder/blob_encoding.cc \
@@ -481,6 +359,7 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/logging/rtc_event_log/events/rtc_event_field_extraction.cc \
          src/logging/rtc_event_log/events/rtc_event_ice_candidate_pair.cc \
          src/logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.cc \
+         src/logging/rtc_event_log/events/rtc_event_neteq_set_minimum_delay.cc \
          src/logging/rtc_event_log/events/rtc_event_probe_cluster_created.cc \
          src/logging/rtc_event_log/events/rtc_event_probe_result_failure.cc \
          src/logging/rtc_event_log/events/rtc_event_probe_result_success.cc \
@@ -496,8 +375,10 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/logging/rtc_event_log/rtc_stream_config.cc \
          src/media/base/adapted_video_track_source.cc \
          src/media/base/codec.cc \
+         src/media/base/codec_comparators.cc \
+         src/media/base/codec_list.cc \
          src/media/base/sdp_video_format_utils.cc \
-         src/media/base/media_channel.cc \
+         src/media/base/media_channel_impl.cc \
          src/media/base/media_constants.cc \
          src/media/base/media_engine.cc \
          src/media/base/rid_description.cc \
@@ -509,9 +390,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/media/base/video_common.cc \
          src/media/base/video_source_base.cc \
          src/media/engine/adm_helpers.cc \
-         src/media/engine/payload_type_mapper.cc \
-         src/media/engine/simulcast.cc \
-         src/media/engine/unhandled_packets_buffer.cc \
          src/media/engine/webrtc_media_engine.cc \
          src/media/engine/webrtc_media_engine.cc \
          src/media/engine/webrtc_video_engine.cc \
@@ -519,7 +397,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/media/sctp/dcsctp_transport.cc \
          src/media/sctp/sctp_transport_factory.cc \
          src/modules/async_audio_processing/async_audio_processing.cc \
-         src/modules/audio_coding/acm2/acm_receiver.cc \
          src/modules/audio_coding/acm2/acm_remixing.cc \
          src/modules/audio_coding/acm2/acm_resampler.cc \
          src/modules/audio_coding/acm2/audio_coding_module.cc \
@@ -541,11 +418,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/audio_coding/codecs/g711/audio_decoder_pcm.cc \
          src/modules/audio_coding/codecs/g711/audio_encoder_pcm.cc \
          src/modules/audio_coding/codecs/g722/audio_encoder_g722.cc \
-         src/modules/audio_coding/codecs/ilbc/audio_encoder_ilbc.cc \
-         src/modules/audio_coding/codecs/isac/fix/source/audio_decoder_isacfix.cc \
-         src/modules/audio_coding/codecs/isac/fix/source/audio_encoder_isacfix.cc \
-         src/modules/audio_coding/codecs/isac/main/source/audio_decoder_isac.cc \
-         src/modules/audio_coding/codecs/isac/main/source/audio_encoder_isac.cc \
          src/modules/audio_coding/codecs/legacy_encoded_audio_frame.cc \
          src/modules/audio_coding/codecs/opus/audio_coder_opus_common.cc \
          src/modules/audio_coding/codecs/opus/audio_decoder_multi_channel_opus_impl.cc \
@@ -566,7 +438,7 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/audio_coding/neteq/cross_correlation.cc \
          src/modules/audio_coding/neteq/decision_logic.cc \
          src/modules/audio_coding/neteq/decoder_database.cc \
-         src/modules/audio_coding/neteq/default_neteq_factory.cc \
+         src/modules/audio_coding/neteq/delay_constraints.cc \
          src/modules/audio_coding/neteq/delay_manager.cc \
          src/modules/audio_coding/neteq/dsp_helper.cc \
          src/modules/audio_coding/neteq/dtmf_buffer.cc \
@@ -581,7 +453,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/audio_coding/neteq/packet.cc \
          src/modules/audio_coding/neteq/packet_arrival_history.cc \
          src/modules/audio_coding/neteq/packet_buffer.cc \
-         src/modules/audio_coding/neteq/post_decode_vad.cc \
          src/modules/audio_coding/neteq/preemptive_expand.cc \
          src/modules/audio_coding/neteq/random_vector.cc \
          src/modules/audio_coding/neteq/red_payload_splitter.cc \
@@ -663,22 +534,20 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/audio_processing/aecm/echo_control_mobile.cc \
          src/modules/audio_processing/agc/agc.cc \
          src/modules/audio_processing/agc/agc_manager_direct.cc \
-         src/modules/audio_processing/agc/analog_gain_stats_reporter.cc \
-         src/modules/audio_processing/agc/clipping_predictor.cc \
-         src/modules/audio_processing/agc/clipping_predictor_evaluator.cc \
-         src/modules/audio_processing/agc/clipping_predictor_level_buffer.cc \
          src/modules/audio_processing/agc/legacy/analog_agc.cc \
          src/modules/audio_processing/agc/legacy/digital_agc.cc \
          src/modules/audio_processing/agc/loudness_histogram.cc \
          src/modules/audio_processing/agc/utility.cc \
-         src/modules/audio_processing/agc2/adaptive_digital_gain_applier.cc \
          src/modules/audio_processing/agc2/adaptive_digital_gain_controller.cc \
-         src/modules/audio_processing/agc2/adaptive_mode_level_estimator.cc \
          src/modules/audio_processing/agc2/biquad_filter.cc \
+         src/modules/audio_processing/agc2/clipping_predictor.cc \
+         src/modules/audio_processing/agc2/clipping_predictor_level_buffer.cc \
          src/modules/audio_processing/agc2/compute_interpolated_gain_curve.cc \
          src/modules/audio_processing/agc2/cpu_features.cc \
          src/modules/audio_processing/agc2/fixed_digital_level_estimator.cc \
          src/modules/audio_processing/agc2/gain_applier.cc \
+         src/modules/audio_processing/agc2/input_volume_controller.cc \
+         src/modules/audio_processing/agc2/input_volume_stats_reporter.cc \
          src/modules/audio_processing/agc2/interpolated_gain_curve.cc \
          src/modules/audio_processing/agc2/limiter.cc \
          src/modules/audio_processing/agc2/noise_level_estimator.cc \
@@ -695,10 +564,10 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/audio_processing/agc2/rnn_vad/spectral_features_internal.cc \
          src/modules/audio_processing/agc2/saturation_protector.cc \
          src/modules/audio_processing/agc2/saturation_protector_buffer.cc \
+         src/modules/audio_processing/agc2/speech_level_estimator.cc \
          src/modules/audio_processing/agc2/vad_wrapper.cc \
          src/modules/audio_processing/agc2/vector_float_frame.cc \
          src/modules/audio_processing/audio_buffer.cc \
-         src/modules/audio_processing/audio_processing_builder_impl.cc \
          src/modules/audio_processing/audio_processing_impl.cc \
          src/modules/audio_processing/capture_levels_adjuster/audio_samples_scaler.cc \
          src/modules/audio_processing/capture_levels_adjuster/capture_levels_adjuster.cc \
@@ -712,8 +581,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/audio_processing/high_pass_filter.cc \
          src/modules/audio_processing/include/aec_dump.cc \
          src/modules/audio_processing/include/audio_frame_proxies.cc \
-         src/modules/audio_processing/include/audio_processing.cc \
-         src/modules/audio_processing/include/audio_processing_statistics.cc \
          src/modules/audio_processing/logging/apm_data_dumper.cc \
          src/modules/audio_processing/ns/fast_math.cc \
          src/modules/audio_processing/ns/histograms.cc \
@@ -729,16 +596,9 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/audio_processing/ns/suppression_params.cc \
          src/modules/audio_processing/ns/wiener_filter.cc \
          src/modules/audio_processing/residual_echo_detector.cc \
-         src/modules/audio_processing/optionally_built_submodule_creators.cc \
          src/modules/audio_processing/rms_level.cc \
          src/modules/audio_processing/splitting_filter.cc \
          src/modules/audio_processing/three_band_filter_bank.cc \
-         src/modules/audio_processing/transient/moving_moments.cc \
-         src/modules/audio_processing/transient/transient_detector.cc \
-         src/modules/audio_processing/transient/transient_suppressor_impl.cc \
-         src/modules/audio_processing/transient/voice_probability_delay_unit.cc \
-         src/modules/audio_processing/transient/wpd_node.cc \
-         src/modules/audio_processing/transient/wpd_tree.cc \
          src/modules/audio_processing/vad/gmm.cc \
          src/modules/audio_processing/utility/cascaded_biquad_filter.cc \
          src/modules/audio_processing/utility/delay_estimator.cc \
@@ -780,13 +640,15 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/pacing/task_queue_paced_sender.cc \
          src/modules/remote_bitrate_estimator/aimd_rate_control.cc \
          src/modules/remote_bitrate_estimator/bwe_defines.cc \
+         src/modules/remote_bitrate_estimator/congestion_control_feedback_tracker.cc \
+         src/modules/remote_bitrate_estimator/congestion_control_feedback_generator.cc \
          src/modules/remote_bitrate_estimator/inter_arrival.cc \
          src/modules/remote_bitrate_estimator/overuse_detector.cc \
          src/modules/remote_bitrate_estimator/overuse_estimator.cc \
          src/modules/remote_bitrate_estimator/packet_arrival_map.cc \
          src/modules/remote_bitrate_estimator/remote_bitrate_estimator_abs_send_time.cc \
          src/modules/remote_bitrate_estimator/remote_bitrate_estimator_single_stream.cc \
-         src/modules/remote_bitrate_estimator/remote_estimator_proxy.cc \
+         src/modules/remote_bitrate_estimator/transport_sequence_number_feedback_generator.cc \
          src/modules/rtp_rtcp/include/report_block_data.cc \
          src/modules/rtp_rtcp/include/rtp_rtcp_defines.cc \
          src/modules/rtp_rtcp/source/absolute_capture_time_interpolator.cc \
@@ -794,14 +656,19 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/rtp_rtcp/source/active_decode_targets_helper.cc \
          src/modules/rtp_rtcp/source/capture_clock_offset_updater.cc \
          src/modules/rtp_rtcp/source/create_video_rtp_depacketizer.cc \
+         src/modules/rtp_rtcp/source/corruption_detection_extension.cc \
          src/modules/rtp_rtcp/source/dtmf_queue.cc \
          src/modules/rtp_rtcp/source/fec_private_tables_bursty.cc \
          src/modules/rtp_rtcp/source/fec_private_tables_random.cc \
          src/modules/rtp_rtcp/source/flexfec_header_reader_writer.cc \
          src/modules/rtp_rtcp/source/flexfec_receiver.cc \
          src/modules/rtp_rtcp/source/flexfec_sender.cc \
+         src/modules/rtp_rtcp/source/flexfec_03_header_reader_writer.cc \
+         src/modules/rtp_rtcp/source/frame_object.cc \
          src/modules/rtp_rtcp/source/forward_error_correction.cc \
          src/modules/rtp_rtcp/source/forward_error_correction_internal.cc \
+         src/modules/rtp_rtcp/source/leb128.cc \
+         src/modules/rtp_rtcp/source/ntp_time_util.cc \
          src/modules/rtp_rtcp/source/packet_loss_stats.cc \
          src/modules/rtp_rtcp/source/packet_sequencer.cc \
          src/modules/rtp_rtcp/source/receive_statistics_impl.cc \
@@ -810,6 +677,7 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/rtp_rtcp/source/rtcp_packet.cc \
          src/modules/rtp_rtcp/source/rtcp_packet/app.cc \
          src/modules/rtp_rtcp/source/rtcp_packet/bye.cc \
+         src/modules/rtp_rtcp/source/rtcp_packet/congestion_control_feedback.cc \
          src/modules/rtp_rtcp/source/rtcp_packet/common_header.cc \
          src/modules/rtp_rtcp/source/rtcp_packet/compound_packet.cc \
          src/modules/rtp_rtcp/source/rtcp_packet/dlrr.cc \
@@ -857,6 +725,7 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/rtp_rtcp/source/rtp_packet_received.cc \
          src/modules/rtp_rtcp/source/rtp_packet_to_send.cc \
          src/modules/rtp_rtcp/source/rtp_packetizer_av1.cc \
+         src/modules/rtp_rtcp/source/rtp_packet_send_info.cc \
          src/modules/rtp_rtcp/source/rtp_rtcp_impl.cc \
          src/modules/rtp_rtcp/source/rtp_rtcp_impl2.cc \
          src/modules/rtp_rtcp/source/rtp_sender_audio.cc \
@@ -868,8 +737,8 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/rtp_rtcp/source/rtp_util.cc \
          src/modules/rtp_rtcp/source/rtp_video_header.cc \
          src/modules/rtp_rtcp/source/rtp_video_layers_allocation_extension.cc \
+         src/modules/rtp_rtcp/source/rtp_video_stream_receiver_frame_transformer_delegate.cc \
          src/modules/rtp_rtcp/source/source_tracker.cc \
-         src/modules/rtp_rtcp/source/time_util.cc \
          src/modules/rtp_rtcp/source/tmmbr_help.cc \
          src/modules/rtp_rtcp/source/ulpfec_generator.cc \
          src/modules/rtp_rtcp/source/ulpfec_header_reader_writer.cc \
@@ -889,33 +758,26 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/video_coding/codecs/vp8/vp8_scalability.cc \
          src/modules/video_coding/codecs/vp9/svc_config.cc \
          src/modules/video_coding/decoder_database.cc \
-         src/modules/video_coding/decoding_state.cc \
          src/modules/video_coding/encoded_frame.cc \
          src/modules/video_coding/fec_controller_default.cc \
-         src/modules/video_coding/frame_buffer.cc \
-         src/modules/video_coding/frame_buffer2.cc \
          src/modules/video_coding/frame_dependencies_calculator.cc \
          src/modules/video_coding/frame_helpers.cc \
-         src/modules/video_coding/frame_object.cc \
          src/modules/video_coding/generic_decoder.cc \
          src/modules/video_coding/h264_sprop_parameter_sets.cc \
          src/modules/video_coding/h264_sps_pps_tracker.cc \
+         src/modules/video_coding/h26x_packet_buffer.cc \
          src/modules/video_coding/histogram.cc \
          src/modules/video_coding/include/video_codec_interface.cc \
-         src/modules/video_coding/jitter_buffer.cc \
          src/modules/video_coding/loss_notification_controller.cc \
          src/modules/video_coding/media_opt_util.cc \
          src/modules/video_coding/nack_requester.cc \
          src/modules/video_coding/packet_buffer.cc \
-         src/modules/video_coding/packet.cc \
-         src/modules/video_coding/receiver.cc \
          src/modules/video_coding/rtp_frame_id_only_ref_finder.cc \
          src/modules/video_coding/rtp_frame_reference_finder.cc \
          src/modules/video_coding/rtp_generic_ref_finder.cc \
          src/modules/video_coding/rtp_seq_num_only_ref_finder.cc \
          src/modules/video_coding/rtp_vp8_ref_finder.cc \
          src/modules/video_coding/rtp_vp9_ref_finder.cc \
-         src/modules/video_coding/session_info.cc \
          src/modules/video_coding/svc/create_scalability_structure.cc \
          src/modules/video_coding/svc/scalability_mode_util.cc \
          src/modules/video_coding/svc/scalability_structure_full_svc.cc \
@@ -924,11 +786,12 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/video_coding/svc/scalability_structure_simulcast.cc \
          src/modules/video_coding/svc/scalable_video_controller_no_layering.cc \
          src/modules/video_coding/svc/svc_rate_allocator.cc \
-         src/modules/video_coding/timing/codec_timer.cc \
+         src/modules/video_coding/timing/decode_time_percentile_filter.cc \
          src/modules/video_coding/timing/frame_delay_variation_kalman_filter.cc \
-         src/modules/video_coding/timing/inter_frame_delay.cc \
+         src/modules/video_coding/timing/inter_frame_delay_variation_calculator.cc \
          src/modules/video_coding/timing/jitter_estimator.cc \
          src/modules/video_coding/timing/rtt_filter.cc \
+         src/modules/video_coding/timing/timestamp_extrapolator.cc \
          src/modules/video_coding/timing/timing.cc \
          src/modules/video_coding/utility/bandwidth_quality_scaler.cc \
          src/modules/video_coding/utility/decoded_frames_history.cc \
@@ -945,11 +808,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/modules/video_coding/video_coding_impl.cc \
          src/modules/video_coding/video_receiver.cc \
          src/modules/video_coding/video_receiver2.cc \
-         src/modules/video_processing/util/denoiser_filter.cc \
-         src/modules/video_processing/util/denoiser_filter_c.cc \
-         src/modules/video_processing/util/noise_estimation.cc \
-         src/modules/video_processing/util/skin_detection.cc \
-         src/modules/video_processing/video_denoiser.cc \
          src/net/dcsctp/fuzzers/dcsctp_fuzzers.cc \
          src/net/dcsctp/packet/chunk/abort_chunk.cc \
          src/net/dcsctp/packet/chunk/chunk.cc \
@@ -996,6 +854,7 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/net/dcsctp/packet/parameter/ssn_tsn_reset_request_parameter.cc \
          src/net/dcsctp/packet/parameter/state_cookie_parameter.cc \
          src/net/dcsctp/packet/parameter/supported_extensions_parameter.cc \
+         src/net/dcsctp/packet/parameter/zero_checksum_acceptable_chunk_parameter.cc \
          src/net/dcsctp/packet/sctp_packet.cc \
          src/net/dcsctp/packet/tlv_trait.cc \
          src/net/dcsctp/public/dcsctp_handover_state.cc \
@@ -1027,8 +886,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/p2p/base/connection.cc \
          src/p2p/base/connection_info.cc \
          src/p2p/base/default_ice_transport_factory.cc \
-         src/p2p/base/dtls_transport.cc \
-         src/p2p/base/dtls_transport_internal.cc \
          src/p2p/base/ice_credentials_iterator.cc \
          src/p2p/base/ice_switch_reason.cc \
          src/p2p/base/ice_transport_internal.cc \
@@ -1040,19 +897,26 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/p2p/base/port_interface.cc \
          src/p2p/base/pseudo_tcp.cc \
          src/p2p/base/regathering_controller.cc \
+         src/p2p/base/stun_dictionary.cc \
          src/p2p/base/stun_port.cc \
          src/p2p/base/stun_request.cc \
-         src/p2p/base/stun_server.cc \
          src/p2p/base/tcp_port.cc \
          src/p2p/base/transport_description.cc \
          src/p2p/base/transport_description_factory.cc \
          src/p2p/base/turn_port.cc \
-         src/p2p/base/turn_server.cc \
+         src/p2p/base/wrapping_active_ice_controller.cc \
          src/p2p/client/basic_port_allocator.cc \
          src/p2p/client/turn_port_factory.cc \
+         src/p2p/dtls/dtls_transport.cc \
+         src/p2p/dtls/dtls_transport_internal.cc \
+         src/p2p/dtls/dtls_stun_piggyback_controller.cc \
+         src/p2p/dtls/dtls_utils.cc \
+         src/p2p/test/stun_server.cc \
+         src/p2p/test/turn_server.cc \
          src/pc/audio_rtp_receiver.cc \
          src/pc/audio_track.cc \
          src/pc/channel.cc \
+         src/pc/codec_vendor.cc \
          src/pc/connection_context.cc \
          src/pc/data_channel_controller.cc \
          src/pc/data_channel_utils.cc \
@@ -1070,6 +934,7 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/pc/jsep_transport_controller.cc \
          src/pc/legacy_stats_collector.cc \
          src/pc/local_audio_source.cc \
+         src/pc/media_options.cc \
          src/pc/media_protocol_names.cc \
          src/pc/media_session.cc \
          src/pc/media_stream.cc \
@@ -1091,17 +956,18 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/pc/sctp_transport.cc \
          src/pc/sctp_utils.cc \
          src/pc/simulcast_description.cc \
+         src/pc/simulcast_sdp_serializer.cc \
+         src/pc/sdp_munging_detector.cc \
          src/pc/sdp_offer_answer.cc \
-         src/pc/sdp_serializer.cc \
          src/pc/sdp_utils.cc \
          src/pc/session_description.cc \
-         src/pc/srtp_filter.cc \
          src/pc/srtp_session.cc \
          src/pc/srtp_transport.cc \
          src/pc/sctp_data_channel.cc \
          src/pc/track_media_info_map.cc \
          src/pc/transceiver_list.cc \
          src/pc/transport_stats.cc \
+         src/pc/typed_codec_vendor.cc \
          src/pc/usage_pattern.cc \
          src/pc/video_rtp_receiver.cc \
          src/pc/video_rtp_track_source.cc \
@@ -1109,14 +975,15 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/pc/video_track_source.cc \
          src/pc/webrtc_sdp.cc \
          src/pc/webrtc_session_description_factory.cc \
+         src/rtc_base/async_dns_resolver.cc \
          src/rtc_base/async_packet_socket.cc \
-         src/rtc_base/async_resolver.cc \
-         src/rtc_base/async_resolver_interface.cc \
          src/rtc_base/async_socket.cc \
          src/rtc_base/async_tcp_socket.cc \
          src/rtc_base/async_udp_socket.cc \
+         src/rtc_base/base64.cc \
          src/rtc_base/bit_buffer.cc \
          src/rtc_base/bitstream_reader.cc \
+         src/rtc_base/bitrate_tracker.cc \
          src/rtc_base/buffer_queue.cc \
          src/rtc_base/byte_buffer.cc \
          src/rtc_base/callback_list.cc \
@@ -1124,14 +991,13 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/rtc_base/copy_on_write_buffer.cc \
          src/rtc_base/cpu_time.cc \
          src/rtc_base/crc32.cc \
-         src/rtc_base/crypt_string.cc \
+         src/rtc_base/crypto_random.cc \
          src/rtc_base/data_rate_limiter.cc \
          src/rtc_base/deprecated/recursive_critical_section.cc \
          src/rtc_base/event.cc \
          src/rtc_base/event_tracer.cc \
          src/rtc_base/experiments/alr_experiment.cc \
          src/rtc_base/experiments/balanced_degradation_settings.cc \
-         src/rtc_base/experiments/bandwidth_quality_scaler_settings.cc \
          src/rtc_base/experiments/encoder_info_settings.cc \
          src/rtc_base/experiments/field_trial_list.cc \
          src/rtc_base/experiments/field_trial_parser.cc \
@@ -1141,32 +1007,25 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/rtc_base/experiments/normalize_simulcast_size_experiment.cc \
          src/rtc_base/experiments/quality_scaler_settings.cc \
          src/rtc_base/experiments/quality_scaling_experiment.cc \
-         src/rtc_base/experiments/quality_rampup_experiment.cc \
          src/rtc_base/experiments/rate_control_settings.cc \
-         src/rtc_base/experiments/rtt_mult_experiment.cc \
          src/rtc_base/experiments/stable_target_rate_experiment.cc \
          src/rtc_base/experiments/struct_parameters_parser.cc \
          src/rtc_base/fake_clock.cc \
          src/rtc_base/fake_ssl_identity.cc \
+         src/rtc_base/frequency_tracker.cc \
          src/rtc_base/file_rotating_stream.cc \
-         src/rtc_base/helpers.cc \
-         src/rtc_base/http_common.cc \
          src/rtc_base/ifaddrs_converter.cc \
          src/rtc_base/internal/default_socket_server.cc \
          src/rtc_base/ip_address.cc \
-         src/rtc_base/location.cc \
          src/rtc_base/logging.cc \
          src/rtc_base/log_sinks.cc \
          src/rtc_base/memory_usage.cc \
          src/rtc_base/memory/aligned_malloc.cc \
          src/rtc_base/message_digest.cc \
-         src/rtc_base/message_handler.cc \
-         src/rtc_base/nat_server.cc \
-         src/rtc_base/nat_socket_factory.cc \
-         src/rtc_base/nat_types.cc \
          src/rtc_base/net_helper.cc \
          src/rtc_base/net_helpers.cc \
          src/rtc_base/network/sent_packet.cc \
+         src/rtc_base/network/received_packet.cc \
          src/rtc_base/network.cc \
          src/rtc_base/network_constants.cc \
          src/rtc_base/network_monitor.cc \
@@ -1189,7 +1048,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/rtc_base/physical_socket_server.cc \
          src/rtc_base/platform_thread.cc \
          src/rtc_base/platform_thread_types.cc \
-         src/rtc_base/proxy_info.cc \
          src/rtc_base/proxy_server.cc \
          src/rtc_base/race_checker.cc \
          src/rtc_base/random.cc \
@@ -1202,7 +1060,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/rtc_base/socket_address.cc \
          src/rtc_base/socket_address_pair.cc \
          src/rtc_base/socket.cc \
-         src/rtc_base/socket_stream.cc \
          src/rtc_base/ssl_adapter.cc \
          src/rtc_base/ssl_certificate.cc \
          src/rtc_base/ssl_fingerprint.cc \
@@ -1211,7 +1068,6 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/rtc_base/stream.cc \
          src/rtc_base/string_encode.cc \
          src/rtc_base/string_to_number.cc \
-         src/rtc_base/strings/audio_format_to_string.cc \
          src/rtc_base/strings/json.cc \
          src/rtc_base/strings/string_builder.cc \
          src/rtc_base/strings/string_format.cc \
@@ -1221,18 +1077,17 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/rtc_base/synchronization/yield_policy.cc \
          src/rtc_base/system/file_wrapper.cc \
          src/rtc_base/system_time.cc \
-         src/rtc_base/task_queue.cc \
          src/rtc_base/task_queue_stdlib.cc \
          src/rtc_base/task_utils/repeating_task.cc \
          src/rtc_base/third_party/base64/base64.cc \
          src/rtc_base/thread.cc \
-         src/rtc_base/time/timestamp_extrapolator.cc \
          src/rtc_base/timestamp_aligner.cc \
          src/rtc_base/time_utils.cc \
          src/rtc_base/unique_id_generator.cc \
          src/rtc_base/virtual_socket_server.cc \
          src/rtc_base/weak_ptr.cc \
          src/rtc_base/zero_memory.cc \
+         src/stats/attribute.cc \
          src/stats/rtc_stats.cc \
          src/stats/rtc_stats_report.cc \
          src/stats/rtcstats_objects.cc \
@@ -1250,13 +1105,21 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/video/adaptation/encode_usage_resource.cc \
          src/video/adaptation/overuse_frame_detector.cc \
          src/video/adaptation/pixel_limit_resource.cc \
-         src/video/adaptation/quality_rampup_experiment_helper.cc \
          src/video/adaptation/quality_scaler_resource.cc \
          src/video/adaptation/video_stream_encoder_resource.cc \
          src/video/adaptation/video_stream_encoder_resource_manager.cc \
          src/video/alignment_adjuster.cc \
          src/video/buffered_frame_decryptor.cc \
          src/video/call_stats2.cc \
+         src/video/config/encoder_stream_factory.cc \
+         src/video/config/simulcast.cc \
+         src/video/config/video_encoder_config.cc \
+         src/video/corruption_detection/corruption_classifier.cc \
+         src/video/corruption_detection/frame_instrumentation_generator.cc \
+         src/video/corruption_detection/frame_instrumentation_evaluation.cc \
+         src/video/corruption_detection/generic_mapping_functions.cc \
+         src/video/corruption_detection/halton_frame_sampler.cc \
+         src/video/corruption_detection/halton_sequence.cc \
          src/video/decode_synchronizer.cc \
          src/video/encoder_bitrate_adjuster.cc \
          src/video/encoder_overshoot_detector.cc \
@@ -1264,13 +1127,17 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/video/frame_cadence_adapter.cc \
          src/video/frame_decode_timing.cc \
          src/video/frame_dumping_decoder.cc \
+         src/video/frame_dumping_encoder.cc \
          src/video/frame_encode_metadata_writer.cc \
+         src/video/quality_convergence_monitor.cc \
+         src/video/quality_convergence_controller.cc \
          src/video/quality_limitation_reason_tracker.cc \
-         src/video/quality_threshold.cc \
-         src/video/receive_statistics_proxy2.cc \
+         src/video/rate_utilization_tracker.cc \
+         src/video/receive_statistics_proxy.cc \
          src/video/report_block_stats.cc \
+         src/video/render/incoming_video_stream.cc \
+         src/video/render/video_render_frames.cc \
 		 src/video/rtp_streams_synchronizer2.cc \
-         src/video/rtp_video_stream_receiver_frame_transformer_delegate.cc \
          src/video/rtp_video_stream_receiver2.cc \
          src/video/send_delay_stats.cc \
          src/video/send_statistics_proxy.cc \
@@ -1282,11 +1149,9 @@ CXX_SRCS=src/api/adaptation/resource.cc \
          src/video/video_quality_observer2.cc \
          src/video/video_receive_stream_timeout_tracker.cc \
          src/video/video_receive_stream2.cc \
-         src/video/video_send_stream.cc \
          src/video/video_send_stream_impl.cc \
          src/video/video_source_sink_controller.cc \
          src/video/video_stream_buffer_controller.cc \
-         src/video/video_stream_decoder_impl.cc \
          src/video/video_stream_decoder2.cc \
          src/video/video_stream_encoder.cc \
          $(CXX_SRCS/pb) \
@@ -1337,8 +1202,10 @@ YUV_SRCS=src/third_party/libyuv/source/compare.cc \
 LIBSRTP_SRCS=src/third_party/libsrtp/crypto/cipher/aes_gcm_ossl.c \
              src/third_party/libsrtp/crypto/cipher/aes_icm_ossl.c \
              src/third_party/libsrtp/crypto/cipher/cipher.c \
+             src/third_party/libsrtp/crypto/cipher/cipher_test_cases.c \
              src/third_party/libsrtp/crypto/cipher/null_cipher.c \
              src/third_party/libsrtp/crypto/hash/auth.c \
+             src/third_party/libsrtp/crypto/hash/auth_test_cases.c \
              src/third_party/libsrtp/crypto/hash/hmac_ossl.c \
              src/third_party/libsrtp/crypto/hash/null_auth.c \
              src/third_party/libsrtp/crypto/kernel/alloc.c \
@@ -1346,11 +1213,8 @@ LIBSRTP_SRCS=src/third_party/libsrtp/crypto/cipher/aes_gcm_ossl.c \
              src/third_party/libsrtp/crypto/kernel/err.c \
              src/third_party/libsrtp/crypto/kernel/key.c \
              src/third_party/libsrtp/crypto/math/datatypes.c \
-             src/third_party/libsrtp/crypto/math/stat.c \
              src/third_party/libsrtp/crypto/replay/rdb.c \
              src/third_party/libsrtp/crypto/replay/rdbx.c \
-             src/third_party/libsrtp/crypto/replay/ut_sim.c \
-             src/third_party/libsrtp/srtp/ekt.c \
              src/third_party/libsrtp/srtp/srtp.c
 
 CRC32C_SRCS/aarch64=src/third_party/crc32c/src/src/crc32c_arm64.cc
@@ -1541,7 +1405,7 @@ define TEST_WEBRTC_CC_SRC
 #include <api/video_codecs/video_encoder_factory.h>
 #include <rtc_base/ssl_adapter.h>
 int main(int argc, char** argv) {
-    if (!rtc::InitializeSSL()) {
+    if (!webrtc::InitializeSSL()) {
         std::cerr << "Failed to init SSL." << std::endl;
         return 1;
     }
@@ -1550,17 +1414,23 @@ int main(int argc, char** argv) {
         webrtc::CreateBuiltinAudioEncoderFactory(),
         nullptr, nullptr, nullptr, nullptr, nullptr);
     webrtc::PeerConnectionInterface::RTCConfiguration config;
-    auto pc = factory->CreatePeerConnection(config, webrtc::PeerConnectionDependencies(nullptr));
+    auto result = factory->CreatePeerConnectionOrError(config,
+                                                       webrtc::PeerConnectionDependencies(nullptr));
+    if (!result.ok()) {
+        std::cerr << "Failed to create peer connections" << std::endl;
+        return 1;
+    }
     auto video_track = factory->CreateVideoTrack("test", nullptr);
     auto stream = factory->CreateLocalMediaStream("test");
     stream->AddTrack(video_track);
-    pc->AddStream(stream.get());
-    if (!rtc::CleanupSSL()) {
+    result.MoveValue()->AddStream(stream.get());
+    if (!webrtc::CleanupSSL()) {
         std::cerr << "Failed to clean SSL." << std::endl;
         return 1;
     }
     return 0;
 }
+
 endef
 export TEST_WEBRTC_CC_SRC
 
@@ -1589,6 +1459,9 @@ install_webrtc_hdrs:
 
 	mkdir -p $(PREFIX)/include/webrtc/api/call
 	install -C src/api/call/*.h $(PREFIX)/include/webrtc/api/call
+
+	mkdir -p $(PREFIX)/include/webrtc/api/environment
+	install -C src/api/environment/*.h $(PREFIX)/include/webrtc/api/environment
 
 	mkdir -p $(PREFIX)/include/webrtc/api/crypto
 	install -C src/api/crypto/*.h $(PREFIX)/include/webrtc/api/crypto
@@ -1709,10 +1582,14 @@ install_webrtc_hdrs:
 	           $(PREFIX)/include/webrtc/modules/video_coding/include
 
 	mkdir -p $(PREFIX)/include/webrtc/p2p/base
-	install -C src/p2p/base/*.h $(PREFIX)/include/webrtc/p2p/base
+	install -C src/p2p/base/*.h src/p2p/test/turn_server.h src/p2p/test/stun_server.h \
+               $(PREFIX)/include/webrtc/p2p/base
 
 	mkdir -p $(PREFIX)/include/webrtc/p2p/client
 	install -C src/p2p/client/*.h $(PREFIX)/include/webrtc/p2p/client
+
+	mkdir -p $(PREFIX)/include/webrtc/p2p/dtls
+	install -C src/p2p/dtls/*.h $(PREFIX)/include/webrtc/p2p/dtls
 
 	mkdir -p $(PREFIX)/include/webrtc/pc
 	install -C src/pc/*.h $(PREFIX)/include/webrtc/pc

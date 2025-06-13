@@ -523,10 +523,13 @@ bool RTPSenderVideo::SendVideo(int payload_type,
   if (video_header.frame_type == VideoFrameType::kEmptyFrame)
     return true;
 
-  if (payload.empty())
+  if (payload.empty()) {
+    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo payload is empty.";
     return false;
+  }
 
   if (!rtp_sender_->SendingMedia()) {
+    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo not sending.";
     return false;
   }
 
@@ -684,6 +687,7 @@ bool RTPSenderVideo::SendVideo(int payload_type,
     if (frame_encryptor_->Encrypt(
             webrtc::MediaType::VIDEO, first_packet->Ssrc(), additional_data,
             payload, encrypted_video_payload, &bytes_written) != 0) {
+      RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo failed to encrypt.";
       return false;
     }
 
@@ -700,8 +704,11 @@ bool RTPSenderVideo::SendVideo(int payload_type,
 
   const size_t num_packets = packetizer->NumPackets();
 
-  if (num_packets == 0)
+  if (num_packets == 0) {
+    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo failed to packetize payload of "
+                        << payload.size() << " bytes";
     return false;
+  }
 
   bool first_frame = first_frame_sent_();
   std::vector<std::unique_ptr<RtpPacketToSend>> rtp_packets;
@@ -728,8 +735,11 @@ bool RTPSenderVideo::SendVideo(int payload_type,
 
     packet->set_first_packet_of_frame(i == 0);
 
-    if (!packetizer->NextPacket(packet.get()))
+    if (!packetizer->NextPacket(packet.get())) {
+      RTC_LOG(LS_WARNING) << "@@@@@@@@@@@@2";
+      RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendVideo failed to get the next packet.";
       return false;
+    }
     RTC_DCHECK_LE(packet->payload_size(), expected_payload_capacity);
 
     packet->set_allow_retransmission(allow_retransmission);
@@ -810,6 +820,10 @@ bool RTPSenderVideo::SendEncodedImage(int payload_type,
     return frame_transformer_delegate_->TransformFrame(
         payload_type, codec_type, rtp_timestamp, encoded_image, video_header,
         expected_retransmission_time);
+  }
+  if (encoded_image.size() == 0) {
+    RTC_LOG(LS_WARNING) << "RTPSenderVideo::SendEncodedImage encoded_image is empty.";
+    return false;
   }
   return SendVideo(payload_type, codec_type, rtp_timestamp,
                    encoded_image.CaptureTime(), encoded_image,

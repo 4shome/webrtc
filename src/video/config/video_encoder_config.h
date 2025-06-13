@@ -166,6 +166,8 @@ class VideoEncoderConfig {
   ~VideoEncoderConfig();
   std::string ToString() const;
 
+  std::string id;
+
   bool HasScaleResolutionDownTo() const;
 
   // TODO(bugs.webrtc.org/6883): Consolidate on one of these.

@@ -26,6 +26,7 @@
 #include "api/media_types.h"
 #include "api/rtp_headers.h"
 #include "api/rtp_parameters.h"
+#include "api/rtp_transceiver_interface.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/task_queue/task_queue_base.h"
@@ -895,31 +896,33 @@ bool VoiceChannel::SetLocalContent_w(const MediaContentDescription* content,
   bool update_header_extensions = true;
   media_send_channel()->SetExtmapAllowMixed(content->extmap_allow_mixed());
 
-  AudioReceiverParameters recv_params = last_recv_params_;
-  MediaChannelParametersFromMediaDescription(
-      content, header_extensions,
-      webrtc::RtpTransceiverDirectionHasRecv(content->direction()),
-      &recv_params);
-  recv_params.mid = mid();
-
-  if (!media_receive_channel()->SetReceiverParameters(recv_params)) {
-    error_desc = webrtc::StringFormat(
-        "Failed to set local audio description recv parameters for m-section "
-        "with mid='%s'.",
-        mid().c_str());
-    return false;
-  }
-
   bool criteria_modified = false;
-  if (webrtc::RtpTransceiverDirectionHasRecv(content->direction())) {
-    for (const Codec& codec : content->codecs()) {
-      if (MaybeAddHandledPayloadType(codec.id)) {
-        criteria_modified = true;
+  if (content->direction() == RtpTransceiverDirection::kSendRecv ||
+      content->direction() == RtpTransceiverDirection::kRecvOnly) {
+    AudioReceiverParameters recv_params = last_recv_params_;
+    MediaChannelParametersFromMediaDescription(
+        content->as_audio(), header_extensions,
+        RtpTransceiverDirectionHasRecv(content->direction()),
+        &recv_params);
+
+    if (!media_receive_channel()->SetReceiverParameters(recv_params)) {
+      error_desc = StringFormat(
+          "Failed to set local audio description recv parameters for m-section "
+          "with mid='%s'.",
+          mid().c_str());
+      return false;
+    }
+
+    if (RtpTransceiverDirectionHasRecv(content->direction())) {
+      for (const Codec& codec : content->as_audio()->codecs()) {
+        if (MaybeAddHandledPayloadType(codec.id)) {
+          criteria_modified = true;
+        }
       }
     }
-  }
 
-  last_recv_params_ = recv_params;
+    last_recv_params_ = recv_params;
+  }
 
   if (!UpdateLocalStreams_w(content->streams(), type, error_desc)) {
     RTC_DCHECK(!error_desc.empty());
