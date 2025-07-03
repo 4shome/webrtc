@@ -501,20 +501,24 @@ void WebRtcVoiceEngine::Init() {
       "rtc-low-prio", TaskQueueFactory::Priority::LOW);
 
   // Load our audio codec lists.
-  RTC_LOG(LS_VERBOSE) << "Supported send codecs in order of preference:";
-  send_codecs_ =
-      LegacyCollectCodecs(encoder_factory_->GetSupportedEncoders(),
-                          !payload_types_in_transport_trial_enabled_);
-  for (const webrtc::Codec& codec : send_codecs_) {
-    RTC_LOG(LS_VERBOSE) << ToString(codec);
+  if (encoder_factory_) {
+    RTC_LOG(LS_VERBOSE) << "Supported send codecs in order of preference:";
+    send_codecs_ =
+        LegacyCollectCodecs(encoder_factory_->GetSupportedEncoders(),
+                            !payload_types_in_transport_trial_enabled_);
+    for (const webrtc::Codec& codec : send_codecs_) {
+      RTC_LOG(LS_VERBOSE) << ToString(codec);
+    }
   }
 
-  RTC_LOG(LS_VERBOSE) << "Supported recv codecs in order of preference:";
-  recv_codecs_ =
-      LegacyCollectCodecs(decoder_factory_->GetSupportedDecoders(),
-                          !payload_types_in_transport_trial_enabled_);
-  for (const webrtc::Codec& codec : recv_codecs_) {
-    RTC_LOG(LS_VERBOSE) << ToString(codec);
+  if (decoder_factory_) {
+    RTC_LOG(LS_VERBOSE) << "Supported recv codecs in order of preference:";
+    recv_codecs_ =
+        LegacyCollectCodecs(decoder_factory_->GetSupportedDecoders(),
+                            !payload_types_in_transport_trial_enabled_);
+    for (const webrtc::Codec& codec : recv_codecs_) {
+      RTC_LOG(LS_VERBOSE) << ToString(codec);
+    }
   }
 
 #if defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
@@ -780,29 +784,12 @@ WebRtcVoiceEngine::GetRtpHeaderExtensions() const {
 }
 
 bool WebRtcVoiceEngine::StartAecDump(FileWrapper file, int64_t max_size_bytes) {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-
-  AudioProcessing* ap = apm();
-  if (!ap) {
-    RTC_LOG(LS_WARNING)
-        << "Attempting to start aecdump when no audio processing module is "
-           "present, hence no aecdump is started.";
-    return false;
-  }
-
-  return ap->CreateAndAttachAecDump(file.Release(), max_size_bytes,
-                                    low_priority_worker_queue_.get());
+  RTC_LOG(LS_INFO) << "Skip AEC dump.";
+  return false;
 }
 
 void WebRtcVoiceEngine::StopAecDump() {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-  AudioProcessing* ap = apm();
-  if (ap) {
-    ap->DetachAecDump();
-  } else {
-    RTC_LOG(LS_WARNING) << "Attempting to stop aecdump when no audio "
-                           "processing module is present";
-  }
+  RTC_LOG(LS_INFO) << "Skip AEC dump.";
 }
 
 std::optional<AudioDeviceModule::Stats>

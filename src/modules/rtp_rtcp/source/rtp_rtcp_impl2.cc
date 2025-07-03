@@ -318,6 +318,7 @@ bool ModuleRtpRtcpImpl2::OnSendingRtpFrame(uint32_t timestamp,
                                            int payload_type,
                                            bool force_sender_report) {
   if (!Sending()) {
+    RTC_LOG(LS_WARNING) << "ModuleRtpRtcpImpl2::OnSendingRtpFrame not sending.";
     return false;
   }
   // TODO(bugs.webrtc.org/12873): Migrate this method and it's users to use

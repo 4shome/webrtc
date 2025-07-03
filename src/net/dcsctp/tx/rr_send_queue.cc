@@ -216,7 +216,7 @@ std::optional<SendQueue::DataToSend> RRSendQueue::OutgoingStream::Produce(
       RTC_DCHECK(item.remaining_size > 0);
     }
     RTC_DCHECK(IsConsistent());
-    return chunk;
+    return std::move(chunk);
   }
   RTC_DCHECK(IsConsistent());
   return std::nullopt;

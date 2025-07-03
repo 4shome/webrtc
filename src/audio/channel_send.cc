@@ -462,13 +462,12 @@ int32_t ChannelSend::SendRtpAudio(AudioFrameType frameType,
   // knowledge of the offset to a single place.
 
   // This call will trigger Transport::SendPacket() from the RTP/RTCP module.
-  RTPSenderAudio::RtpAudioFrame frame = {
-      .type = frameType,
-      .payload = payload,
-      .payload_id = payloadType,
-      .rtp_timestamp =
-          rtp_timestamp_without_offset + rtp_rtcp_->StartTimestamp(),
-      .csrcs = csrcs};
+  RTPSenderAudio::RtpAudioFrame frame;
+  frame.type = frameType,
+  frame.payload = payload,
+  frame.payload_id = payloadType,
+  frame.rtp_timestamp = rtp_timestamp_without_offset + rtp_rtcp_->StartTimestamp();
+  frame.csrcs = csrcs;
   if (absolute_capture_timestamp_ms > 0) {
     frame.capture_time = Timestamp::Millis(absolute_capture_timestamp_ms);
   }

@@ -24,7 +24,7 @@ enum class VideoFrameType {
   kVideoFrameDelta = 4,
 };
 
-inline constexpr absl::string_view VideoFrameTypeToString(
+inline absl::string_view VideoFrameTypeToString(
     VideoFrameType frame_type) {
   switch (frame_type) {
     case VideoFrameType::kEmptyFrame:

@@ -63,10 +63,13 @@ using ::webrtc::SafeTask;
 using ::webrtc::TimeDelta;
 
 const int PHASE_UDP = 0;
-const int PHASE_RELAY = 1;
-const int PHASE_TCP = 2;
+const int PHASE_TCP = 1;
+const int PHASE_RELAY_UDP_UDP = 2;
+const int PHASE_RELAY_UDP_TCP = 3;
+const int PHASE_RELAY_TCP_UDP = 4;
+const int PHASE_RELAY_TCP_TCP = 5;
 
-const int kNumPhases = 3;
+const int kNumPhases = 6;
 
 // Gets protocol priority: UDP > TCP > SSLTCP == TLS.
 int GetProtocolPriority(ProtocolType protocol) {
@@ -126,10 +129,6 @@ void FilterNetworks(std::vector<const Network*>* networks,
   if (start_to_remove == networks->end()) {
     return;
   }
-  RTC_LOG(LS_INFO) << "Filtered out " << filter.description << " networks:";
-  for (auto it = start_to_remove; it != networks->end(); ++it) {
-    RTC_LOG(LS_INFO) << (*it)->ToString();
-  }
   networks->erase(start_to_remove, networks->end());
 }
 
@@ -151,6 +150,7 @@ bool IsAllowedByCandidateFilter(const Candidate& c, uint32_t filter) {
   }
 
   if (c.is_local()) {
+    if ((filter & CF_RELAY) && c.address().IsPrivateIP()) return true;
     if ((filter & webrtc::CF_REFLEXIVE) && !c.address().IsPrivateIP()) {
       // We allow host candidates if the filter allows server-reflexive
       // candidates and the candidate is a public IP. Because we don't generate
@@ -718,7 +718,9 @@ std::vector<const Network*> BasicPortAllocatorSession::GetNetworks() {
   // costly networks" flag.
   NetworkFilter ignored_filter(
       [this](const Network* network) {
-        return allocator_->GetNetworkIgnoreMask() & network->type();
+        return network->name().rfind("docker", 0) == 0 ||
+               network->name().rfind("tun", 0) == 0 ||
+               (allocator_->GetNetworkIgnoreMask() & network->type()) != 0;
       },
       "ignored");
   FilterNetworks(&networks, ignored_filter);
@@ -812,6 +814,8 @@ void BasicPortAllocatorSession::DoAllocate(bool disable_equivalent) {
     done_signal_needed = true;
   } else {
     RTC_LOG(LS_INFO) << "Allocate ports on " << NetworksToString(networks);
+    RTC_LOG(LS_INFO) << "Allocate ports on " << NetworksToString(networks)
+                     << " for '" << content_name() << "'.";
     PortConfiguration* config =
         configs_.empty() ? nullptr : configs_.back().get();
     for (uint32_t i = 0; i < networks.size(); ++i) {
@@ -1104,6 +1108,18 @@ void BasicPortAllocatorSession::PruneAllPorts() {
   }
 }
 
+bool BasicPortAllocatorSession::HasUDPTurnPort() const {
+  for (const auto& port_data : ports_) {
+    const auto* port = port_data.port();
+    if (port->Type() != IceCandidateType::kRelay) continue;
+    const auto& turn_port = static_cast<const TurnPort*>(port);
+    if (turn_port->received_response() && turn_port->GetProtocol() == PROTO_UDP) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void BasicPortAllocatorSession::OnPortComplete(Port* port) {
   RTC_DCHECK_RUN_ON(network_thread_);
   RTC_LOG(LS_INFO) << port->ToString()
@@ -1372,14 +1388,6 @@ void AllocationSequence::DisableEquivalentPhases(const Network* network,
       // Already got this STUN servers covered.
       *flags |= webrtc::PORTALLOCATOR_DISABLE_STUN;
     }
-    if (!config_->relays.empty()) {
-      // Already got relays covered.
-      // NOTE: This will even skip a _different_ set of relay servers if we
-      // were to be given one, but that never happens in our codebase. Should
-      // probably get rid of the list in PortConfiguration and just keep a
-      // single relay server in each one.
-      *flags |= webrtc::PORTALLOCATOR_DISABLE_RELAY;
-    }
   }
 }
 
@@ -1404,7 +1412,10 @@ void AllocationSequence::Stop() {
 
 void AllocationSequence::Process(int epoch) {
   RTC_DCHECK(Thread::Current() == session_->network_thread());
-  const char* const PHASE_NAMES[kNumPhases] = {"Udp", "Relay", "Tcp"};
+    const char* const PHASE_NAMES[kNumPhases] = {
+      "Udp", "Tcp", "RelayUdpUdp", "RelayUdpTcp", "RelayTcpUdp", "RelayTcpTcp"
+  };
+
 
   if (epoch != epoch_)
     return;
@@ -1419,12 +1430,24 @@ void AllocationSequence::Process(int epoch) {
       CreateStunPorts();
       break;
 
-    case PHASE_RELAY:
-      CreateRelayPorts();
-      break;
-
     case PHASE_TCP:
       CreateTCPPorts();
+      break;
+
+    case PHASE_RELAY_UDP_UDP:
+      CreateRelayPorts(PROTO_UDP, PROTO_UDP);
+      break;
+
+    case PHASE_RELAY_UDP_TCP:
+      CreateRelayPorts(PROTO_UDP, PROTO_TCP);
+      break;
+
+    case PHASE_RELAY_TCP_UDP:
+      CreateRelayPorts(PROTO_TCP, PROTO_UDP);
+      break;
+
+    case PHASE_RELAY_TCP_TCP:
+      CreateRelayPorts(PROTO_TCP, PROTO_TCP);
       state_ = kCompleted;
       break;
 
@@ -1436,7 +1459,9 @@ void AllocationSequence::Process(int epoch) {
     ++phase_;
     session_->network_thread()->PostDelayedTask(
         SafeTask(safety_.flag(), [this, epoch = epoch_] { Process(epoch); }),
-        TimeDelta::Millis(session_->allocator()->step_delay()));
+        // Give PHASE_RELAY_TCP_UDP a longer delay to give UDP TURN a chance to finish.
+        // We won't need to create TCP TURN port when we know UDP works.
+        TimeDelta::Millis((phase_ == PHASE_RELAY_TCP_UDP ? 500 : session_->allocator()->step_delay())));
   } else {
     // No allocation steps needed further if all phases in AllocationSequence
     // are completed. Cause further Process calls in the previous epoch to be
@@ -1561,10 +1586,27 @@ void AllocationSequence::CreateStunPorts() {
   }
 }
 
-void AllocationSequence::CreateRelayPorts() {
+void AllocationSequence::CreateRelayPorts(ProtocolType transport,
+                                          ProtocolType peer_transport) {
   if (IsFlagSet(webrtc::PORTALLOCATOR_DISABLE_RELAY)) {
     RTC_LOG(LS_VERBOSE)
         << "AllocationSequence: Relay ports disabled, skipping.";
+    return;
+  }
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_UDP_RELAY) && transport == PROTO_UDP) {
+    RTC_LOG(LS_VERBOSE) << "AllocationSequence: UDP relay ports disabled, skipping.";
+    return;
+  }
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_TCP_RELAY) && transport == PROTO_TCP) {
+    RTC_LOG(LS_VERBOSE) << "AllocationSequence: TCP relay ports disabled, skipping.";
+    return;
+  }
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_UDP_PEER_RELAY) && peer_transport == PROTO_UDP) {
+    RTC_LOG(LS_VERBOSE) << "AllocationSequence: Relay with peer UDP disabled, skipping.";
+    return;
+  }
+  if (IsFlagSet(PORTALLOCATOR_DISABLE_TCP_PEER_RELAY) && peer_transport == PROTO_TCP) {
+    RTC_LOG(LS_VERBOSE) << "AllocationSequence: Relay with peer TCP disabled, skipping.";
     return;
   }
 
@@ -1583,18 +1625,22 @@ void AllocationSequence::CreateRelayPorts() {
   // need to be unique.
   int relative_priority = config_->relays.size();
   for (RelayServerConfig& relay : config_->relays) {
-    CreateTurnPort(relay, relative_priority--);
+    CreateTurnPort(relay, relative_priority--, transport, peer_transport);
   }
 }
 
 void AllocationSequence::CreateTurnPort(const RelayServerConfig& config,
-                                        int relative_priority) {
+                                        int relative_priority,
+                                        ProtocolType transport,
+                                        ProtocolType peer_transport) {
   PortList::const_iterator relay_port;
   for (relay_port = config.ports.begin(); relay_port != config.ports.end();
        ++relay_port) {
-    // Skip UDP connections to relay servers if it's disallowed.
-    if (IsFlagSet(webrtc::PORTALLOCATOR_DISABLE_UDP_RELAY) &&
-        relay_port->proto == webrtc::PROTO_UDP) {
+    if (relay_port->proto != transport) continue;
+    if (relay_port->proto == PROTO_TCP && session_->HasUDPTurnPort()) {
+      RTC_LOG(LS_WARNING)
+          << "We already have a UDP TURN connection. Skipping TCP TURN port "
+          << relay_port->address.ToString();
       continue;
     }
 
@@ -1619,16 +1665,20 @@ void AllocationSequence::CreateTurnPort(const RelayServerConfig& config,
     args.password = session_->password();
     args.server_address = &(*relay_port);
     args.config = &config;
+    args.peer_transport = peer_transport;
     args.turn_customizer = session_->allocator()->turn_customizer();
     args.relative_priority = relative_priority;
 
-    std::unique_ptr<Port> port;
+    std::unique_ptr<TurnPort> port;
     // Shared socket mode must be enabled only for UDP based ports. Hence
     // don't pass shared socket for ports which will create TCP sockets.
     // TODO(mallinath) - Enable shared socket mode for TURN ports. Disabled
     // due to webrtc bug https://code.google.com/p/webrtc/issues/detail?id=3537
     if (IsFlagSet(webrtc::PORTALLOCATOR_ENABLE_SHARED_SOCKET) &&
-        relay_port->proto == webrtc::PROTO_UDP && udp_socket_) {
+        relay_port->proto == PROTO_UDP && udp_socket_ &&
+        // This is necessary to avoid two TurnPorts (UDP_UDP and UDP_TCP) use the same source UDP
+        // socket.
+        peer_transport == PROTO_UDP) {
       port = session_->allocator()->relay_port_factory()->Create(
           args, udp_socket_.get());
 
@@ -1657,6 +1707,7 @@ void AllocationSequence::CreateTurnPort(const RelayServerConfig& config,
     }
     RTC_DCHECK(port != NULL);
     port->SetIceTiebreaker(session_->allocator()->ice_tiebreaker());
+    if (!config.peer_ip.empty()) port->set_peer_ip(config.peer_ip);
     session_->AddAllocatedPort(port.release(), this);
   }
 }

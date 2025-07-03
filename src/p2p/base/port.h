@@ -150,6 +150,7 @@ struct CandidatePairChangeEvent {
   std::string reason;
   // How long do we estimate that we've been disconnected.
   int64_t estimated_disconnected_time_ms;
+  IceCandidatePairState state;
 };
 
 typedef std::set<SocketAddress> ServerAddresses;

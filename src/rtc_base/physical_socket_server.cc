@@ -79,7 +79,7 @@
 
 #if defined(WEBRTC_POSIX)
 #include <netinet/tcp.h>  // for TCP_NODELAY
-
+#include <linux/sockios.h>
 #define IP_MTU 14  // Until this is integrated from linux/in.h to netinet/in.h
 typedef void* SockOptArg;
 
@@ -221,7 +221,7 @@ SocketAddress PhysicalSocket::GetRemoteAddress() const {
   if (result >= 0) {
     webrtc::SocketAddressFromSockAddrStorage(addr_storage, &address);
   } else {
-    RTC_LOG(LS_WARNING)
+    RTC_LOG(LS_VERBOSE)
         << "GetRemoteAddress: unable to get remote addr, socket=" << s_;
   }
   return address;
@@ -529,7 +529,9 @@ int PhysicalSocket::DoReadFromSocket(void* buffer,
 #if defined(WEBRTC_POSIX)
   int received = 0;
   iovec iov = {.iov_base = buffer, .iov_len = length};
-  msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1};
+  msghdr msg;
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
   if (out_addr) {
     out_addr->Clear();
     msg.msg_name = addr;

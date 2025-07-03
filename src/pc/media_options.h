@@ -40,6 +40,8 @@ struct SenderOptions {
   SimulcastLayerList simulcast_layers;
   // Use `num_sim_layers` to indicate legacy simulcast.
   int num_sim_layers;
+  Codecs audio_codecs;
+  Codecs video_codecs;
 };
 
 // Options for an individual media description/"m=" section.
@@ -53,12 +55,14 @@ struct MediaDescriptionOptions {
   // TODO(deadbeef): When we don't support Plan B, there will only be one
   // sender per media description and this can be simplified.
   void AddAudioSender(const std::string& track_id,
-                      const std::vector<std::string>& stream_ids);
+                      const std::vector<std::string>& stream_ids,
+                      const Codecs& codecs);
   void AddVideoSender(const std::string& track_id,
                       const std::vector<std::string>& stream_ids,
                       const std::vector<RidDescription>& rids,
                       const SimulcastLayerList& simulcast_layers,
-                      int num_sim_layers);
+                      int num_sim_layers,
+                      const Codecs& codecs);
 
   MediaType type;
   std::string mid;
@@ -80,7 +84,9 @@ struct MediaDescriptionOptions {
                          const std::vector<std::string>& stream_ids,
                          const std::vector<RidDescription>& rids,
                          const SimulcastLayerList& simulcast_layers,
-                         int num_sim_layers);
+                         int num_sim_layers,
+                         const Codecs& audio_codecs,
+                         const Codecs& video_codecs);
 };
 
 // Provides a mechanism for describing how m= sections should be generated.

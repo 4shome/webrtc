@@ -31,6 +31,7 @@
 #include "api/rtc_error.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
+#include "api/video/video_codec_type.h"
 #include "api/video_codecs/video_encoder_factory.h"
 #include "rtc_base/system/rtc_export.h"
 
@@ -135,6 +136,9 @@ class RTC_EXPORT RtpSenderInterface : public webrtc::RefCountInterface,
   // TODO: bugs.webrtc.org/15929 - remove when all implementations are good
   void SetFrameTransformer(scoped_refptr<FrameTransformerInterface>
                            /* frame_transformer */) override {}
+
+  virtual void AddVideoCodecType(VideoCodecType vct) = 0;
+  virtual std::vector<VideoCodecType> GetVideoCodecTypes() = 0;
 
  protected:
   ~RtpSenderInterface() override = default;
