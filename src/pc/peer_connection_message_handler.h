@@ -17,16 +17,16 @@
 #include "api/media_stream_interface.h"
 #include "api/peer_connection_interface.h"
 #include "api/rtc_error.h"
-#include "api/stats_types.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/task_queue/task_queue_base.h"
 #include "pc/legacy_stats_collector_interface.h"
+#include "rtc_base/thread.h"
 
 namespace webrtc {
 
 class PeerConnectionMessageHandler {
  public:
-  explicit PeerConnectionMessageHandler(rtc::Thread* signaling_thread)
+  explicit PeerConnectionMessageHandler(Thread* signaling_thread)
       : signaling_thread_(signaling_thread) {}
   ~PeerConnectionMessageHandler() = default;
 

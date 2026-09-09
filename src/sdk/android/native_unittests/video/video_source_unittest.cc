@@ -8,18 +8,29 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "sdk/android/native_api/video/video_source.h"
+
+#include <jni.h>
+
+#include <cstdint>
 #include <vector>
 
+#include "api/media_stream_interface.h"
+#include "api/scoped_refptr.h"
+#include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
+#include "api/video/video_source_interface.h"
+#include "rtc_base/thread.h"
 #include "sdk/android/generated_native_unittests_jni/JavaVideoSourceTestHelper_jni.h"
-#include "sdk/android/native_api/video/video_source.h"
+#include "sdk/android/native_api/jni/jvm.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 namespace test {
 
 namespace {
-class TestVideoSink : public rtc::VideoSinkInterface<VideoFrame> {
+class TestVideoSink : public webrtc::VideoSinkInterface<VideoFrame> {
  public:
   void OnFrame(const VideoFrame& frame) { frames_.push_back(frame); }
 
@@ -37,12 +48,13 @@ class TestVideoSink : public rtc::VideoSinkInterface<VideoFrame> {
 TEST(JavaVideoSourceTest, CreateJavaVideoSource) {
   JNIEnv* env = AttachCurrentThreadIfNeeded();
   // Wrap test thread so it can be used as the signaling thread.
-  rtc::ThreadManager::Instance()->WrapCurrentThread();
+  webrtc::ThreadManager::Instance()->WrapCurrentThread();
 
-  rtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
+  webrtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
       CreateJavaVideoSource(
-          env, rtc::ThreadManager::Instance()->CurrentThread(),
-          false /* is_screencast */, true /* align_timestamps */);
+          env, webrtc::ThreadManager::Instance()->CurrentThread(),
+          false /* is_screencast */, true /* align_timestamps */,
+          CreateTestEnvironment());
 
   ASSERT_NE(nullptr, video_track_source);
   EXPECT_NE(nullptr,
@@ -54,13 +66,15 @@ TEST(JavaVideoSourceTest, OnFrameCapturedFrameIsDeliveredToSink) {
 
   JNIEnv* env = AttachCurrentThreadIfNeeded();
   // Wrap test thread so it can be used as the signaling thread.
-  rtc::ThreadManager::Instance()->WrapCurrentThread();
+  webrtc::ThreadManager::Instance()->WrapCurrentThread();
 
-  rtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
+  webrtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
       CreateJavaVideoSource(
-          env, rtc::ThreadManager::Instance()->CurrentThread(),
-          false /* is_screencast */, true /* align_timestamps */);
-  video_track_source->AddOrUpdateSink(&test_video_sink, rtc::VideoSinkWants());
+          env, webrtc::ThreadManager::Instance()->CurrentThread(),
+          false /* is_screencast */, true /* align_timestamps */,
+          CreateTestEnvironment());
+  video_track_source->AddOrUpdateSink(&test_video_sink,
+                                      webrtc::VideoSinkWants());
 
   jni::Java_JavaVideoSourceTestHelper_startCapture(
       env, video_track_source->GetJavaVideoCapturerObserver(env),
@@ -87,13 +101,15 @@ TEST(JavaVideoSourceTest,
 
   JNIEnv* env = AttachCurrentThreadIfNeeded();
   // Wrap test thread so it can be used as the signaling thread.
-  rtc::ThreadManager::Instance()->WrapCurrentThread();
+  webrtc::ThreadManager::Instance()->WrapCurrentThread();
 
-  rtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
+  webrtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
       CreateJavaVideoSource(
-          env, rtc::ThreadManager::Instance()->CurrentThread(),
-          false /* is_screencast */, false /* align_timestamps */);
-  video_track_source->AddOrUpdateSink(&test_video_sink, rtc::VideoSinkWants());
+          env, webrtc::ThreadManager::Instance()->CurrentThread(),
+          false /* is_screencast */, false /* align_timestamps */,
+          CreateTestEnvironment());
+  video_track_source->AddOrUpdateSink(&test_video_sink,
+                                      webrtc::VideoSinkWants());
 
   jni::Java_JavaVideoSourceTestHelper_startCapture(
       env, video_track_source->GetJavaVideoCapturerObserver(env),
@@ -118,12 +134,13 @@ TEST(JavaVideoSourceTest,
 TEST(JavaVideoSourceTest, CapturerStartedSuccessStateBecomesLive) {
   JNIEnv* env = AttachCurrentThreadIfNeeded();
   // Wrap test thread so it can be used as the signaling thread.
-  rtc::ThreadManager::Instance()->WrapCurrentThread();
+  webrtc::ThreadManager::Instance()->WrapCurrentThread();
 
-  rtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
+  webrtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
       CreateJavaVideoSource(
-          env, rtc::ThreadManager::Instance()->CurrentThread(),
-          false /* is_screencast */, true /* align_timestamps */);
+          env, webrtc::ThreadManager::Instance()->CurrentThread(),
+          false /* is_screencast */, true /* align_timestamps */,
+          CreateTestEnvironment());
 
   jni::Java_JavaVideoSourceTestHelper_startCapture(
       env, video_track_source->GetJavaVideoCapturerObserver(env),
@@ -136,12 +153,13 @@ TEST(JavaVideoSourceTest, CapturerStartedSuccessStateBecomesLive) {
 TEST(JavaVideoSourceTest, CapturerStartedFailureStateBecomesEnded) {
   JNIEnv* env = AttachCurrentThreadIfNeeded();
   // Wrap test thread so it can be used as the signaling thread.
-  rtc::ThreadManager::Instance()->WrapCurrentThread();
+  webrtc::ThreadManager::Instance()->WrapCurrentThread();
 
-  rtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
+  webrtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
       CreateJavaVideoSource(
-          env, rtc::ThreadManager::Instance()->CurrentThread(),
-          false /* is_screencast */, true /* align_timestamps */);
+          env, webrtc::ThreadManager::Instance()->CurrentThread(),
+          false /* is_screencast */, true /* align_timestamps */,
+          CreateTestEnvironment());
 
   jni::Java_JavaVideoSourceTestHelper_startCapture(
       env, video_track_source->GetJavaVideoCapturerObserver(env),
@@ -154,12 +172,13 @@ TEST(JavaVideoSourceTest, CapturerStartedFailureStateBecomesEnded) {
 TEST(JavaVideoSourceTest, CapturerStoppedStateBecomesEnded) {
   JNIEnv* env = AttachCurrentThreadIfNeeded();
   // Wrap test thread so it can be used as the signaling thread.
-  rtc::ThreadManager::Instance()->WrapCurrentThread();
+  webrtc::ThreadManager::Instance()->WrapCurrentThread();
 
-  rtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
+  webrtc::scoped_refptr<JavaVideoTrackSourceInterface> video_track_source =
       CreateJavaVideoSource(
-          env, rtc::ThreadManager::Instance()->CurrentThread(),
-          false /* is_screencast */, true /* align_timestamps */);
+          env, webrtc::ThreadManager::Instance()->CurrentThread(),
+          false /* is_screencast */, true /* align_timestamps */,
+          CreateTestEnvironment());
 
   jni::Java_JavaVideoSourceTestHelper_startCapture(
       env, video_track_source->GetJavaVideoCapturerObserver(env),
@@ -173,3 +192,5 @@ TEST(JavaVideoSourceTest, CapturerStoppedStateBecomesEnded) {
 
 }  // namespace test
 }  // namespace webrtc
+
+DEFINE_JNI(JavaVideoSourceTestHelper)

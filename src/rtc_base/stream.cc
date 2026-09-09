@@ -9,38 +9,13 @@
  */
 #include "rtc_base/stream.h"
 
-#include <errno.h>
-#include <string.h>
 
-#include <algorithm>
-#include <string>
 
-#include "rtc_base/checks.h"
-#include "rtc_base/thread.h"
-
-namespace rtc {
+namespace webrtc {
 
 ///////////////////////////////////////////////////////////////////////////////
 // StreamInterface
 ///////////////////////////////////////////////////////////////////////////////
-
-StreamResult StreamInterface::WriteAll(const void* data,
-                                       size_t data_len,
-                                       size_t* written,
-                                       int* error) {
-  StreamResult result = SR_SUCCESS;
-  size_t total_written = 0, current_written;
-  while (total_written < data_len) {
-    result = Write(static_cast<const char*>(data) + total_written,
-                   data_len - total_written, &current_written, error);
-    if (result != SR_SUCCESS)
-      break;
-    total_written += current_written;
-  }
-  if (written)
-    *written = total_written;
-  return result;
-}
 
 bool StreamInterface::Flush() {
   return false;
@@ -48,4 +23,4 @@ bool StreamInterface::Flush() {
 
 StreamInterface::StreamInterface() {}
 
-}  // namespace rtc
+}  // namespace webrtc

@@ -10,6 +10,8 @@
 
 #include "modules/desktop_capture/desktop_capture_metrics_helper.h"
 
+#include <cstdint>
+
 #include "modules/desktop_capture/desktop_capture_types.h"
 #include "system_wrappers/include/metrics.h"
 
@@ -21,7 +23,7 @@ namespace {
 enum class SequentialDesktopCapturerId {
   kUnknown = 0,
   kWgcCapturerWin = 1,
-  kScreenCapturerWinMagnifier = 2,
+  // kScreenCapturerWinMagnifier = 2,
   kWindowCapturerWinGdi = 3,
   kScreenCapturerWinGdi = 4,
   kScreenCapturerWinDirectx = 5,
@@ -34,9 +36,6 @@ void RecordCapturerImpl(uint32_t capturer_id) {
   switch (capturer_id) {
     case DesktopCapturerId::kWgcCapturerWin:
       sequential_id = SequentialDesktopCapturerId::kWgcCapturerWin;
-      break;
-    case DesktopCapturerId::kScreenCapturerWinMagnifier:
-      sequential_id = SequentialDesktopCapturerId::kScreenCapturerWinMagnifier;
       break;
     case DesktopCapturerId::kWindowCapturerWinGdi:
       sequential_id = SequentialDesktopCapturerId::kWindowCapturerWinGdi;

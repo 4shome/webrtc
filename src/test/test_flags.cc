@@ -15,13 +15,6 @@
 
 #include "absl/flags/flag.h"
 
-ABSL_FLAG(std::string,
-          force_fieldtrials,
-          "",
-          "Field trials control experimental feature code which can be forced. "
-          "E.g. running with --force_fieldtrials=WebRTC-FooFeature/Enable/"
-          " will assign the group Enable to field trial WebRTC-FooFeature.");
-
 ABSL_FLAG(std::vector<std::string>,
           plot,
           {},
@@ -36,3 +29,8 @@ ABSL_FLAG(
     "Path where the perf results should be stored in proto format described "
     "described by histogram.proto in "
     "https://chromium.googlesource.com/catapult/.");
+
+ABSL_FLAG(bool,
+          webrtc_quick_perf_test,
+          false,
+          "Runs webrtc perfomance tests in quick mode.");

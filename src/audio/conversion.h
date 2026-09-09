@@ -11,6 +11,9 @@
 #ifndef AUDIO_CONVERSION_H_
 #define AUDIO_CONVERSION_H_
 
+#include <cstddef>
+#include <cstdint>
+
 namespace webrtc {
 
 // Convert fixed point number with 8 bit fractional part, to floating point.

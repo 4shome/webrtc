@@ -9,6 +9,9 @@
  */
 #include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor_extension.h"
 
+#include <cstdint>
+
+#include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -20,8 +23,6 @@ using ::testing::ElementsAreArray;
 using ::testing::IsEmpty;
 
 constexpr uint8_t kDeprecatedFlags = 0x30;
-
-// TODO(danilchap): Add fuzzer to test for various invalid inputs.
 
 TEST(RtpGenericFrameDescriptorExtensionTest,
      ParseFirstPacketOfIndependenSubFrame) {

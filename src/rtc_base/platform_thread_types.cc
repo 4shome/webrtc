@@ -10,13 +10,19 @@
 
 #include "rtc_base/platform_thread_types.h"
 
+// IWYU pragma: begin_keep
 #if defined(WEBRTC_LINUX)
+#include <linux/prctl.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
+
+#if !defined(WEBRTC_ARCH_ARM) && !defined(WEBRTC_ARCH_ARM64)
+#include <asm/unistd_64.h>
+#endif
 #endif
 
 #if defined(WEBRTC_WIN)
-#include "rtc_base/arraysize.h"
+#include <iterator>
 
 // The SetThreadDescription API was brought in version 1607 of Windows 10.
 // For compatibility with various versions of winuser and avoid clashing with
@@ -25,7 +31,14 @@ typedef HRESULT(WINAPI* RTC_SetThreadDescription)(HANDLE hThread,
                                                   PCWSTR lpThreadDescription);
 #endif
 
-namespace rtc {
+#if defined(WEBRTC_FUCHSIA)
+#include <zircon/syscalls.h>
+
+#include "rtc_base/checks.h"
+#endif
+// IWYU pragma: end_keep
+
+namespace webrtc {
 
 PlatformThreadId CurrentThreadId() {
 #if defined(WEBRTC_WIN)
@@ -76,13 +89,13 @@ void SetCurrentThreadName(const char* name) {
   if (set_thread_description_func) {
     // Convert from ASCII to UTF-16.
     wchar_t wide_thread_name[64];
-    for (size_t i = 0; i < arraysize(wide_thread_name) - 1; ++i) {
+    for (size_t i = 0; i < std::size(wide_thread_name) - 1; ++i) {
       wide_thread_name[i] = name[i];
       if (wide_thread_name[i] == L'\0')
         break;
     }
     // Guarantee null-termination.
-    wide_thread_name[arraysize(wide_thread_name) - 1] = L'\0';
+    wide_thread_name[std::size(wide_thread_name) - 1] = L'\0';
     set_thread_description_func(::GetCurrentThread(), wide_thread_name);
   }
 
@@ -109,7 +122,11 @@ void SetCurrentThreadName(const char* name) {
   prctl(PR_SET_NAME, reinterpret_cast<unsigned long>(name));  // NOLINT
 #elif defined(WEBRTC_MAC) || defined(WEBRTC_IOS)
   pthread_setname_np(name);
+#elif defined(WEBRTC_FUCHSIA)
+  zx_status_t status = zx_object_set_property(zx_thread_self(), ZX_PROP_NAME,
+                                              name, strlen(name));
+  RTC_DCHECK_EQ(status, ZX_OK);
 #endif
 }
 
-}  // namespace rtc
+}  // namespace webrtc

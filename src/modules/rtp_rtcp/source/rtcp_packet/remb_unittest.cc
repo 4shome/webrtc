@@ -10,6 +10,13 @@
 
 #include "modules/rtp_rtcp/source/rtcp_packet/remb.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <iterator>
+#include <vector>
+
+#include "rtc_base/buffer.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/rtcp_packet_parser.h"
@@ -21,15 +28,15 @@ using webrtc::rtcp::Remb;
 
 namespace webrtc {
 namespace {
-const uint32_t kSenderSsrc = 0x12345678;
-const uint32_t kRemoteSsrcs[] = {0x23456789, 0x2345678a, 0x2345678b};
-const uint32_t kBitrateBps = 0x3fb93 * 2;  // 522022;
-const int64_t kBitrateBps64bit = int64_t{0x3fb93} << 30;
-const uint8_t kPacket[] = {0x8f, 206,  0x00, 0x07, 0x12, 0x34, 0x56, 0x78,
-                           0x00, 0x00, 0x00, 0x00, 'R',  'E',  'M',  'B',
-                           0x03, 0x07, 0xfb, 0x93, 0x23, 0x45, 0x67, 0x89,
-                           0x23, 0x45, 0x67, 0x8a, 0x23, 0x45, 0x67, 0x8b};
-const size_t kPacketLength = sizeof(kPacket);
+constexpr uint32_t kSenderSsrc = 0x12345678;
+constexpr uint32_t kRemoteSsrcs[] = {0x23456789, 0x2345678a, 0x2345678b};
+constexpr uint32_t kBitrateBps = 0x3fb93 * 2;  // 522022;
+constexpr int64_t kBitrateBps64bit = int64_t{0x3fb93} << 30;
+constexpr uint8_t kPacket[] = {0x8f, 206,  0x00, 0x07, 0x12, 0x34, 0x56, 0x78,
+                               0x00, 0x00, 0x00, 0x00, 'R',  'E',  'M',  'B',
+                               0x03, 0x07, 0xfb, 0x93, 0x23, 0x45, 0x67, 0x89,
+                               0x23, 0x45, 0x67, 0x8a, 0x23, 0x45, 0x67, 0x8b};
+constexpr size_t kPacketLength = sizeof(kPacket);
 }  // namespace
 
 TEST(RtcpPacketRembTest, Create) {
@@ -39,7 +46,7 @@ TEST(RtcpPacketRembTest, Create) {
       std::vector<uint32_t>(std::begin(kRemoteSsrcs), std::end(kRemoteSsrcs)));
   remb.SetBitrateBps(kBitrateBps);
 
-  rtc::Buffer packet = remb.Build();
+  Buffer packet = remb.Build();
 
   EXPECT_THAT(make_tuple(packet.data(), packet.size()),
               ElementsAreArray(kPacket));
@@ -59,7 +66,7 @@ TEST(RtcpPacketRembTest, CreateAndParseWithoutSsrcs) {
   Remb remb;
   remb.SetSenderSsrc(kSenderSsrc);
   remb.SetBitrateBps(kBitrateBps);
-  rtc::Buffer packet = remb.Build();
+  Buffer packet = remb.Build();
 
   Remb parsed;
   EXPECT_TRUE(test::ParseSinglePacket(packet, &parsed));
@@ -71,7 +78,7 @@ TEST(RtcpPacketRembTest, CreateAndParseWithoutSsrcs) {
 TEST(RtcpPacketRembTest, CreateAndParse64bitBitrate) {
   Remb remb;
   remb.SetBitrateBps(kBitrateBps64bit);
-  rtc::Buffer packet = remb.Build();
+  Buffer packet = remb.Build();
 
   Remb parsed;
   EXPECT_TRUE(test::ParseSinglePacket(packet, &parsed));
@@ -101,9 +108,22 @@ TEST(RtcpPacketRembTest, ParseFailsWhenUniqueIdentifierIsNotRemb) {
 TEST(RtcpPacketRembTest, ParseFailsWhenBitrateDoNotFitIn64bits) {
   uint8_t packet[kPacketLength];
   memcpy(packet, kPacket, kPacketLength);
-  packet[17] |= 0xfc;  // Set exponenta component to maximum of 63.
+  packet[17] |= 0xfc;  // Set exponent component to maximum of 63.
   packet[19] |= 0x02;  // Ensure mantissa is at least 2.
 
+  Remb remb;
+  EXPECT_FALSE(test::ParseSinglePacket(packet, &remb));
+}
+
+TEST(RtcpPacketRembTest, ParseFailsWhenBitrateDoNotFitIn63bits) {
+  uint8_t packet[kPacketLength];
+  memcpy(packet, kPacket, kPacketLength);
+  packet[17] = 56 << 2;  // Set exponent component to 56.
+  packet[18] = 0;        // Set mantissa to 200 > 128
+  packet[19] = 200;
+
+  // Result value 200 * 2^56 can't be represented with int64_t and thus should
+  // be rejected.
   Remb remb;
   EXPECT_FALSE(test::ParseSinglePacket(packet, &remb));
 }

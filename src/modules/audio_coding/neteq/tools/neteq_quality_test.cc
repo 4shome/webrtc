@@ -10,39 +10,46 @@
 
 #include "modules/audio_coding/neteq/tools/neteq_quality_test.h"
 
-#include <stdio.h>
-
+#include <climits>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <memory>
+#include <ostream>
+#include <set>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/flags/flag.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-#include "modules/audio_coding/neteq/default_neteq_factory.h"
-#include "modules/audio_coding/neteq/tools/neteq_quality_test.h"
+#include "api/audio_codecs/audio_decoder_factory.h"
+#include "api/audio_codecs/audio_format.h"
+#include "api/neteq/default_neteq_factory.h"
+#include "api/neteq/neteq.h"
+#include "api/scoped_refptr.h"
+#include "api/units/timestamp.h"
 #include "modules/audio_coding/neteq/tools/output_audio_file.h"
 #include "modules/audio_coding/neteq/tools/output_wav_file.h"
 #include "modules/audio_coding/neteq/tools/resample_input_audio_file.h"
+#include "modules/audio_coding/neteq/tools/rtp_generator.h"
 #include "rtc_base/checks.h"
-#include "system_wrappers/include/clock.h"
+#include "rtc_base/string_encode.h"
+#include "test/create_test_environment.h"
+#include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 
-const std::string& DefaultInFilename() {
-  static const std::string path =
-      ::webrtc::test::ResourcePath("audio_coding/speech_mono_16kHz", "pcm");
-  return path;
-}
-
-const std::string& DefaultOutFilename() {
-  static const std::string path =
-      ::webrtc::test::OutputPath() + "neteq_quality_test_out.pcm";
-  return path;
-}
-
-ABSL_FLAG(
-    std::string,
-    in_filename,
-    DefaultInFilename(),
-    "Filename for input audio (specify sample rate with --input_sample_rate, "
-    "and channels with --channels).");
+ABSL_FLAG(std::string,
+          in_filename,
+          "audio_coding/speech_mono_16kHz.pcm",
+          "Path of the input file (relative to the resources/ directory) for "
+          "input audio (specify sample rate with --input_sample_rate, "
+          "and channels with --channels).");
 
 ABSL_FLAG(int, input_sample_rate, 16000, "Sample rate of input file in Hz.");
 
@@ -50,8 +57,9 @@ ABSL_FLAG(int, channels, 1, "Number of channels in input audio.");
 
 ABSL_FLAG(std::string,
           out_filename,
-          DefaultOutFilename(),
-          "Name of output audio file.");
+          "neteq_quality_test_out.pcm",
+          "Name of output audio file, which will be saved in " +
+              ::webrtc::test::OutputPath());
 
 ABSL_FLAG(
     int,
@@ -93,17 +101,30 @@ namespace {
 
 std::unique_ptr<NetEq> CreateNetEq(
     const NetEq::Config& config,
-    Clock* clock,
-    const rtc::scoped_refptr<AudioDecoderFactory>& decoder_factory) {
-  return DefaultNetEqFactory().CreateNetEq(config, decoder_factory, clock);
+    scoped_refptr<AudioDecoderFactory> decoder_factory) {
+  return DefaultNetEqFactory().Create(CreateTestEnvironment(), config,
+                                      std::move(decoder_factory));
+}
+
+const std::string& GetInFilenamePath(absl::string_view file_name) {
+  std::vector<absl::string_view> name_parts = split(file_name, '.');
+  RTC_CHECK_EQ(name_parts.size(), 2);
+  static const std::string path =
+      test::ResourcePath(name_parts[0], name_parts[1]);
+  return path;
+}
+
+const std::string& GetOutFilenamePath(absl::string_view file_name) {
+  static const std::string path = test::OutputPath() + std::string(file_name);
+  return path;
 }
 
 }  // namespace
 
-const uint8_t kPayloadType = 95;
-const int kOutputSizeMs = 10;
-const int kInitSeed = 0x12345678;
-const int kPacketLossTimeUnitMs = 10;
+constexpr uint8_t kPayloadType = 95;
+constexpr int kOutputSizeMs = 10;
+constexpr int kInitSeed = 0x12345678;
+constexpr int kPacketLossTimeUnitMs = 10;
 
 // Common validator for file names.
 static bool ValidateFilename(absl::string_view value, bool is_output) {
@@ -167,7 +188,7 @@ NetEqQualityTest::NetEqQualityTest(
     int in_sampling_khz,
     int out_sampling_khz,
     const SdpAudioFormat& format,
-    const rtc::scoped_refptr<AudioDecoderFactory>& decoder_factory)
+    const scoped_refptr<AudioDecoderFactory>& decoder_factory)
     : audio_format_(format),
       channels_(absl::GetFlag(FLAGS_channels)),
       decoded_time_ms_(0),
@@ -181,16 +202,17 @@ NetEqQualityTest::NetEqQualityTest(
           static_cast<size_t>(in_sampling_khz_ * block_duration_ms_)),
       payload_size_bytes_(0),
       max_payload_bytes_(0),
-      in_file_(
-          new ResampleInputAudioFile(absl::GetFlag(FLAGS_in_filename),
-                                     absl::GetFlag(FLAGS_input_sample_rate),
-                                     in_sampling_khz * 1000,
-                                     absl::GetFlag(FLAGS_runtime_ms) > 0)),
+      in_file_(new ResampleInputAudioFile(
+          GetInFilenamePath(absl::GetFlag(FLAGS_in_filename)),
+          absl::GetFlag(FLAGS_input_sample_rate),
+          in_sampling_khz * 1000,
+          absl::GetFlag(FLAGS_runtime_ms) > 0)),
       rtp_generator_(
           new RtpGenerator(in_sampling_khz_, 0, 0, decodable_time_ms_)),
       total_payload_size_bytes_(0) {
   // Flag validation
-  RTC_CHECK(ValidateFilename(absl::GetFlag(FLAGS_in_filename), false))
+  RTC_CHECK(ValidateFilename(
+      GetInFilenamePath(absl::GetFlag(FLAGS_in_filename)), false))
       << "Invalid input filename.";
 
   RTC_CHECK(absl::GetFlag(FLAGS_input_sample_rate) == 8000 ||
@@ -202,7 +224,8 @@ NetEqQualityTest::NetEqQualityTest(
   RTC_CHECK_EQ(absl::GetFlag(FLAGS_channels), 1)
       << "Invalid number of channels, current support only 1.";
 
-  RTC_CHECK(ValidateFilename(absl::GetFlag(FLAGS_out_filename), true))
+  RTC_CHECK(ValidateFilename(
+      GetOutFilenamePath(absl::GetFlag(FLAGS_out_filename)), true))
       << "Invalid output filename.";
 
   RTC_CHECK(absl::GetFlag(FLAGS_packet_loss_rate) >= 0 &&
@@ -224,7 +247,8 @@ NetEqQualityTest::NetEqQualityTest(
   RTC_CHECK_GE(absl::GetFlag(FLAGS_preload_packets), 0)
       << "Invalid number of packets to preload; must be non-negative.";
 
-  const std::string out_filename = absl::GetFlag(FLAGS_out_filename);
+  const std::string out_filename =
+      GetOutFilenamePath(absl::GetFlag(FLAGS_out_filename));
   const std::string log_filename = out_filename + ".log";
   log_file_.open(log_filename.c_str(), std::ofstream::out);
   RTC_CHECK(log_file_.is_open());
@@ -233,15 +257,15 @@ NetEqQualityTest::NetEqQualityTest(
       out_filename.substr(out_filename.size() - 4) == ".wav") {
     // Open a wav file.
     output_.reset(
-        new webrtc::test::OutputWavFile(out_filename, 1000 * out_sampling_khz));
+        new test::OutputWavFile(out_filename, 1000 * out_sampling_khz));
   } else {
     // Open a pcm file.
-    output_.reset(new webrtc::test::OutputAudioFile(out_filename));
+    output_.reset(new test::OutputAudioFile(out_filename));
   }
 
   NetEq::Config config;
   config.sample_rate_hz = out_sampling_khz_ * 1000;
-  neteq_ = CreateNetEq(config, Clock::GetRealTimeClock(), decoder_factory);
+  neteq_ = CreateNetEq(config, decoder_factory);
   max_payload_bytes_ = in_size_samples_ * channels_ * sizeof(int16_t);
   in_data_.reset(new int16_t[in_size_samples_ * channels_]);
 }
@@ -250,13 +274,13 @@ NetEqQualityTest::~NetEqQualityTest() {
   log_file_.close();
 }
 
-bool NoLoss::Lost(int now_ms) {
+bool NoLoss::Lost(int /* now_ms */) {
   return false;
 }
 
 UniformLoss::UniformLoss(double loss_rate) : loss_rate_(loss_rate) {}
 
-bool UniformLoss::Lost(int now_ms) {
+bool UniformLoss::Lost(int /* now_ms */) {
   int drop_this = rand();
   return (drop_this < loss_rate_ * RAND_MAX);
 }
@@ -350,15 +374,17 @@ void NetEqQualityTest::SetUp() {
       break;
     }
     case kFixedLoss: {
-      std::istringstream loss_events_stream(absl::GetFlag(FLAGS_loss_events));
-      std::string loss_event_string;
       std::set<FixedLossEvent, FixedLossEventCmp> loss_events;
-      while (std::getline(loss_events_stream, loss_event_string, ',')) {
+      for (absl::string_view loss_event_string : absl::StrSplit(
+               absl::GetFlag(FLAGS_loss_events), ',', absl::SkipEmpty())) {
         std::vector<int> loss_event_params;
-        std::istringstream loss_event_params_stream(loss_event_string);
-        std::copy(std::istream_iterator<int>(loss_event_params_stream),
-                  std::istream_iterator<int>(),
-                  std::back_inserter(loss_event_params));
+        for (absl::string_view param :
+             absl::StrSplit(loss_event_string, ' ', absl::SkipEmpty())) {
+          int val;
+          if (absl::SimpleAtoi(param, &val)) {
+            loss_event_params.push_back(val);
+          }
+        }
         RTC_CHECK_EQ(loss_event_params.size(), 2);
         auto result = loss_events.insert(
             FixedLossEvent(loss_event_params[0], loss_event_params[1]));
@@ -408,7 +434,8 @@ int NetEqQualityTest::Transmit() {
     if (!PacketLost()) {
       int ret = neteq_->InsertPacket(
           rtp_header_,
-          rtc::ArrayView<const uint8_t>(payload_.data(), payload_size_bytes_));
+          std::span<const uint8_t>(payload_.data(), payload_size_bytes_),
+          Timestamp::Millis(packet_input_time_ms));
       if (ret != NetEq::kOK)
         return -1;
       Log() << "was sent.";

@@ -11,16 +11,16 @@
 #ifndef SDK_OBJC_NATIVE_API_VIDEO_RENDERER_H_
 #define SDK_OBJC_NATIVE_API_VIDEO_RENDERER_H_
 
-#import "base/RTCVideoRenderer.h"
-
 #include <memory>
 
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
+#import "base/RTCVideoRenderer.h"
 
 namespace webrtc {
 
-std::unique_ptr<rtc::VideoSinkInterface<VideoFrame>> ObjCToNativeVideoRenderer(
+std::unique_ptr<webrtc::VideoSinkInterface<VideoFrame>>
+ObjCToNativeVideoRenderer(
     id<RTC_OBJC_TYPE(RTCVideoRenderer)> objc_video_renderer);
 
 }  // namespace webrtc

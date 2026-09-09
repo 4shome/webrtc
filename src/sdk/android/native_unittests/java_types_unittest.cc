@@ -8,11 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <memory>
+#include "sdk/android/native_api/jni/java_types.h"
+
+#include <jni.h>
+
+#include <cstdint>
+#include <map>
+#include <string>
 #include <vector>
 
 #include "sdk/android/generated_native_unittests_jni/JavaTypesTestHelper_jni.h"
-#include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/jvm.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -26,7 +33,9 @@ TEST(JavaTypesTest, TestJavaToNativeStringMap) {
   std::map<std::string, std::string> output = JavaToNativeStringMap(env, j_map);
 
   std::map<std::string, std::string> expected{
-      {"one", "1"}, {"two", "2"}, {"three", "3"},
+      {"one", "1"},
+      {"two", "2"},
+      {"three", "3"},
   };
   EXPECT_EQ(expected, output);
 }
@@ -74,3 +83,5 @@ TEST(JavaTypesTest, TestNativeToJavaToNativeByteArrayLeakTest) {
 }  // namespace
 }  // namespace test
 }  // namespace webrtc
+
+DEFINE_JNI(JavaTypesTestHelper)

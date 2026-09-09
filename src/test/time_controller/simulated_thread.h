@@ -12,18 +12,34 @@
 
 #include <memory>
 
+#include "absl/base/nullability.h"
+#include "absl/functional/any_invocable.h"
+#include "absl/strings/string_view.h"
+#include "api/function_view.h"
+#include "api/location.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "rtc_base/socket_server.h"
 #include "rtc_base/synchronization/mutex.h"
-#include "test/time_controller/simulated_time_controller.h"
+#include "rtc_base/thread.h"
+#include "rtc_base/thread_annotations.h"
+#include "test/time_controller/simulated_time_controller_impl.h"
 
 namespace webrtc {
 
-class SimulatedThread : public rtc::Thread,
+class SimulatedThread : public Thread,
                         public sim_time_impl::SimulatedSequenceRunner {
  public:
   using CurrentThreadSetter = CurrentThreadSetter;
   SimulatedThread(sim_time_impl::SimulatedTimeControllerImpl* handler,
+                  absl::string_view name);
+  SimulatedThread(sim_time_impl::SimulatedTimeControllerImpl* handler,
                   absl::string_view name,
-                  std::unique_ptr<rtc::SocketServer> socket_server);
+                  std::unique_ptr<SocketServer> absl_nonnull socket_server);
+  SimulatedThread(sim_time_impl::SimulatedTimeControllerImpl* handler,
+                  absl::string_view name,
+                  SocketServer* absl_nonnull socket_server);
   ~SimulatedThread() override;
 
   void RunReady(Timestamp at_time) override;
@@ -36,22 +52,15 @@ class SimulatedThread : public rtc::Thread,
   TaskQueueBase* GetAsTaskQueue() override { return this; }
 
   // Thread interface
-  void BlockingCall(rtc::FunctionView<void()> functor) override;
-  void Post(const rtc::Location& posted_from,
-            rtc::MessageHandler* phandler,
-            uint32_t id,
-            rtc::MessageData* pdata,
-            bool time_sensitive) override;
-  void PostDelayed(const rtc::Location& posted_from,
-                   int delay_ms,
-                   rtc::MessageHandler* phandler,
-                   uint32_t id,
-                   rtc::MessageData* pdata) override;
-  void PostAt(const rtc::Location& posted_from,
-              int64_t target_time_ms,
-              rtc::MessageHandler* phandler,
-              uint32_t id,
-              rtc::MessageData* pdata) override;
+  void BlockingCallImpl(FunctionView<void()> functor,
+                        const Location& location) override;
+  void PostTaskImpl(absl::AnyInvocable<void() &&> task,
+                    const PostTaskTraits& traits,
+                    const Location& location) override;
+  void PostDelayedTaskImpl(absl::AnyInvocable<void() &&> task,
+                           TimeDelta delay,
+                           const PostDelayedTaskTraits& traits,
+                           const Location& location) override;
 
   void Stop() override;
 
@@ -67,7 +76,9 @@ class SimulatedMainThread : public SimulatedThread {
  public:
   explicit SimulatedMainThread(
       sim_time_impl::SimulatedTimeControllerImpl* handler);
-  ~SimulatedMainThread();
+  SimulatedMainThread(sim_time_impl::SimulatedTimeControllerImpl* handler,
+                      SocketServer* socket_server);
+  ~SimulatedMainThread() override;
 
  private:
   CurrentThreadSetter current_setter_;

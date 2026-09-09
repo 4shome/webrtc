@@ -54,8 +54,8 @@ int main(int argc, const char* argv[]) {
     printf("  9  BT.2020     KR = 0.2627; KB = 0.0593\n");
     return -1;
   }
-  float kr = atof(argv[1]);
-  float kb = atof(argv[2]);
+  float kr = (float)atof(argv[1]);
+  float kb = (float)atof(argv[2]);
   float kg = 1 - kr - kb;
 
   float vr = 2 * (1 - kr);
@@ -76,10 +76,14 @@ int main(int argc, const char* argv[]) {
   //
   // // U and V contributions to R,G,B.
 
-  printf("UB %-3.0f /* round(%f * 64 = %8.4f) */\n", round(ub * 64), ub, ub * 64);
-  printf("UG %-3.0f /* round(%f * 64 = %8.4f) */\n", round(ug * 64), ug, ug * 64);
-  printf("VG %-3.0f /* round(%f * 64 = %8.4f) */\n", round(vg * 64), vg, vg * 64);
-  printf("VR %-3.0f /* round(%f * 64 = %8.4f) */\n", round(vr * 64), vr, vr * 64);
+  printf("UB %-3.0f /* round(%f * 64 = %8.4f) */\n", round(ub * 64), ub,
+         ub * 64);
+  printf("UG %-3.0f /* round(%f * 64 = %8.4f) */\n", round(ug * 64), ug,
+         ug * 64);
+  printf("VG %-3.0f /* round(%f * 64 = %8.4f) */\n", round(vg * 64), vg,
+         vg * 64);
+  printf("VR %-3.0f /* round(%f * 64 = %8.4f) */\n", round(vr * 64), vr,
+         vr * 64);
 
   vr = 255.f / 224.f * 2 * (1 - kr);
   ug = 255.f / 224.f * 2 * ((1 - kb) * kb / kg);
@@ -97,10 +101,14 @@ int main(int argc, const char* argv[]) {
   //
   // // U and V contributions to R,G,B.
 
-  printf("UB %-3.0f /* round(%f * 64 = %8.4f) */\n", round(ub * 64), ub, ub * 64);
-  printf("UG %-3.0f /* round(%f * 64 = %8.4f) */\n", round(ug * 64), ug, ug * 64);
-  printf("VG %-3.0f /* round(%f * 64 = %8.4f) */\n", round(vg * 64), vg, vg * 64);
-  printf("VR %-3.0f /* round(%f * 64 = %8.4f) */\n", round(vr * 64), vr, vr * 64);
+  printf("UB %-3.0f /* round(%f * 64 = %8.4f) */\n", round(ub * 64), ub,
+         ub * 64);
+  printf("UG %-3.0f /* round(%f * 64 = %8.4f) */\n", round(ug * 64), ug,
+         ug * 64);
+  printf("VG %-3.0f /* round(%f * 64 = %8.4f) */\n", round(vg * 64), vg,
+         vg * 64);
+  printf("VR %-3.0f /* round(%f * 64 = %8.4f) */\n", round(vr * 64), vr,
+         vr * 64);
 
   return 0;
 }

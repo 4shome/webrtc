@@ -10,48 +10,45 @@
 
 #include "sdk/android/src/jni/pc/media_stream_track.h"
 
+#include <jni.h>
+
 #include "api/media_stream_interface.h"
+#include "api/media_types.h"
 #include "sdk/android/generated_peerconnection_jni/MediaStreamTrack_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 
 namespace webrtc {
 namespace jni {
 
-ScopedJavaLocalRef<jobject> NativeToJavaMediaType(
-    JNIEnv* jni,
-    cricket::MediaType media_type) {
-  return Java_MediaType_fromNativeIndex(jni, media_type);
+ScopedJavaLocalRef<jobject> NativeToJavaMediaType(JNIEnv* jni,
+                                                  MediaType media_type) {
+  return Java_MediaType_fromNativeIndex(jni, static_cast<int>(media_type));
 }
 
-cricket::MediaType JavaToNativeMediaType(JNIEnv* jni,
-                                         const JavaRef<jobject>& j_media_type) {
-  return static_cast<cricket::MediaType>(
-      Java_MediaType_getNative(jni, j_media_type));
+MediaType JavaToNativeMediaType(JNIEnv* jni,
+                                const JavaRef<jobject>& j_media_type) {
+  return static_cast<MediaType>(Java_MediaType_getNative(jni, j_media_type));
 }
 
-static ScopedJavaLocalRef<jstring> JNI_MediaStreamTrack_GetId(
-    JNIEnv* jni,
-    jlong j_p) {
+static ScopedJavaLocalRef<jstring> JNI_MediaStreamTrack_GetId(JNIEnv* jni,
+                                                              jlong j_p) {
   return NativeToJavaString(
       jni, reinterpret_cast<MediaStreamTrackInterface*>(j_p)->id());
 }
 
-static ScopedJavaLocalRef<jstring> JNI_MediaStreamTrack_GetKind(
-    JNIEnv* jni,
-    jlong j_p) {
+static ScopedJavaLocalRef<jstring> JNI_MediaStreamTrack_GetKind(JNIEnv* jni,
+                                                                jlong j_p) {
   return NativeToJavaString(
       jni, reinterpret_cast<MediaStreamTrackInterface*>(j_p)->kind());
 }
 
-static jboolean JNI_MediaStreamTrack_GetEnabled(JNIEnv* jni,
-                                                jlong j_p) {
+static jboolean JNI_MediaStreamTrack_GetEnabled(JNIEnv* jni, jlong j_p) {
   return reinterpret_cast<MediaStreamTrackInterface*>(j_p)->enabled();
 }
 
-static ScopedJavaLocalRef<jobject> JNI_MediaStreamTrack_GetState(
-    JNIEnv* jni,
-    jlong j_p) {
+static ScopedJavaLocalRef<jobject> JNI_MediaStreamTrack_GetState(JNIEnv* jni,
+                                                                 jlong j_p) {
   return Java_State_fromNativeIndex(
       jni, reinterpret_cast<MediaStreamTrackInterface*>(j_p)->state());
 }
@@ -65,3 +62,5 @@ static jboolean JNI_MediaStreamTrack_SetEnabled(JNIEnv* jni,
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(MediaStreamTrack)

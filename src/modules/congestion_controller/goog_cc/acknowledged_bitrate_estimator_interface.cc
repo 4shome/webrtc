@@ -11,15 +11,16 @@
 #include "modules/congestion_controller/goog_cc/acknowledged_bitrate_estimator_interface.h"
 
 #include <algorithm>
+#include <memory>
 
+#include "api/field_trials_view.h"
 #include "api/units/time_delta.h"
 #include "modules/congestion_controller/goog_cc/acknowledged_bitrate_estimator.h"
 #include "modules/congestion_controller/goog_cc/robust_throughput_estimator.h"
+#include "rtc_base/experiments/struct_parameters_parser.h"
 #include "rtc_base/logging.h"
 
 namespace webrtc {
-
-constexpr char RobustThroughputEstimatorSettings::kKey[];
 
 RobustThroughputEstimatorSettings::RobustThroughputEstimatorSettings(
     const FieldTrialsView* key_value_config) {

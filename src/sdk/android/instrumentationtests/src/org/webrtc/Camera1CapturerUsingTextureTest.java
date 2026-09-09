@@ -11,7 +11,7 @@
 package org.webrtc;
 
 import android.content.Context;
-import android.support.test.InstrumentationRegistry;
+import androidx.test.InstrumentationRegistry;
 import androidx.test.filters.LargeTest;
 import androidx.test.filters.MediumTest;
 import androidx.test.filters.SmallTest;
@@ -204,5 +204,13 @@ public class Camera1CapturerUsingTextureTest {
   @MediumTest
   public void testStartWhileCameraIsAlreadyOpenAndStop() throws InterruptedException {
     fixtures.startWhileCameraIsAlreadyOpenAndStop();
+  }
+
+  // This test that VideoCapturer.isCapturing() returns the correct value across the
+  // start -> stop -> restart -> stop lifecycle.
+  @Test
+  @MediumTest
+  public void testIsCapturing() throws InterruptedException {
+    fixtures.capturerReportsCapturingState();
   }
 }

@@ -11,44 +11,54 @@
 package org.webrtc;
 
 import androidx.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
+import org.jni_zero.NativeMethods;
 
 public class SoftwareVideoEncoderFactory implements VideoEncoderFactory {
+  private static final String TAG = "SoftwareVideoEncoderFactory";
+
+  private final long nativeFactory;
+
+  public SoftwareVideoEncoderFactory() {
+    this.nativeFactory = SoftwareVideoEncoderFactoryJni.get().createFactory();
+  }
+
   @Nullable
   @Override
-  public VideoEncoder createEncoder(VideoCodecInfo codecInfo) {
-    String codecName = codecInfo.getName();
-
-    if (codecName.equalsIgnoreCase(VideoCodecMimeType.VP8.name())) {
-      return new LibvpxVp8Encoder();
-    }
-    if (codecName.equalsIgnoreCase(VideoCodecMimeType.VP9.name())
-        && LibvpxVp9Encoder.nativeIsSupported()) {
-      return new LibvpxVp9Encoder();
-    }
-    if (codecName.equalsIgnoreCase(VideoCodecMimeType.AV1.name())) {
-      return new LibaomAv1Encoder();
+  public VideoEncoder createEncoder(VideoCodecInfo info) {
+    if (!SoftwareVideoEncoderFactoryJni.get().isSupported(nativeFactory, info)) {
+      Logging.w(TAG, "Trying to create encoder for unsupported format. " + info);
+      return null;
     }
 
-    return null;
+    return new WrappedNativeVideoEncoder() {
+      @Override
+      public long createNative(long webrtcEnvRef) {
+        return SoftwareVideoEncoderFactoryJni.get().create(nativeFactory, webrtcEnvRef, info);
+      }
+
+      @Override
+      public boolean isHardwareEncoder() {
+        return false;
+      }
+    };
   }
 
   @Override
   public VideoCodecInfo[] getSupportedCodecs() {
-    return supportedCodecs();
+    return SoftwareVideoEncoderFactoryJni.get()
+        .getSupportedCodecs(nativeFactory)
+        .toArray(new VideoCodecInfo[0]);
   }
 
-  static VideoCodecInfo[] supportedCodecs() {
-    List<VideoCodecInfo> codecs = new ArrayList<VideoCodecInfo>();
+  @NativeMethods
+  interface Natives {
+    long createFactory();
 
-    codecs.add(new VideoCodecInfo(VideoCodecMimeType.VP8.name(), new HashMap<>()));
-    if (LibvpxVp9Encoder.nativeIsSupported()) {
-      codecs.add(new VideoCodecInfo(VideoCodecMimeType.VP9.name(), new HashMap<>()));
-    }
-    codecs.add(new VideoCodecInfo(VideoCodecMimeType.AV1.name(), new HashMap<>()));
+    boolean isSupported(long factory, VideoCodecInfo info);
 
-    return codecs.toArray(new VideoCodecInfo[codecs.size()]);
+    long create(long factory, long webrtcEnvRef, VideoCodecInfo info);
+
+    List<VideoCodecInfo> getSupportedCodecs(long factory);
   }
 }

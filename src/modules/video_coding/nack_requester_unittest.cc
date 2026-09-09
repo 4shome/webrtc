@@ -14,11 +14,16 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <vector>
 
+#include "api/task_queue/task_queue_base.h"
+#include "api/units/time_delta.h"
+#include "modules/include/module_common_types.h"
+#include "rtc_base/checks.h"
 #include "system_wrappers/include/clock.h"
+#include "test/create_test_field_trials.h"
 #include "test/gtest.h"
 #include "test/run_loop.h"
-#include "test/scoped_key_value_config.h"
 
 namespace webrtc {
 // TODO(bugs.webrtc.org/11594): Use the use the GlobalSimulatedTimeController
@@ -34,7 +39,7 @@ class TestNackRequester : public ::testing::Test,
   void SetUp() override {}
 
   void SendNack(const std::vector<uint16_t>& sequence_numbers,
-                bool buffering_allowed) override {
+                bool /* buffering_allowed */) override {
     sent_nacks_.insert(sent_nacks_.end(), sequence_numbers.begin(),
                        sequence_numbers.end());
     if (waiting_for_send_nack_) {
@@ -80,16 +85,15 @@ class TestNackRequester : public ::testing::Test,
     RTC_DCHECK(!nack_module_.get());
     nack_periodic_processor_ =
         std::make_unique<NackPeriodicProcessor>(interval);
-    test::ScopedKeyValueConfig empty_field_trials_;
     nack_module_ = std::make_unique<NackRequester>(
         TaskQueueBase::Current(), nack_periodic_processor_.get(), clock_.get(),
-        this, this, empty_field_trials_);
+        this, this, CreateTestFieldTrials());
     nack_module_->UpdateRtt(kDefaultRttMs);
-    return *nack_module_.get();
+    return *nack_module_;
   }
 
   static constexpr int64_t kDefaultRttMs = 20;
-  rtc::AutoThread main_thread_;
+  test::RunLoop main_thread_;
   test::RunLoop loop_;
   std::unique_ptr<SimulatedClock> clock_;
   std::unique_ptr<NackPeriodicProcessor> nack_periodic_processor_;
@@ -102,90 +106,25 @@ class TestNackRequester : public ::testing::Test,
 
 TEST_F(TestNackRequester, NackOnePacket) {
   NackRequester& nack_module = CreateNackModule();
-  nack_module.OnReceivedPacket(1, false, false);
-  nack_module.OnReceivedPacket(3, false, false);
+  nack_module.OnReceivedPacket(1);
+  nack_module.OnReceivedPacket(3);
   ASSERT_EQ(1u, sent_nacks_.size());
   EXPECT_EQ(2, sent_nacks_[0]);
 }
 
 TEST_F(TestNackRequester, WrappingSeqNum) {
   NackRequester& nack_module = CreateNackModule();
-  nack_module.OnReceivedPacket(0xfffe, false, false);
-  nack_module.OnReceivedPacket(1, false, false);
+  nack_module.OnReceivedPacket(0xfffe);
+  nack_module.OnReceivedPacket(1);
   ASSERT_EQ(2u, sent_nacks_.size());
   EXPECT_EQ(0xffff, sent_nacks_[0]);
   EXPECT_EQ(0, sent_nacks_[1]);
-}
-
-TEST_F(TestNackRequester, WrappingSeqNumClearToKeyframe) {
-  NackRequester& nack_module = CreateNackModule(TimeDelta::Millis(10));
-  nack_module.OnReceivedPacket(0xfffe, false, false);
-  nack_module.OnReceivedPacket(1, false, false);
-  ASSERT_EQ(2u, sent_nacks_.size());
-  EXPECT_EQ(0xffff, sent_nacks_[0]);
-  EXPECT_EQ(0, sent_nacks_[1]);
-
-  sent_nacks_.clear();
-  nack_module.OnReceivedPacket(2, true, false);
-  ASSERT_EQ(0u, sent_nacks_.size());
-
-  nack_module.OnReceivedPacket(501, true, false);
-  ASSERT_EQ(498u, sent_nacks_.size());
-  for (int seq_num = 3; seq_num < 501; ++seq_num)
-    EXPECT_EQ(seq_num, sent_nacks_[seq_num - 3]);
-
-  sent_nacks_.clear();
-  nack_module.OnReceivedPacket(1001, false, false);
-  EXPECT_EQ(499u, sent_nacks_.size());
-  for (int seq_num = 502; seq_num < 1001; ++seq_num)
-    EXPECT_EQ(seq_num, sent_nacks_[seq_num - 502]);
-
-  sent_nacks_.clear();
-  clock_->AdvanceTimeMilliseconds(100);
-  ASSERT_TRUE(WaitForSendNack());
-  ASSERT_EQ(999u, sent_nacks_.size());
-  EXPECT_EQ(0xffff, sent_nacks_[0]);
-  EXPECT_EQ(0, sent_nacks_[1]);
-  for (int seq_num = 3; seq_num < 501; ++seq_num)
-    EXPECT_EQ(seq_num, sent_nacks_[seq_num - 1]);
-  for (int seq_num = 502; seq_num < 1001; ++seq_num)
-    EXPECT_EQ(seq_num, sent_nacks_[seq_num - 2]);
-
-  // Adding packet 1004 will cause the nack list to reach it's max limit.
-  // It will then clear all nacks up to the next keyframe (seq num 2),
-  // thus removing 0xffff and 0 from the nack list.
-  sent_nacks_.clear();
-  nack_module.OnReceivedPacket(1004, false, false);
-  ASSERT_EQ(2u, sent_nacks_.size());
-  EXPECT_EQ(1002, sent_nacks_[0]);
-  EXPECT_EQ(1003, sent_nacks_[1]);
-
-  sent_nacks_.clear();
-  clock_->AdvanceTimeMilliseconds(100);
-  ASSERT_TRUE(WaitForSendNack());
-  ASSERT_EQ(999u, sent_nacks_.size());
-  for (int seq_num = 3; seq_num < 501; ++seq_num)
-    EXPECT_EQ(seq_num, sent_nacks_[seq_num - 3]);
-  for (int seq_num = 502; seq_num < 1001; ++seq_num)
-    EXPECT_EQ(seq_num, sent_nacks_[seq_num - 4]);
-
-  // Adding packet 1007 will cause the nack module to overflow again, thus
-  // clearing everything up to 501 which is the next keyframe.
-  nack_module.OnReceivedPacket(1007, false, false);
-  sent_nacks_.clear();
-  clock_->AdvanceTimeMilliseconds(100);
-  ASSERT_TRUE(WaitForSendNack());
-  ASSERT_EQ(503u, sent_nacks_.size());
-  for (int seq_num = 502; seq_num < 1001; ++seq_num)
-    EXPECT_EQ(seq_num, sent_nacks_[seq_num - 502]);
-  EXPECT_EQ(1005, sent_nacks_[501]);
-  EXPECT_EQ(1006, sent_nacks_[502]);
 }
 
 TEST_F(TestNackRequester, ResendNack) {
   NackRequester& nack_module = CreateNackModule(TimeDelta::Millis(1));
-  nack_module.OnReceivedPacket(1, false, false);
-  nack_module.OnReceivedPacket(3, false, false);
+  nack_module.OnReceivedPacket(1);
+  nack_module.OnReceivedPacket(3);
   size_t expected_nacks_sent = 1;
   ASSERT_EQ(expected_nacks_sent, sent_nacks_.size());
   EXPECT_EQ(2, sent_nacks_[0]);
@@ -225,8 +164,8 @@ TEST_F(TestNackRequester, ResendNack) {
 
 TEST_F(TestNackRequester, ResendPacketMaxRetries) {
   NackRequester& nack_module = CreateNackModule(TimeDelta::Millis(1));
-  nack_module.OnReceivedPacket(1, false, false);
-  nack_module.OnReceivedPacket(3, false, false);
+  nack_module.OnReceivedPacket(1);
+  nack_module.OnReceivedPacket(3);
   ASSERT_EQ(1u, sent_nacks_.size());
   EXPECT_EQ(2, sent_nacks_[0]);
 
@@ -246,37 +185,22 @@ TEST_F(TestNackRequester, ResendPacketMaxRetries) {
 
 TEST_F(TestNackRequester, TooLargeNackList) {
   NackRequester& nack_module = CreateNackModule();
-  nack_module.OnReceivedPacket(0, false, false);
-  nack_module.OnReceivedPacket(1001, false, false);
+  nack_module.OnReceivedPacket(0);
+  nack_module.OnReceivedPacket(1001);
   EXPECT_EQ(1000u, sent_nacks_.size());
   EXPECT_EQ(0, keyframes_requested_);
-  nack_module.OnReceivedPacket(1003, false, false);
+  nack_module.OnReceivedPacket(1003);
   EXPECT_EQ(1000u, sent_nacks_.size());
   EXPECT_EQ(1, keyframes_requested_);
-  nack_module.OnReceivedPacket(1004, false, false);
-  EXPECT_EQ(1000u, sent_nacks_.size());
-  EXPECT_EQ(1, keyframes_requested_);
-}
-
-TEST_F(TestNackRequester, TooLargeNackListWithKeyFrame) {
-  NackRequester& nack_module = CreateNackModule();
-  nack_module.OnReceivedPacket(0, false, false);
-  nack_module.OnReceivedPacket(1, true, false);
-  nack_module.OnReceivedPacket(1001, false, false);
-  EXPECT_EQ(999u, sent_nacks_.size());
-  EXPECT_EQ(0, keyframes_requested_);
-  nack_module.OnReceivedPacket(1003, false, false);
-  EXPECT_EQ(1000u, sent_nacks_.size());
-  EXPECT_EQ(0, keyframes_requested_);
-  nack_module.OnReceivedPacket(1005, false, false);
+  nack_module.OnReceivedPacket(1004);
   EXPECT_EQ(1000u, sent_nacks_.size());
   EXPECT_EQ(1, keyframes_requested_);
 }
 
 TEST_F(TestNackRequester, ClearUpTo) {
   NackRequester& nack_module = CreateNackModule(TimeDelta::Millis(1));
-  nack_module.OnReceivedPacket(0, false, false);
-  nack_module.OnReceivedPacket(100, false, false);
+  nack_module.OnReceivedPacket(0);
+  nack_module.OnReceivedPacket(100);
   EXPECT_EQ(99u, sent_nacks_.size());
 
   sent_nacks_.clear();
@@ -289,8 +213,8 @@ TEST_F(TestNackRequester, ClearUpTo) {
 
 TEST_F(TestNackRequester, ClearUpToWrap) {
   NackRequester& nack_module = CreateNackModule();
-  nack_module.OnReceivedPacket(0xfff0, false, false);
-  nack_module.OnReceivedPacket(0xf, false, false);
+  nack_module.OnReceivedPacket(0xfff0);
+  nack_module.OnReceivedPacket(0xf);
   EXPECT_EQ(30u, sent_nacks_.size());
 
   sent_nacks_.clear();
@@ -303,13 +227,13 @@ TEST_F(TestNackRequester, ClearUpToWrap) {
 
 TEST_F(TestNackRequester, PacketNackCount) {
   NackRequester& nack_module = CreateNackModule(TimeDelta::Millis(1));
-  EXPECT_EQ(0, nack_module.OnReceivedPacket(0, false, false));
-  EXPECT_EQ(0, nack_module.OnReceivedPacket(2, false, false));
-  EXPECT_EQ(1, nack_module.OnReceivedPacket(1, false, false));
+  EXPECT_EQ(0, nack_module.OnReceivedPacket(0));
+  EXPECT_EQ(0, nack_module.OnReceivedPacket(2));
+  EXPECT_EQ(1, nack_module.OnReceivedPacket(1));
 
   sent_nacks_.clear();
   nack_module.UpdateRtt(100);
-  EXPECT_EQ(0, nack_module.OnReceivedPacket(5, false, false));
+  EXPECT_EQ(0, nack_module.OnReceivedPacket(5));
   clock_->AdvanceTimeMilliseconds(100);
   WaitForSendNack();
   EXPECT_EQ(4u, sent_nacks_.size());
@@ -319,40 +243,24 @@ TEST_F(TestNackRequester, PacketNackCount) {
 
   EXPECT_EQ(6u, sent_nacks_.size());
 
-  EXPECT_EQ(3, nack_module.OnReceivedPacket(3, false, false));
-  EXPECT_EQ(3, nack_module.OnReceivedPacket(4, false, false));
-  EXPECT_EQ(0, nack_module.OnReceivedPacket(4, false, false));
-}
-
-TEST_F(TestNackRequester, NackListFullAndNoOverlapWithKeyframes) {
-  NackRequester& nack_module = CreateNackModule();
-  const int kMaxNackPackets = 1000;
-  const unsigned int kFirstGap = kMaxNackPackets - 20;
-  const unsigned int kSecondGap = 200;
-  uint16_t seq_num = 0;
-  nack_module.OnReceivedPacket(seq_num++, true, false);
-  seq_num += kFirstGap;
-  nack_module.OnReceivedPacket(seq_num++, true, false);
-  EXPECT_EQ(kFirstGap, sent_nacks_.size());
-  sent_nacks_.clear();
-  seq_num += kSecondGap;
-  nack_module.OnReceivedPacket(seq_num, true, false);
-  EXPECT_EQ(kSecondGap, sent_nacks_.size());
+  EXPECT_EQ(3, nack_module.OnReceivedPacket(3));
+  EXPECT_EQ(3, nack_module.OnReceivedPacket(4));
+  EXPECT_EQ(0, nack_module.OnReceivedPacket(4));
 }
 
 TEST_F(TestNackRequester, HandleFecRecoveredPacket) {
   NackRequester& nack_module = CreateNackModule();
-  nack_module.OnReceivedPacket(1, false, false);
-  nack_module.OnReceivedPacket(4, false, true);
+  nack_module.OnReceivedPacket(1);
+  nack_module.OnReceivedPacket(4, /*is_recovered=*/true);
   EXPECT_EQ(0u, sent_nacks_.size());
-  nack_module.OnReceivedPacket(5, false, false);
+  nack_module.OnReceivedPacket(5);
   EXPECT_EQ(2u, sent_nacks_.size());
 }
 
 TEST_F(TestNackRequester, SendNackWithoutDelay) {
   NackRequester& nack_module = CreateNackModule();
-  nack_module.OnReceivedPacket(0, false, false);
-  nack_module.OnReceivedPacket(100, false, false);
+  nack_module.OnReceivedPacket(0);
+  nack_module.OnReceivedPacket(100);
   EXPECT_EQ(99u, sent_nacks_.size());
 }
 
@@ -361,26 +269,24 @@ class TestNackRequesterWithFieldTrial : public ::testing::Test,
                                         public KeyFrameRequestSender {
  protected:
   TestNackRequesterWithFieldTrial()
-      : nack_delay_field_trial_("WebRTC-SendNackDelayMs/10/"),
-        clock_(new SimulatedClock(0)),
+      : clock_(new SimulatedClock(0)),
         nack_module_(TaskQueueBase::Current(),
                      &nack_periodic_processor_,
                      clock_.get(),
                      this,
                      this,
-                     nack_delay_field_trial_),
+                     CreateTestFieldTrials("WebRTC-SendNackDelayMs/10/")),
         keyframes_requested_(0) {}
 
   void SendNack(const std::vector<uint16_t>& sequence_numbers,
-                bool buffering_allowed) override {
+                bool /* buffering_allowed */) override {
     sent_nacks_.insert(sent_nacks_.end(), sequence_numbers.begin(),
                        sequence_numbers.end());
   }
 
   void RequestKeyFrame() override { ++keyframes_requested_; }
 
-  test::ScopedKeyValueConfig nack_delay_field_trial_;
-  rtc::AutoThread main_thread_;
+  test::RunLoop main_thread_;
   std::unique_ptr<SimulatedClock> clock_;
   NackPeriodicProcessor nack_periodic_processor_;
   NackRequester nack_module_;
@@ -389,14 +295,14 @@ class TestNackRequesterWithFieldTrial : public ::testing::Test,
 };
 
 TEST_F(TestNackRequesterWithFieldTrial, SendNackWithDelay) {
-  nack_module_.OnReceivedPacket(0, false, false);
-  nack_module_.OnReceivedPacket(100, false, false);
+  nack_module_.OnReceivedPacket(0);
+  nack_module_.OnReceivedPacket(100);
   EXPECT_EQ(0u, sent_nacks_.size());
   clock_->AdvanceTimeMilliseconds(10);
-  nack_module_.OnReceivedPacket(106, false, false);
+  nack_module_.OnReceivedPacket(106);
   EXPECT_EQ(99u, sent_nacks_.size());
   clock_->AdvanceTimeMilliseconds(10);
-  nack_module_.OnReceivedPacket(109, false, false);
+  nack_module_.OnReceivedPacket(109);
   EXPECT_EQ(104u, sent_nacks_.size());
 }
 }  // namespace webrtc

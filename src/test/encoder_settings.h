@@ -10,14 +10,15 @@
 #ifndef TEST_ENCODER_SETTINGS_H_
 #define TEST_ENCODER_SETTINGS_H_
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <string>
 #include <vector>
 
-#include "api/video_codecs/video_encoder_config.h"
+#include "api/field_trials_view.h"
+#include "api/video/video_codec_type.h"
 #include "call/video_receive_stream.h"
 #include "call/video_send_stream.h"
+#include "video/config/video_encoder_config.h"
 
 namespace webrtc {
 namespace test {
@@ -35,9 +36,10 @@ class DefaultVideoStreamFactory
 
  private:
   std::vector<VideoStream> CreateEncoderStreams(
-      int width,
-      int height,
-      const VideoEncoderConfig& encoder_config) override;
+      const FieldTrialsView& field_trials,
+      int frame_width,
+      int frame_height,
+      const webrtc::VideoEncoderConfig& encoder_config) override;
 };
 
 // Creates `encoder_config.number_of_streams` VideoStreams where index

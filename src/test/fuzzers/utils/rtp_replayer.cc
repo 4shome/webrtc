@@ -11,21 +11,39 @@
 #include "test/fuzzers/utils/rtp_replayer.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/memory/memory.h"
-#include "api/task_queue/default_task_queue_factory.h"
-#include "api/transport/field_trial_based_config.h"
+#include "api/call/transport.h"
+#include "api/environment/environment.h"
+#include "api/media_types.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/test/time_controller.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "call/call.h"
+#include "call/call_config.h"
+#include "call/video_receive_stream.h"
+#include "media/engine/internal_decoder_factory.h"
+#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_packet.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/strings/json.h"
 #include "system_wrappers/include/clock.h"
 #include "test/call_config_utils.h"
+#include "test/create_test_environment.h"
 #include "test/encoder_settings.h"
-#include "test/fake_decoder.h"
 #include "test/rtp_file_reader.h"
 #include "test/run_loop.h"
+#include "test/time_controller/simulated_time_controller.h"
+#include "test/video_renderer.h"
 
 namespace webrtc {
 namespace test {
@@ -46,12 +64,8 @@ void RtpReplayer::Replay(
     const uint8_t* rtp_dump_data,
     size_t rtp_dump_size) {
   RunLoop loop;
-  rtc::ScopedBaseFakeClock fake_clock;
-
-  // Work around: webrtc calls webrtc::Random(clock.TimeInMicroseconds())
-  // everywhere and Random expects non-zero seed. Let's set the clock non-zero
-  // to make them happy.
-  fake_clock.SetTime(webrtc::Timestamp::Millis(1));
+  GlobalSimulatedTimeController time_controller(
+      /*start_time=*/Timestamp::Millis(1));
 
   // Attempt to create an RtpReader from the input file.
   auto rtp_reader = CreateRtpReader(rtp_dump_data, rtp_dump_size);
@@ -60,15 +74,25 @@ void RtpReplayer::Replay(
     return;
   }
 
+  RtpHeaderExtensionMap extensions(/*extmap_allow_mixed=*/true);
+  // Skip i = 0 since it maps to kRtpExtensionNone.
+  for (int i = 1; i < kRtpExtensionNumberOfExtensions; i++) {
+    RTPExtensionType extension_type = static_cast<RTPExtensionType>(i);
+    // Extensions are registered with an ID, which you signal to the
+    // peer so they know what to expect. This code only cares about
+    // parsing so the value of the ID isn't relevant.
+    extensions.RegisterByType(RtpHeaderExtensionId(i), extension_type);
+  }
+
   // Setup the video streams based on the configuration.
-  webrtc::RtcEventLogNull event_log;
-  std::unique_ptr<TaskQueueFactory> task_queue_factory =
-      CreateDefaultTaskQueueFactory();
-  Call::Config call_config(&event_log);
-  call_config.task_queue_factory = task_queue_factory.get();
-  FieldTrialBasedConfig field_trials;
-  call_config.trials = &field_trials;
-  std::unique_ptr<Call> call(Call::Create(call_config));
+  // Destroying video receive streams does a blocking call using Event class.
+  // TaskQueue implementations that `time_controller` creates can cooperate
+  // with Event class implemented in WebRTC, but not with Event class overridden
+  // by chromium. To avoid blocking when running in chromium, real (default)
+  // task queues are used, while `time_controller` is used only for the Clock.
+  Environment env = CreateTestEnvironment({.time = time_controller.GetClock()});
+  std::unique_ptr<Call> call =
+      Call::Create(CallConfig::CreateSingleThreaded(env));
   SetupVideoStreams(&receive_stream_configs, stream_state.get(), call.get());
 
   // Start replaying the provided stream now that it has been configured.
@@ -76,7 +100,7 @@ void RtpReplayer::Replay(
     receive_stream->Start();
   }
 
-  ReplayPackets(&fake_clock, call.get(), rtp_reader.get());
+  ReplayPackets(time_controller, *call, *rtp_reader, extensions);
 
   for (const auto& receive_stream : stream_state->receive_streams) {
     call->DestroyVideoReceiveStream(receive_stream);
@@ -143,21 +167,22 @@ std::unique_ptr<test::RtpFileReader> RtpReplayer::CreateRtpReader(
   return rtp_reader;
 }
 
-void RtpReplayer::ReplayPackets(rtc::FakeClock* clock,
-                                Call* call,
-                                test::RtpFileReader* rtp_reader) {
+void RtpReplayer::ReplayPackets(
+    TimeController& time_controller,
+    Call& call,
+    test::RtpFileReader& rtp_reader,
+    const RtpPacketReceived::ExtensionManager& extensions) {
+  Clock& clock = *time_controller.GetClock();
   int64_t replay_start_ms = -1;
-  int num_packets = 0;
-  std::map<uint32_t, int> unknown_packets;
 
   while (true) {
-    int64_t now_ms = rtc::TimeMillis();
+    int64_t now_ms = clock.TimeInMilliseconds();
     if (replay_start_ms == -1) {
       replay_start_ms = now_ms;
     }
 
     test::RtpPacket packet;
-    if (!rtp_reader->NextPacket(&packet)) {
+    if (!rtp_reader.NextPacket(&packet)) {
       break;
     }
 
@@ -165,47 +190,25 @@ void RtpReplayer::ReplayPackets(rtc::FakeClock* clock,
     if (deliver_in_ms > 0) {
       // StatsCounter::ReportMetricToAggregatedCounter is O(elapsed time).
       // Set an upper limit to prevent waste time.
-      clock->AdvanceTime(webrtc::TimeDelta::Millis(
+      time_controller.AdvanceTime(TimeDelta::Millis(
           std::min(deliver_in_ms, static_cast<int64_t>(100))));
     }
 
-    rtc::CopyOnWriteBuffer packet_buffer(packet.data, packet.length);
-    ++num_packets;
-    switch (call->Receiver()->DeliverPacket(webrtc::MediaType::VIDEO,
-                                            packet_buffer,
-                                            /* packet_time_us */ -1)) {
-      case PacketReceiver::DELIVERY_OK:
-        break;
-      case PacketReceiver::DELIVERY_UNKNOWN_SSRC: {
-        webrtc::RtpPacket header;
-        header.Parse(packet_buffer);
-        if (unknown_packets[header.Ssrc()] == 0) {
-          RTC_LOG(LS_ERROR) << "Unknown SSRC: " << header.Ssrc();
-        }
-        ++unknown_packets[header.Ssrc()];
-        break;
-      }
-      case PacketReceiver::DELIVERY_PACKET_ERROR: {
-        RTC_LOG(LS_ERROR)
-            << "Packet error, corrupt packets or incorrect setup?";
-        webrtc::RtpPacket header;
-        header.Parse(packet_buffer);
-        RTC_LOG(LS_ERROR) << "Packet packet_length=" << packet.length
-                          << " payload_type=" << header.PayloadType()
-                          << " sequence_number=" << header.SequenceNumber()
-                          << " time_stamp=" << header.Timestamp()
-                          << " ssrc=" << header.Ssrc();
-        break;
-      }
+    RtpPacketReceived received_packet(&extensions, clock.CurrentTime());
+    if (!received_packet.Parse(packet.data, packet.length)) {
+      RTC_LOG(LS_ERROR) << "Packet error, corrupt packets or incorrect setup?";
+      break;
     }
-  }
-  RTC_LOG(LS_INFO) << "num_packets: " << num_packets;
+    // Set the clock rate - always 90K for video
+    received_packet.set_payload_type_frequency(kVideoPayloadTypeFrequency);
 
-  for (const auto& unknown_packet : unknown_packets) {
-    RTC_LOG(LS_ERROR) << "Packets for unknown ssrc " << unknown_packet.first
-                      << ":" << unknown_packet.second;
+    call.Receiver()->DeliverRtpPacket(
+        MediaType::VIDEO, std::move(received_packet),
+        [&](const RtpPacketReceived& parsed_packet) {
+          RTC_LOG(LS_ERROR) << "Unknown SSRC: " << parsed_packet.Ssrc();
+          return false;
+        });
   }
 }
-
 }  // namespace test
 }  // namespace webrtc

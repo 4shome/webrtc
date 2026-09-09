@@ -1,5 +1,5 @@
 /*
- *  Copyright 2015 The WebRTC Project Authors. All rights reserved.
+ *  Copyright 2015 The WebRTC Project Authors. All Rights Reserved.
  *
  *  Use of this source code is governed by a BSD-style license
  *  that can be found in the LICENSE file in the root of the source
@@ -11,10 +11,17 @@
 #include "rtc_base/bit_buffer.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <limits>
+#include <span>
 
 #include "absl/numeric/bits.h"
+#include "absl/strings/string_view.h"
 #include "rtc_base/checks.h"
+
+namespace webrtc {
 
 namespace {
 
@@ -47,7 +54,8 @@ uint8_t WritePartialByte(uint8_t source,
 
 }  // namespace
 
-namespace rtc {
+BitBufferWriter::BitBufferWriter(std::span<uint8_t> bytes)
+    : BitBufferWriter(bytes.data(), bytes.size()) {}
 
 BitBufferWriter::BitBufferWriter(uint8_t* bytes, size_t byte_count)
     : writable_bytes_(bytes),
@@ -62,18 +70,11 @@ uint64_t BitBufferWriter::RemainingBitCount() const {
   return (static_cast<uint64_t>(byte_count_) - byte_offset_) * 8 - bit_offset_;
 }
 
-bool BitBufferWriter::ConsumeBytes(size_t byte_count) {
-  return ConsumeBits(byte_count * 8);
-}
-
-bool BitBufferWriter::ConsumeBits(size_t bit_count) {
-  if (bit_count > RemainingBitCount()) {
-    return false;
-  }
+void BitBufferWriter::ConsumeBits(size_t bit_count) {
+  RTC_DCHECK_LE(bit_count, RemainingBitCount());
 
   byte_offset_ += (bit_offset_ + bit_count) / 8;
   bit_offset_ = (bit_offset_ + bit_count) % 8;
-  return true;
 }
 
 void BitBufferWriter::GetCurrentOffset(size_t* out_byte_offset,
@@ -106,6 +107,23 @@ bool BitBufferWriter::WriteUInt32(uint32_t val) {
   return WriteBits(val, sizeof(uint32_t) * 8);
 }
 
+bool BitBufferWriter::ZeroBits(size_t bit_count) {
+  if (bit_count > RemainingBitCount()) {
+    return false;
+  }
+  // Assume bits in the last partially written byte are already zeroed, and thus
+  // do not need to be modified.
+  size_t old_end = byte_offset_ + (bit_offset_ > 0 ? 1 : 0);
+  ConsumeBits(bit_count);
+  size_t new_end = byte_offset_ + (bit_offset_ > 0 ? 1 : 0);
+  if (new_end > old_end) {
+    // Zero bytes considered newly written, including the last one that can be
+    // considered partially written.
+    memset(writable_bytes_ + old_end, 0, new_end - old_end);
+  }
+  return true;
+}
+
 bool BitBufferWriter::WriteBits(uint64_t val, size_t bit_count) {
   if (bit_count > RemainingBitCount()) {
     return false;
@@ -117,24 +135,23 @@ bool BitBufferWriter::WriteBits(uint64_t val, size_t bit_count) {
 
   uint8_t* bytes = writable_bytes_ + byte_offset_;
 
-  // The first byte is relatively special; the bit offset to write to may put us
-  // in the middle of the byte, and the total bit count to write may require we
-  // save the bits at the end of the byte.
-  size_t remaining_bits_in_current_byte = 8 - bit_offset_;
-  size_t bits_in_first_byte =
-      std::min(bit_count, remaining_bits_in_current_byte);
-  *bytes = WritePartialByte(HighestByte(val), bits_in_first_byte, *bytes,
-                            bit_offset_);
-  if (bit_count <= remaining_bits_in_current_byte) {
-    // Nothing left to write, so quit early.
-    return ConsumeBits(total_bits);
+  if (bit_offset_ > 0) {
+    // The first byte is relatively special; the bit offset to write to may put
+    // us in the middle of the byte, and the total bit count to write may
+    // require we save the bits at the end of the byte.
+    size_t remaining_bits_in_current_byte = 8 - bit_offset_;
+    size_t bits_in_first_byte =
+        std::min(bit_count, remaining_bits_in_current_byte);
+    *bytes = WritePartialByte(HighestByte(val), bits_in_first_byte, *bytes,
+                              bit_offset_);
+
+    // Subtract what we've written from the bit count, shift it off the value,
+    // and write the remaining full bytes.
+    val <<= bits_in_first_byte;
+    bytes++;
+    bit_count -= bits_in_first_byte;
   }
 
-  // Subtract what we've written from the bit count, shift it off the value, and
-  // write the remaining full bytes.
-  val <<= bits_in_first_byte;
-  bytes++;
-  bit_count -= bits_in_first_byte;
   while (bit_count >= 8) {
     *bytes++ = HighestByte(val);
     val <<= 8;
@@ -144,11 +161,12 @@ bool BitBufferWriter::WriteBits(uint64_t val, size_t bit_count) {
   // Last byte may also be partial, so write the remaining bits from the top of
   // val.
   if (bit_count > 0) {
-    *bytes = WritePartialByte(HighestByte(val), bit_count, *bytes, 0);
+    *bytes = HighestByte(val);
   }
 
   // All done! Consume the bits we've written.
-  return ConsumeBits(total_bits);
+  ConsumeBits(total_bits);
+  return true;
 }
 
 bool BitBufferWriter::WriteNonSymmetric(uint32_t val, uint32_t num_values) {
@@ -205,4 +223,25 @@ bool BitBufferWriter::WriteSignedExponentialGolomb(int32_t val) {
   }
 }
 
-}  // namespace rtc
+bool BitBufferWriter::WriteLeb128(uint64_t val) {
+  bool success = true;
+  do {
+    uint8_t byte = static_cast<uint8_t>(val & 0x7f);
+    val >>= 7;
+    if (val > 0) {
+      byte |= 0x80;
+    }
+    success &= WriteUInt8(byte);
+  } while (val > 0);
+  return success;
+}
+
+bool BitBufferWriter::WriteString(absl::string_view data) {
+  bool success = true;
+  for (char c : data) {
+    success &= WriteUInt8(c);
+  }
+  return success;
+}
+
+}  // namespace webrtc

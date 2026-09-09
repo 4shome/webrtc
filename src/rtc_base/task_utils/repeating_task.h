@@ -11,11 +11,11 @@
 #ifndef RTC_BASE_TASK_UTILS_REPEATING_TASK_H_
 #define RTC_BASE_TASK_UTILS_REPEATING_TASK_H_
 
-#include <memory>
-#include <type_traits>
 #include <utility>
 
 #include "absl/functional/any_invocable.h"
+#include "api/location.h"
+#include "api/scoped_refptr.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/units/time_delta.h"
@@ -52,11 +52,13 @@ class RepeatingTaskHandle {
   // TaskQueue deletes it. It's perfectly fine to destroy the handle while the
   // task is running, since the repeated task is owned by the TaskQueue.
   // The tasks are scheduled onto the task queue using the specified precision.
-  static RepeatingTaskHandle Start(TaskQueueBase* task_queue,
-                                   absl::AnyInvocable<TimeDelta()> closure,
-                                   TaskQueueBase::DelayPrecision precision =
-                                       TaskQueueBase::DelayPrecision::kLow,
-                                   Clock* clock = Clock::GetRealTimeClock());
+  static RepeatingTaskHandle Start(
+      TaskQueueBase* task_queue,
+      absl::AnyInvocable<TimeDelta()> closure,
+      TaskQueueBase::DelayPrecision precision =
+          TaskQueueBase::DelayPrecision::kLow,
+      Clock* clock = Clock::GetRealTimeClock(),
+      const Location& location = Location::Current());
 
   // DelayedStart is equivalent to Start except that the first invocation of the
   // closure will be delayed by the given amount.
@@ -66,7 +68,8 @@ class RepeatingTaskHandle {
       absl::AnyInvocable<TimeDelta()> closure,
       TaskQueueBase::DelayPrecision precision =
           TaskQueueBase::DelayPrecision::kLow,
-      Clock* clock = Clock::GetRealTimeClock());
+      Clock* clock = Clock::GetRealTimeClock(),
+      const Location& location = Location::Current());
 
   // Stops future invocations of the repeating task closure. Can only be called
   // from the TaskQueue where the task is running. The closure is guaranteed to
@@ -79,10 +82,9 @@ class RepeatingTaskHandle {
   bool Running() const;
 
  private:
-  explicit RepeatingTaskHandle(
-      rtc::scoped_refptr<PendingTaskSafetyFlag> alive_flag)
+  explicit RepeatingTaskHandle(scoped_refptr<PendingTaskSafetyFlag> alive_flag)
       : repeating_task_(std::move(alive_flag)) {}
-  rtc::scoped_refptr<PendingTaskSafetyFlag> repeating_task_;
+  scoped_refptr<PendingTaskSafetyFlag> repeating_task_;
 };
 
 }  // namespace webrtc

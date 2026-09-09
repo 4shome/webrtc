@@ -10,51 +10,52 @@
 
 #include "rtc_base/memory_stream.h"
 
-#include <errno.h>
-#include <string.h>
-
 #include <algorithm>
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
+#include <span>
 
 #include "rtc_base/checks.h"
+#include "rtc_base/stream.h"
 
-namespace rtc {
+namespace webrtc {
 
 StreamState MemoryStream::GetState() const {
   return SS_OPEN;
 }
 
-StreamResult MemoryStream::Read(void* buffer,
-                                size_t bytes,
-                                size_t* bytes_read,
-                                int* error) {
+StreamResult MemoryStream::Read(std::span<uint8_t> buffer,
+                                size_t& bytes_read,
+                                int& error) {
   if (seek_position_ >= data_length_) {
     return SR_EOS;
   }
   size_t available = data_length_ - seek_position_;
-  if (bytes > available) {
+  size_t bytes;
+  if (buffer.size() > available) {
     // Read partial buffer
     bytes = available;
+  } else {
+    bytes = buffer.size();
   }
-  memcpy(buffer, &buffer_[seek_position_], bytes);
+  memcpy(buffer.data(), &buffer_[seek_position_], bytes);
   seek_position_ += bytes;
-  if (bytes_read) {
-    *bytes_read = bytes;
-  }
+  bytes_read = bytes;
   return SR_SUCCESS;
 }
 
-StreamResult MemoryStream::Write(const void* buffer,
-                                 size_t bytes,
-                                 size_t* bytes_written,
-                                 int* error) {
+StreamResult MemoryStream::Write(std::span<const uint8_t> buffer,
+                                 size_t& bytes_written,
+                                 int& error) {
   size_t available = buffer_length_ - seek_position_;
   if (0 == available) {
     // Increase buffer size to the larger of:
     // a) new position rounded up to next 256 bytes
     // b) double the previous length
-    size_t new_buffer_length =
-        std::max(((seek_position_ + bytes) | 0xFF) + 1, buffer_length_ * 2);
-    StreamResult result = DoReserve(new_buffer_length, error);
+    size_t new_buffer_length = std::max(
+        ((seek_position_ + buffer.size()) | 0xFF) + 1, buffer_length_ * 2);
+    StreamResult result = DoReserve(new_buffer_length, &error);
     if (SR_SUCCESS != result) {
       return result;
     }
@@ -62,17 +63,16 @@ StreamResult MemoryStream::Write(const void* buffer,
     available = buffer_length_ - seek_position_;
   }
 
+  size_t bytes = buffer.size();
   if (bytes > available) {
     bytes = available;
   }
-  memcpy(&buffer_[seek_position_], buffer, bytes);
+  memcpy(&buffer_[seek_position_], buffer.data(), bytes);
   seek_position_ += bytes;
   if (data_length_ < seek_position_) {
     data_length_ = seek_position_;
   }
-  if (bytes_written) {
-    *bytes_written = bytes;
-  }
+  bytes_written = bytes;
   return SR_SUCCESS;
 }
 
@@ -143,4 +143,4 @@ StreamResult MemoryStream::DoReserve(size_t size, int* error) {
   return SR_ERROR;
 }
 
-}  // namespace rtc
+}  // namespace webrtc

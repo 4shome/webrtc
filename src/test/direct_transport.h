@@ -10,14 +10,22 @@
 #ifndef TEST_DIRECT_TRANSPORT_H_
 #define TEST_DIRECT_TRANSPORT_H_
 
+#include <cstddef>
+#include <cstdint>
+#include <map>
 #include <memory>
+#include <span>
 
+#include "absl/base/nullability.h"
 #include "api/call/transport.h"
+#include "api/environment/environment.h"
+#include "api/media_types.h"
+#include "api/rtp_parameters.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/task_queue_base.h"
-#include "api/test/simulated_network.h"
 #include "call/call.h"
 #include "call/simulated_packet_receiver.h"
+#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/task_utils/repeating_task.h"
 #include "rtc_base/thread_annotations.h"
@@ -44,37 +52,46 @@ class Demuxer {
 // same task-queue - the one that's passed in via the constructor.
 class DirectTransport : public Transport {
  public:
-  DirectTransport(TaskQueueBase* task_queue,
-                  std::unique_ptr<SimulatedPacketReceiverInterface> pipe,
-                  Call* send_call,
-                  const std::map<uint8_t, MediaType>& payload_type_map);
+  DirectTransport(
+      const Environment& env,
+      TaskQueueBase* absl_nonnull network_thread,
+      absl_nonnull std::unique_ptr<SimulatedPacketReceiverInterface> pipe,
+      Call* absl_nullable send_call,
+      const std::map<uint8_t, MediaType>& payload_type_map,
+      std::span<const RtpExtension> audio_extensions,
+      std::span<const RtpExtension> video_extensions);
 
   ~DirectTransport() override;
 
   // TODO(holmer): Look into moving this to the constructor.
   virtual void SetReceiver(PacketReceiver* receiver);
 
-  bool SendRtp(const uint8_t* data,
-               size_t length,
+  bool SendRtp(std::span<const uint8_t> data,
                const PacketOptions& options) override;
-  bool SendRtcp(const uint8_t* data, size_t length) override;
+  bool SendRtcp(std::span<const uint8_t> data,
+                const PacketOptions& options) override;
 
   int GetAverageDelayMs();
 
  private:
   void ProcessPackets() RTC_EXCLUSIVE_LOCKS_REQUIRED(&process_lock_);
-  void SendPacket(const uint8_t* data, size_t length);
+  void LegacySendPacket(const uint8_t* data, size_t length);
   void Start();
 
-  Call* const send_call_;
+  const Environment env_;
+  Call* const absl_nullable send_call_;
 
-  TaskQueueBase* const task_queue_;
+  TaskQueueBase& network_thread_;
 
   Mutex process_lock_;
   RepeatingTaskHandle next_process_task_ RTC_GUARDED_BY(&process_lock_);
 
   const Demuxer demuxer_;
   const std::unique_ptr<SimulatedPacketReceiverInterface> fake_network_;
+  const RtpHeaderExtensionMap audio_extensions_;
+  const RtpHeaderExtensionMap video_extensions_;
+
+  SequenceChecker worker_thread_checker_;
 };
 }  // namespace test
 }  // namespace webrtc

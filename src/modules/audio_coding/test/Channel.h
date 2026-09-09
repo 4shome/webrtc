@@ -13,8 +13,11 @@
 
 #include <stdio.h>
 
+#include <cstdint>
+
+#include "api/neteq/neteq.h"
 #include "modules/audio_coding/include/audio_coding_module.h"
-#include "modules/include/module_common_types.h"
+#include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "rtc_base/synchronization/mutex.h"
 
 namespace webrtc {
@@ -44,8 +47,8 @@ struct ACMTestPayloadStats {
 
 class Channel : public AudioPacketizationCallback {
  public:
-  Channel(int16_t chID = -1);
-  ~Channel() override;
+  Channel();
+  ~Channel() override = default;
 
   int32_t SendData(AudioFrameType frameType,
                    uint8_t payloadType,
@@ -54,7 +57,7 @@ class Channel : public AudioPacketizationCallback {
                    size_t payloadSize,
                    int64_t absolute_capture_timestamp_ms) override;
 
-  void RegisterReceiverACM(AudioCodingModule* acm);
+  void RegisterReceiverNetEq(NetEq* neteq);
 
   void ResetStats();
 
@@ -65,8 +68,6 @@ class Channel : public AudioPacketizationCallback {
   void SetFECTestWithPacketLoss(bool usePacketLoss) {
     _useFECTestWithPacketLoss = usePacketLoss;
   }
-
-  double BitRate();
 
   void set_send_timestamp(uint32_t new_send_ts) {
     external_send_timestamp_ = new_send_ts;
@@ -83,14 +84,12 @@ class Channel : public AudioPacketizationCallback {
  private:
   void CalcStatistics(const RTPHeader& rtp_header, size_t payloadSize);
 
-  AudioCodingModule* _receiverACM;
+  NetEq* _neteq;
   uint16_t _seqNo;
   // 60msec * 32 sample(max)/msec * 2 description (maybe) * 2 bytes/sample
   uint8_t _payloadData[60 * 32 * 2 * 2];
 
   Mutex _channelCritSect;
-  FILE* _bitStreamFile;
-  bool _saveBitStream;
   int16_t _lastPayloadType;
   ACMTestPayloadStats _payloadStats[MAX_NUM_PAYLOADS];
   bool _isStereo;
@@ -102,8 +101,6 @@ class Channel : public AudioPacketizationCallback {
   // FEC Test variables
   int16_t _packetLoss;
   bool _useFECTestWithPacketLoss;
-  uint64_t _beginTime;
-  uint64_t _totalBytes;
 
   // External timing info, defaulted to -1. Only used if they are
   // non-negative.

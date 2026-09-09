@@ -102,7 +102,6 @@ public class PeerConnectionClient {
   private static final String VIDEO_CODEC_PARAM_START_BITRATE = "x-google-start-bitrate";
   private static final String VIDEO_FLEXFEC_FIELDTRIAL =
       "WebRTC-FlexFEC-03-Advertised/Enabled/WebRTC-FlexFEC-03/Enabled/";
-  private static final String VIDEO_VP8_INTEL_HW_ENCODER_FIELDTRIAL = "WebRTC-IntelVP8/Enabled/";
   private static final String DISABLE_WEBRTC_AGC_FIELDTRIAL =
       "WebRTC-Audio-MinimizeResamplingOnMobile/Enabled/";
   private static final String AUDIO_CODEC_PARAM_BITRATE = "maxaveragebitrate";
@@ -334,12 +333,10 @@ public class PeerConnectionClient {
 
     Log.d(TAG, "Preferred video codec: " + getSdpVideoCodecName(peerConnectionParameters));
 
-    final String fieldTrials = getFieldTrials(peerConnectionParameters);
     executor.execute(() -> {
-      Log.d(TAG, "Initialize WebRTC. Field trials: " + fieldTrials);
+      Log.d(TAG, "Initialize WebRTC.");
       PeerConnectionFactory.initialize(
           PeerConnectionFactory.InitializationOptions.builder(appContext)
-              .setFieldTrials(fieldTrials)
               .setEnableInternalTracer(true)
               .createInitializationOptions());
     });
@@ -447,13 +444,15 @@ public class PeerConnectionClient {
     if (peerConnectionParameters.loopback) {
       options.disableEncryption = true;
     }
+    final String fieldTrials = getFieldTrials(peerConnectionParameters);
     factory = PeerConnectionFactory.builder()
+                  .setFieldTrials(fieldTrials)
                   .setOptions(options)
                   .setAudioDeviceModule(adm)
                   .setVideoEncoderFactory(encoderFactory)
                   .setVideoDecoderFactory(decoderFactory)
                   .createPeerConnectionFactory();
-    Log.d(TAG, "Peer connection factory created.");
+    Log.d(TAG, "Peer connection factory created. Field trials: " + fieldTrials);
     adm.release();
   }
 
@@ -1002,7 +1001,6 @@ public class PeerConnectionClient {
       fieldTrials += VIDEO_FLEXFEC_FIELDTRIAL;
       Log.d(TAG, "Enable FlexFEC field trial.");
     }
-    fieldTrials += VIDEO_VP8_INTEL_HW_ENCODER_FIELDTRIAL;
     if (peerConnectionParameters.disableWebRtcAGCAndHPF) {
       fieldTrials += DISABLE_WEBRTC_AGC_FIELDTRIAL;
       Log.d(TAG, "Disable WebRTC AGC field trial.");
@@ -1271,7 +1269,7 @@ public class PeerConnectionClient {
 
     @Override
     public void onSelectedCandidatePairChanged(CandidatePairChangeEvent event) {
-      Log.d(TAG, "Selected candidate pair changed because: " + event);
+      Log.d(TAG, "Selected candidate pair changed because: " + event.reason);
     }
 
     @Override

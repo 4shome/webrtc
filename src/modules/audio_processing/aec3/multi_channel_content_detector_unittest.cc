@@ -10,6 +10,10 @@
 
 #include "modules/audio_processing/aec3/multi_channel_content_detector.h"
 
+#include <algorithm>
+#include <tuple>
+#include <vector>
+
 #include "system_wrappers/include/metrics.h"
 #include "test/gtest.h"
 
@@ -453,18 +457,21 @@ TEST(MultiChannelContentDetectorMetrics, ReportsMetrics) {
                              "PersistentMultichannelContentEverDetected"));
   EXPECT_METRIC_EQ(
       1, metrics::NumEvents("WebRTC.Audio.EchoCanceller."
-                             "PersistentMultichannelContentEverDetected", 1));
+                            "PersistentMultichannelContentEverDetected",
+                            1));
 
   // Check periodic metric.
   EXPECT_METRIC_EQ(
       2, metrics::NumSamples("WebRTC.Audio.EchoCanceller."
                              "ProcessingPersistentMultichannelContent"));
-  EXPECT_METRIC_EQ(
-      1, metrics::NumEvents("WebRTC.Audio.EchoCanceller."
-                             "ProcessingPersistentMultichannelContent", 0));
-  EXPECT_METRIC_EQ(
-      1, metrics::NumEvents("WebRTC.Audio.EchoCanceller."
-                             "ProcessingPersistentMultichannelContent", 1));
+  EXPECT_METRIC_EQ(1,
+                   metrics::NumEvents("WebRTC.Audio.EchoCanceller."
+                                      "ProcessingPersistentMultichannelContent",
+                                      0));
+  EXPECT_METRIC_EQ(1,
+                   metrics::NumEvents("WebRTC.Audio.EchoCanceller."
+                                      "ProcessingPersistentMultichannelContent",
+                                      1));
 }
 
 }  // namespace webrtc

@@ -7,11 +7,12 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#include <string>
-#include <type_traits>
-
-#include "api/function_view.h"
 #include "rtc_base/callback_list.h"
+
+#include <functional>
+#include <string>
+
+#include "rtc_base/untyped_function.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -25,7 +26,7 @@ TEST(CallbackList, NoReceiverSingleMessageTest) {
 
 TEST(CallbackList, MultipleParameterMessageTest) {
   CallbackList<const std::string&, std::string, std::string&&, int, int*,
-             std::string&>
+               std::string&>
       c;
   std::string str = "messege";
   int i = 10;
@@ -38,7 +39,9 @@ TEST(CallbackList, NoParameterMessageTest) {
 
   c.Send();
 }
-
+// Temporary while we deprecate tag-less AddReceiver
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 TEST(CallbackList, ReferenceTest) {
   CallbackList<int&> c;
   int index = 1;
@@ -263,6 +266,66 @@ TEST(CallbackList, RemoveFromSend) {
   c.Send();
   c.Send();
   EXPECT_EQ(removal_tag, 1);
+}
+
+TEST(CallbackList, RemoveFromSendFirst) {
+  int removal_tag0 = 0;
+  int removal_tag1 = 0;
+  CallbackList<> c;
+  c.AddReceiver(&removal_tag0, [&] {
+    c.RemoveReceivers(&removal_tag0);
+    // Do after RemoveReceivers to make sure the lambda is still valid.
+    ++removal_tag0;
+  });
+  c.AddReceiver(&removal_tag1, [&] {});
+  c.Send();
+  c.Send();
+  EXPECT_EQ(removal_tag0, 1);
+}
+
+TEST(CallbackList, RemoveLastFromSend) {
+  int removal_tag0 = 0;
+  int removal_tag1 = 0;
+  CallbackList<> c;
+  c.AddReceiver(&removal_tag0, [] {});
+  c.AddReceiver(&removal_tag1, [&] {
+    c.RemoveReceivers(&removal_tag1);
+    // Do after RemoveReceivers to make sure the lambda is still valid.
+    ++removal_tag1;
+  });
+  c.Send();
+  c.Send();
+  EXPECT_EQ(removal_tag1, 1);
+}
+
+TEST(CallbackList, RemoveMiddleFromSend) {
+  int removal_tag0 = 0;
+  int removal_tag1 = 0;
+  int removal_tag2 = 0;
+  CallbackList<> c;
+  c.AddReceiver(&removal_tag0, [&] {});
+  c.AddReceiver(&removal_tag1, [&] {
+    c.RemoveReceivers(&removal_tag1);
+    // Do after RemoveReceivers to make sure the lambda is still valid.
+    ++removal_tag1;
+  });
+  c.AddReceiver(&removal_tag2, [&] {});
+  c.Send();
+  c.Send();
+  EXPECT_EQ(removal_tag1, 1);
+}
+
+#pragma clang diagnostic pop
+
+TEST(CallbackList, ConstructorSingleSubscriberWithTagTest) {
+  int removal_tag;
+  int accumulator = 0;
+  CallbackList<> c(&removal_tag, [&accumulator] { accumulator += 10; });
+  c.Send();
+  EXPECT_EQ(accumulator, 10);
+  c.RemoveReceivers(&removal_tag);
+  c.Send();
+  EXPECT_EQ(accumulator, 10);  // No change after removal.
 }
 
 }  // namespace

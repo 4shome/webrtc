@@ -11,7 +11,8 @@
 #include "rtc_base/win/create_direct3d_device.h"
 
 #include <libloaderapi.h>
-#include <utility>
+
+namespace webrtc {
 
 namespace {
 
@@ -30,8 +31,6 @@ GetCreateDirect3D11DeviceFromDXGIDevice() {
 }
 
 }  // namespace
-
-namespace webrtc {
 
 bool ResolveCoreWinRTDirect3DDelayload() {
   return GetCreateDirect3D11DeviceFromDXGIDevice();

@@ -10,10 +10,20 @@
 #include "modules/remote_bitrate_estimator/remote_bitrate_estimator_unittest_helper.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <utility>
+#include <vector>
 
+#include "api/rtp_header_extension_id.h"
+#include "api/units/data_rate.h"
+#include "api/units/timestamp.h"
+#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
+#include "modules/rtp_rtcp/source/rtp_header_extensions.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "rtc_base/checks.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -26,7 +36,7 @@ const int kNumInitialPackets = 2;
 namespace testing {
 
 void TestBitrateObserver::OnReceiveBitrateChanged(
-    const std::vector<uint32_t>& ssrcs,
+    const std::vector<uint32_t>& /* ssrcs */,
     uint32_t bitrate) {
   latest_bitrate_ = bitrate;
   updated_ = true;
@@ -88,7 +98,7 @@ int64_t RtpStream::next_rtp_time() const {
 // Generates an RTCP packet.
 RtpStream::RtcpPacket* RtpStream::Rtcp(int64_t time_now_us) {
   if (time_now_us < next_rtcp_time_) {
-    return NULL;
+    return nullptr;
   }
   RtcpPacket* rtcp = new RtcpPacket;
   int64_t send_time_us = time_now_us + kSendSideOffsetUs;
@@ -229,15 +239,17 @@ void RemoteBitrateEstimatorTest::IncomingPacket(uint32_t ssrc,
                                                 int64_t arrival_time,
                                                 uint32_t rtp_timestamp,
                                                 uint32_t absolute_send_time) {
-  RTPHeader header;
-  memset(&header, 0, sizeof(header));
-  header.ssrc = ssrc;
-  header.timestamp = rtp_timestamp;
-  header.extension.hasAbsoluteSendTime = true;
-  header.extension.absoluteSendTime = absolute_send_time;
-  RTC_CHECK_GE(arrival_time + arrival_time_offset_ms_, 0);
-  bitrate_estimator_->IncomingPacket(arrival_time + arrival_time_offset_ms_,
-                                     payload_size, header);
+  RtpHeaderExtensionMap extensions;
+  extensions.Register<AbsoluteSendTime>(RtpHeaderExtensionId(1));
+  RtpPacketReceived rtp_packet(&extensions);
+  rtp_packet.SetSsrc(ssrc);
+  rtp_packet.SetTimestamp(rtp_timestamp);
+  rtp_packet.SetExtension<AbsoluteSendTime>(absolute_send_time);
+  rtp_packet.SetPayloadSize(payload_size);
+  rtp_packet.set_arrival_time(
+      Timestamp::Millis(arrival_time + arrival_time_offset_ms_));
+
+  bitrate_estimator_->IncomingPacket(rtp_packet);
 }
 
 // Generates a frame of packets belonging to a stream at a given bitrate and
@@ -246,7 +258,7 @@ void RemoteBitrateEstimatorTest::IncomingPacket(uint32_t ssrc,
 // Returns true if an over-use was seen, false otherwise.
 // The StreamGenerator::updated() should be used to check for any changes in
 // target bitrate after the call to this function.
-bool RemoteBitrateEstimatorTest::GenerateAndProcessFrame(uint32_t ssrc,
+bool RemoteBitrateEstimatorTest::GenerateAndProcessFrame(uint32_t /* ssrc */,
                                                          uint32_t bitrate_bps) {
   RTC_DCHECK_GT(bitrate_bps, 0);
   stream_generator_->SetBitrateBps(bitrate_bps);
@@ -472,7 +484,8 @@ void RemoteBitrateEstimatorTest::CapacityDropTestHelper(
   uint32_t bitrate_bps = SteadyStateRun(
       kDefaultSsrc, steady_state_time * kFramerate, kStartBitrate,
       kMinExpectedBitrate, kMaxExpectedBitrate, kInitialCapacityBps);
-  EXPECT_NEAR(kInitialCapacityBps, bitrate_bps, 130000u);
+  EXPECT_GE(bitrate_bps, 0.85 * kInitialCapacityBps);
+  EXPECT_LE(bitrate_bps, 1.05 * kInitialCapacityBps);
   bitrate_observer_->Reset();
 
   // Add an offset to make sure the BWE can handle it.

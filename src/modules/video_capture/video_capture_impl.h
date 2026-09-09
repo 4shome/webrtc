@@ -11,27 +11,31 @@
 #ifndef MODULES_VIDEO_CAPTURE_MAIN_SOURCE_VIDEO_CAPTURE_IMPL_H_
 #define MODULES_VIDEO_CAPTURE_MAIN_SOURCE_VIDEO_CAPTURE_IMPL_H_
 
-/*
- * video_capture_impl.h
- */
-
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 
 #include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_rotation.h"
 #include "api/video/video_sink_interface.h"
+#include "modules/video_capture/raw_video_sink_interface.h"
 #include "modules/video_capture/video_capture.h"
 #include "modules/video_capture/video_capture_config.h"
 #include "modules/video_capture/video_capture_defines.h"
+#include "rtc_base/race_checker.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/system/rtc_export.h"
+#include "rtc_base/thread_annotations.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 
+class VideoCaptureOptions;
+
 namespace videocapturemodule {
 // Class definitions
-class VideoCaptureImpl : public VideoCaptureModule {
+class RTC_EXPORT VideoCaptureImpl : public VideoCaptureModule {
  public:
   /*
    *   Create a video capture module object
@@ -40,10 +44,16 @@ class VideoCaptureImpl : public VideoCaptureModule {
    *   deviceUniqueIdUTF8 -  name of the device. Available names can be found by
    * using GetDeviceName
    */
-  static rtc::scoped_refptr<VideoCaptureModule> Create(
+  static scoped_refptr<VideoCaptureModule> Create(
+      Clock* clock,
+      const char* deviceUniqueIdUTF8);
+  static scoped_refptr<VideoCaptureModule> Create(
+      Clock* clock,
+      VideoCaptureOptions* options,
       const char* deviceUniqueIdUTF8);
 
   static DeviceInfo* CreateDeviceInfo();
+  static DeviceInfo* CreateDeviceInfo(VideoCaptureOptions* options);
 
   // Helpers for converting between (integral) degrees and
   // VideoRotation values.  Return 0 on success.
@@ -52,7 +62,9 @@ class VideoCaptureImpl : public VideoCaptureModule {
 
   // Call backs
   void RegisterCaptureDataCallback(
-      rtc::VideoSinkInterface<VideoFrame>* dataCallback) override;
+      VideoSinkInterface<VideoFrame>* dataCallback) override;
+  void RegisterCaptureDataCallback(
+      RawVideoSinkInterface* dataCallback) override;
   void DeRegisterCaptureDataCallback() override;
 
   int32_t SetCaptureRotation(VideoRotation rotation) override;
@@ -74,34 +86,50 @@ class VideoCaptureImpl : public VideoCaptureModule {
   int32_t CaptureSettings(VideoCaptureCapability& /*settings*/) override;
 
  protected:
-  VideoCaptureImpl();
+  explicit VideoCaptureImpl(Clock* clock);
   ~VideoCaptureImpl() override;
 
-  char* _deviceUniqueId;  // current Device unique name;
+  // Calls to the public API must happen on a single thread.
+  SequenceChecker api_checker_;
+  // RaceChecker for members that can be accessed on the API thread while
+  // capture is not happening, and on a callback thread otherwise.
+  RaceChecker capture_checker_;
+  // current Device unique name;
+  char* _deviceUniqueId RTC_GUARDED_BY(api_checker_);
   Mutex api_lock_;
-  VideoCaptureCapability _requestedCapability;  // Should be set by platform
-                                                // dependent code in
-                                                // StartCapture.
+  // Should be set by platform dependent code in StartCapture.
+  VideoCaptureCapability _requestedCapability RTC_GUARDED_BY(api_checker_);
+
  private:
   void UpdateFrameCount();
   uint32_t CalculateFrameRate(int64_t now_ns);
-  int32_t DeliverCapturedFrame(VideoFrame& captureFrame);
+  int32_t DeliverCapturedFrame(VideoFrame& captureFrame)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(api_lock_);
+  void DeliverRawFrame(uint8_t* videoFrame,
+                       size_t videoFrameLength,
+                       const VideoCaptureCapability& frameInfo,
+                       int64_t captureTime)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(api_lock_);
 
   // last time the module process function was called.
-  int64_t _lastProcessTimeNanos;
+  int64_t _lastProcessTimeNanos RTC_GUARDED_BY(capture_checker_);
   // last time the frame rate callback function was called.
-  int64_t _lastFrameRateCallbackTimeNanos;
+  int64_t _lastFrameRateCallbackTimeNanos RTC_GUARDED_BY(capture_checker_);
 
-  rtc::VideoSinkInterface<VideoFrame>* _dataCallBack;
+  VideoSinkInterface<VideoFrame>* _dataCallBack RTC_GUARDED_BY(api_lock_);
+  RawVideoSinkInterface* _rawDataCallBack RTC_GUARDED_BY(api_lock_);
 
-  int64_t _lastProcessFrameTimeNanos;
+  int64_t _lastProcessFrameTimeNanos RTC_GUARDED_BY(capture_checker_);
   // timestamp for local captured frames
-  int64_t _incomingFrameTimesNanos[kFrameRateCountHistorySize];
-  VideoRotation _rotateFrame;  // Set if the frame should be rotated by the
-                               // capture module.
+  int64_t _incomingFrameTimesNanos[kFrameRateCountHistorySize] RTC_GUARDED_BY(
+      capture_checker_);
+  // Set if the frame should be rotated by the capture module.
+  VideoRotation _rotateFrame RTC_GUARDED_BY(api_lock_);
 
   // Indicate whether rotation should be applied before delivered externally.
-  bool apply_rotation_;
+  bool apply_rotation_ RTC_GUARDED_BY(api_lock_);
+
+  Clock* const clock_;
 };
 }  // namespace videocapturemodule
 }  // namespace webrtc

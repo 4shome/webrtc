@@ -14,10 +14,10 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.os.Build;
-import android.support.test.InstrumentationRegistry;
-import android.support.test.runner.AndroidJUnit4;
 import android.util.Log;
+import androidx.test.InstrumentationRegistry;
 import androidx.test.filters.SmallTest;
+import androidx.test.runner.AndroidJUnit4;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -78,7 +78,7 @@ public class PeerConnectionClientTest implements PeerConnectionEvents {
   private boolean isClosed;
   private boolean isIceConnected;
   private SessionDescription localDesc;
-  private List<IceCandidate> iceCandidates = new ArrayList<>();
+  private final List<IceCandidate> iceCandidates = new ArrayList<>();
   private final Object localDescEvent = new Object();
   private final Object iceCandidateEvent = new Object();
   private final Object iceConnectedEvent = new Object();
@@ -87,7 +87,7 @@ public class PeerConnectionClientTest implements PeerConnectionEvents {
   // Mock VideoSink implementation.
   private static class MockSink implements VideoSink {
     // These are protected by 'this' since we gets called from worker threads.
-    private String rendererName;
+    private final String rendererName;
     private boolean renderFrameCalled;
 
     // Thread-safe in itself.

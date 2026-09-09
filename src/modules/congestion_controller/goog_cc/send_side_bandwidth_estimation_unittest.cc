@@ -10,10 +10,16 @@
 
 #include "modules/congestion_controller/goog_cc/send_side_bandwidth_estimation.h"
 
+#include <cstdint>
+
+#include "api/field_trials.h"
 #include "api/rtc_event_log/rtc_event.h"
+#include "api/units/data_rate.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "logging/rtc_event_log/events/rtc_event_bwe_update_loss_based.h"
 #include "logging/rtc_event_log/mock/mock_rtc_event_log.h"
-#include "test/explicit_key_value_config.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -37,7 +43,7 @@ MATCHER(LossBasedBweUpdateWithBitrateAndLossFraction, "") {
 
 void TestProbing(bool use_delay_based) {
   ::testing::NiceMock<MockRtcEventLog> event_log;
-  test::ExplicitKeyValueConfig key_value_config("");
+  FieldTrials key_value_config = CreateTestFieldTrials();
   SendSideBandwidthEstimation bwe(&key_value_config, &event_log);
   int64_t now_ms = 0;
   bwe.SetMinMaxBitrate(DataRate::BitsPerSec(100000),
@@ -90,7 +96,7 @@ TEST(SendSideBweTest, DoesntReapplyBitrateDecreaseWithoutFollowingRemb) {
   EXPECT_CALL(event_log,
               LogProxy(LossBasedBweUpdateWithBitrateAndLossFraction()))
       .Times(1);
-  test::ExplicitKeyValueConfig key_value_config("");
+  FieldTrials key_value_config = CreateTestFieldTrials();
   SendSideBandwidthEstimation bwe(&key_value_config, &event_log);
   static const int kMinBitrateBps = 100000;
   static const int kInitialBitrateBps = 1000000;
@@ -141,7 +147,7 @@ TEST(SendSideBweTest, DoesntReapplyBitrateDecreaseWithoutFollowingRemb) {
 
 TEST(SendSideBweTest, SettingSendBitrateOverridesDelayBasedEstimate) {
   ::testing::NiceMock<MockRtcEventLog> event_log;
-  test::ExplicitKeyValueConfig key_value_config("");
+  FieldTrials key_value_config = CreateTestFieldTrials();
   SendSideBandwidthEstimation bwe(&key_value_config, &event_log);
   static const int kMinBitrateBps = 10000;
   static const int kMaxBitrateBps = 10000000;
@@ -168,21 +174,20 @@ TEST(SendSideBweTest, SettingSendBitrateOverridesDelayBasedEstimate) {
 }
 
 TEST(RttBasedBackoff, DefaultEnabled) {
-  test::ExplicitKeyValueConfig key_value_config("");
-  RttBasedBackoff rtt_backoff(&key_value_config);
+  RttBasedBackoff rtt_backoff(CreateTestFieldTrials());
   EXPECT_TRUE(rtt_backoff.rtt_limit_.IsFinite());
 }
 
 TEST(RttBasedBackoff, CanBeDisabled) {
-  test::ExplicitKeyValueConfig key_value_config(
-      "WebRTC-Bwe-MaxRttLimit/Disabled/");
-  RttBasedBackoff rtt_backoff(&key_value_config);
+  FieldTrials key_value_config =
+      CreateTestFieldTrials("WebRTC-Bwe-MaxRttLimit/Disabled/");
+  RttBasedBackoff rtt_backoff(key_value_config);
   EXPECT_TRUE(rtt_backoff.rtt_limit_.IsPlusInfinity());
 }
 
 TEST(SendSideBweTest, FractionLossIsNotOverflowed) {
   MockRtcEventLog event_log;
-  test::ExplicitKeyValueConfig key_value_config("");
+  FieldTrials key_value_config = CreateTestFieldTrials();
   SendSideBandwidthEstimation bwe(&key_value_config, &event_log);
   static const int kMinBitrateBps = 100000;
   static const int kInitialBitrateBps = 1000000;
@@ -201,6 +206,40 @@ TEST(SendSideBweTest, FractionLossIsNotOverflowed) {
   bwe.UpdatePacketsLost(/*packets_lost=*/-1, /*number_of_packets=*/100,
                         Timestamp::Millis(now_ms));
   EXPECT_EQ(0, bwe.fraction_loss());
+}
+
+TEST(SendSideBweTest, RttIsAboveLimitIfRttGreaterThanLimit) {
+  ::testing::NiceMock<MockRtcEventLog> event_log;
+  FieldTrials key_value_config = CreateTestFieldTrials();
+  SendSideBandwidthEstimation bwe(&key_value_config, &event_log);
+  static const int kMinBitrateBps = 10000;
+  static const int kMaxBitrateBps = 10000000;
+  static const int kInitialBitrateBps = 300000;
+  int64_t now_ms = 0;
+  bwe.SetMinMaxBitrate(DataRate::BitsPerSec(kMinBitrateBps),
+                       DataRate::BitsPerSec(kMaxBitrateBps));
+  bwe.SetSendBitrate(DataRate::BitsPerSec(kInitialBitrateBps),
+                     Timestamp::Millis(now_ms));
+  bwe.UpdatePropagationRtt(/*at_time=*/Timestamp::Millis(now_ms),
+                           /*propagation_rtt=*/TimeDelta::Millis(5000));
+  EXPECT_TRUE(bwe.IsRttAboveLimit());
+}
+
+TEST(SendSideBweTest, RttIsBelowLimitIfRttLessThanLimit) {
+  ::testing::NiceMock<MockRtcEventLog> event_log;
+  FieldTrials key_value_config = CreateTestFieldTrials();
+  SendSideBandwidthEstimation bwe(&key_value_config, &event_log);
+  static const int kMinBitrateBps = 10000;
+  static const int kMaxBitrateBps = 10000000;
+  static const int kInitialBitrateBps = 300000;
+  int64_t now_ms = 0;
+  bwe.SetMinMaxBitrate(DataRate::BitsPerSec(kMinBitrateBps),
+                       DataRate::BitsPerSec(kMaxBitrateBps));
+  bwe.SetSendBitrate(DataRate::BitsPerSec(kInitialBitrateBps),
+                     Timestamp::Millis(now_ms));
+  bwe.UpdatePropagationRtt(/*at_time=*/Timestamp::Millis(now_ms),
+                           /*propagation_rtt=*/TimeDelta::Millis(1000));
+  EXPECT_FALSE(bwe.IsRttAboveLimit());
 }
 
 }  // namespace webrtc

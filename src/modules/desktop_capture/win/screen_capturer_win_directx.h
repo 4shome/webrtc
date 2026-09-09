@@ -11,17 +11,17 @@
 #ifndef MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_DIRECTX_H_
 #define MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_DIRECTX_H_
 
-#include <d3dcommon.h>
-
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "api/scoped_refptr.h"
 #include "modules/desktop_capture/desktop_capture_options.h"
+#include "modules/desktop_capture/desktop_capture_types.h"
 #include "modules/desktop_capture/desktop_capturer.h"
-#include "modules/desktop_capture/desktop_region.h"
 #include "modules/desktop_capture/screen_capture_frame_queue.h"
+#include "modules/desktop_capture/shared_memory.h"
 #include "modules/desktop_capture/win/dxgi_duplicator_controller.h"
 #include "modules/desktop_capture/win/dxgi_frame.h"
 #include "rtc_base/system/rtc_export.h"
@@ -70,7 +70,9 @@ class RTC_EXPORT ScreenCapturerWinDirectx : public DesktopCapturer {
   static int GetIndexFromScreenId(ScreenId id,
                                   const std::vector<std::string>& device_names);
 
-  explicit ScreenCapturerWinDirectx();
+  // This constructor is deprecated. Please don't use it in new implementations.
+  ScreenCapturerWinDirectx();
+  explicit ScreenCapturerWinDirectx(const DesktopCaptureOptions& options);
 
   ~ScreenCapturerWinDirectx() override;
 
@@ -86,7 +88,8 @@ class RTC_EXPORT ScreenCapturerWinDirectx : public DesktopCapturer {
   bool SelectSource(SourceId id) override;
 
  private:
-  const rtc::scoped_refptr<DxgiDuplicatorController> controller_;
+  const scoped_refptr<DxgiDuplicatorController> controller_;
+  DesktopCaptureOptions options_;
 
   // The underlying DxgiDuplicators may retain a reference to the frames that
   // we ask them to duplicate so that they can continue returning valid frames

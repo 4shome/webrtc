@@ -10,6 +10,7 @@
 
 #include "pc/test/android_test_initializer.h"
 
+#include <bits/pthread_types.h>
 #include <jni.h>
 #include <pthread.h>
 #include <stddef.h>
@@ -37,9 +38,9 @@ void EnsureInitializedOnce() {
   JavaVM* jvm = NULL;
   RTC_CHECK_EQ(0, jni->GetJavaVM(&jvm));
 
-  RTC_CHECK(rtc::InitializeSSL()) << "Failed to InitializeSSL()";
+  RTC_CHECK(webrtc::InitializeSSL()) << "Failed to InitializeSSL()";
 
-  webrtc::JVM::Initialize(jvm);
+  JVM::Initialize(jvm);
 }
 
 }  // anonymous namespace

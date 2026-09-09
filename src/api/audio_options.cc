@@ -10,23 +10,25 @@
 
 #include "api/audio_options.h"
 
-#include "api/array_view.h"
+#include <optional>
+#include <string>
+
 #include "rtc_base/strings/string_builder.h"
 
-namespace cricket {
+namespace webrtc {
 namespace {
 
 template <class T>
-void ToStringIfSet(rtc::SimpleStringBuilder* result,
+void ToStringIfSet(StringBuilder* result,
                    const char* key,
-                   const absl::optional<T>& val) {
+                   const std::optional<T>& val) {
   if (val) {
     (*result) << key << ": " << *val << ", ";
   }
 }
 
 template <typename T>
-void SetFrom(absl::optional<T>* s, const absl::optional<T>& o) {
+void SetFrom(std::optional<T>* s, const std::optional<T>& o) {
   if (o) {
     *s = o;
   }
@@ -40,7 +42,10 @@ AudioOptions::~AudioOptions() = default;
 void AudioOptions::SetAll(const AudioOptions& change) {
   SetFrom(&echo_cancellation, change.echo_cancellation);
 #if defined(WEBRTC_IOS)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   SetFrom(&ios_force_software_aec_HACK, change.ios_force_software_aec_HACK);
+#pragma clang diagnostic pop
 #endif
   SetFrom(&auto_gain_control, change.auto_gain_control);
   SetFrom(&noise_suppression, change.noise_suppression);
@@ -52,7 +57,6 @@ void AudioOptions::SetAll(const AudioOptions& change) {
           change.audio_jitter_buffer_fast_accelerate);
   SetFrom(&audio_jitter_buffer_min_delay_ms,
           change.audio_jitter_buffer_min_delay_ms);
-  SetFrom(&combined_audio_video_bwe, change.combined_audio_video_bwe);
   SetFrom(&audio_network_adaptor, change.audio_network_adaptor);
   SetFrom(&audio_network_adaptor_config, change.audio_network_adaptor_config);
   SetFrom(&init_recording_on_send, change.init_recording_on_send);
@@ -61,7 +65,10 @@ void AudioOptions::SetAll(const AudioOptions& change) {
 bool AudioOptions::operator==(const AudioOptions& o) const {
   return echo_cancellation == o.echo_cancellation &&
 #if defined(WEBRTC_IOS)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
          ios_force_software_aec_HACK == o.ios_force_software_aec_HACK &&
+#pragma clang diagnostic pop
 #endif
          auto_gain_control == o.auto_gain_control &&
          noise_suppression == o.noise_suppression &&
@@ -72,20 +79,21 @@ bool AudioOptions::operator==(const AudioOptions& o) const {
              o.audio_jitter_buffer_fast_accelerate &&
          audio_jitter_buffer_min_delay_ms ==
              o.audio_jitter_buffer_min_delay_ms &&
-         combined_audio_video_bwe == o.combined_audio_video_bwe &&
          audio_network_adaptor == o.audio_network_adaptor &&
          audio_network_adaptor_config == o.audio_network_adaptor_config &&
          init_recording_on_send == o.init_recording_on_send;
 }
 
 std::string AudioOptions::ToString() const {
-  char buffer[1024];
-  rtc::SimpleStringBuilder result(buffer);
+  StringBuilder result;
   result << "AudioOptions {";
   ToStringIfSet(&result, "aec", echo_cancellation);
 #if defined(WEBRTC_IOS)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   ToStringIfSet(&result, "ios_force_software_aec_HACK",
                 ios_force_software_aec_HACK);
+#pragma clang diagnostic pop
 #endif
   ToStringIfSet(&result, "agc", auto_gain_control);
   ToStringIfSet(&result, "ns", noise_suppression);
@@ -97,11 +105,10 @@ std::string AudioOptions::ToString() const {
                 audio_jitter_buffer_fast_accelerate);
   ToStringIfSet(&result, "audio_jitter_buffer_min_delay_ms",
                 audio_jitter_buffer_min_delay_ms);
-  ToStringIfSet(&result, "combined_audio_video_bwe", combined_audio_video_bwe);
   ToStringIfSet(&result, "audio_network_adaptor", audio_network_adaptor);
   ToStringIfSet(&result, "init_recording_on_send", init_recording_on_send);
   result << "}";
-  return result.str();
+  return result.Release();
 }
 
-}  // namespace cricket
+}  // namespace webrtc

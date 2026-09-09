@@ -14,7 +14,12 @@
 #include <stddef.h>  // For size_t.
 #include <stdint.h>  // For integer types.
 
-namespace rtc {
+#include <span>
+
+#include "absl/strings/string_view.h"
+#include "api/units/data_size.h"
+
+namespace webrtc {
 
 // A BitBuffer API for write operations. Supports symmetric write APIs to the
 // reading APIs of BitstreamReader.
@@ -22,7 +27,10 @@ namespace rtc {
 // Byte order is assumed big-endian/network.
 class BitBufferWriter {
  public:
+  static constexpr DataSize kMaxLeb128Length = DataSize::Bytes(10);
+
   // Constructs a bit buffer for the writable buffer of `bytes`.
+  explicit BitBufferWriter(std::span<uint8_t> bytes);
   BitBufferWriter(uint8_t* bytes, size_t byte_count);
 
   BitBufferWriter(const BitBufferWriter&) = delete;
@@ -35,12 +43,9 @@ class BitBufferWriter {
   // The remaining bits in the byte buffer.
   uint64_t RemainingBitCount() const;
 
-  // Moves current position `byte_count` bytes forward. Returns false if
-  // there aren't enough bytes left in the buffer.
-  bool ConsumeBytes(size_t byte_count);
-  // Moves current position `bit_count` bits forward. Returns false if
-  // there aren't enough bits left in the buffer.
-  bool ConsumeBits(size_t bit_count);
+  // Writes `bit_count` zero bits. Returns false if there aren't enough bits
+  // left in the buffer.
+  bool ZeroBits(size_t bit_count);
 
   // Sets the current offset to the provied byte/bit offsets. The bit
   // offset is from the given byte, in the range [0,7].
@@ -72,7 +77,17 @@ class BitBufferWriter {
   // sequence 0, 1, -1, 2, -2, etc. in order.
   bool WriteSignedExponentialGolomb(int32_t val);
 
+  // Writes the Leb128 encoded value.
+  bool WriteLeb128(uint64_t val);
+
+  // Writes the string as bytes of data.
+  bool WriteString(absl::string_view data);
+
  private:
+  // Moves current position `bit_count` bits forward.
+  // Assumes `bit_count <= RemainingBitCount()`
+  void ConsumeBits(size_t bit_count);
+
   // The buffer, as a writable array.
   uint8_t* const writable_bytes_;
   // The total size of `bytes_`.
@@ -83,6 +98,7 @@ class BitBufferWriter {
   size_t bit_offset_;
 };
 
-}  // namespace rtc
+}  //  namespace webrtc
+
 
 #endif  // RTC_BASE_BIT_BUFFER_H_

@@ -10,17 +10,25 @@
 
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <span>
 #include <utility>
+#include <vector>
 
-#include "api/array_view.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/common_header.h"
+#include "rtc_base/buffer.h"
+#include "rtc_base/checks.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/near_matcher.h"
 
 namespace webrtc {
 namespace {
@@ -30,6 +38,9 @@ using ::testing::AllOf;
 using ::testing::Each;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
+using ::testing::InSequence;
+using ::testing::MockFunction;
+using ::testing::Ne;
 using ::testing::Property;
 using ::testing::SizeIs;
 
@@ -42,10 +53,6 @@ constexpr TimeDelta kDeltaLimit = 0xFF * TransportFeedback::kDeltaTick;
 constexpr TimeDelta kBaseTimeTick = TransportFeedback::kDeltaTick * (1 << 8);
 constexpr TimeDelta kBaseTimeWrapPeriod = kBaseTimeTick * (1 << 24);
 
-MATCHER_P2(Near, value, max_abs_error, "") {
-  return value - max_abs_error <= arg && arg <= value + max_abs_error;
-}
-
 MATCHER(IsValidFeedback, "") {
   rtcp::CommonHeader rtcp_header;
   TransportFeedback feedback;
@@ -55,13 +62,13 @@ MATCHER(IsValidFeedback, "") {
          feedback.Parse(rtcp_header);
 }
 
-TransportFeedback Parse(rtc::ArrayView<const uint8_t> buffer) {
+TransportFeedback Parse(std::span<const uint8_t> buffer) {
   rtcp::CommonHeader header;
-  RTC_DCHECK(header.Parse(buffer.data(), buffer.size()));
-  RTC_DCHECK_EQ(header.type(), TransportFeedback::kPacketType);
-  RTC_DCHECK_EQ(header.fmt(), TransportFeedback::kFeedbackMessageType);
+  EXPECT_TRUE(header.Parse(buffer.data(), buffer.size()));
+  EXPECT_EQ(header.type(), TransportFeedback::kPacketType);
+  EXPECT_EQ(header.fmt(), TransportFeedback::kFeedbackMessageType);
   TransportFeedback feedback;
-  RTC_DCHECK(feedback.Parse(header));
+  EXPECT_TRUE(feedback.Parse(header));
   return feedback;
 }
 
@@ -79,14 +86,14 @@ class FeedbackTester {
 
   void WithDefaultDelta(TimeDelta delta) { default_delta_ = delta; }
 
-  void WithInput(rtc::ArrayView<const uint16_t> received_seq,
-                 rtc::ArrayView<const Timestamp> received_ts = {}) {
+  void WithInput(std::span<const uint16_t> received_seq,
+                 std::span<const Timestamp> received_ts = {}) {
     std::vector<Timestamp> temp_timestamps;
     if (received_ts.empty()) {
       temp_timestamps = GenerateReceiveTimestamps(received_seq);
       received_ts = temp_timestamps;
     }
-    RTC_DCHECK_EQ(received_seq.size(), received_ts.size());
+    ASSERT_EQ(received_seq.size(), received_ts.size());
 
     expected_deltas_.clear();
     feedback_.emplace(include_timestamps_);
@@ -146,8 +153,8 @@ class FeedbackTester {
   }
 
   std::vector<Timestamp> GenerateReceiveTimestamps(
-      rtc::ArrayView<const uint16_t> seq_nums) {
-    RTC_DCHECK(!seq_nums.empty());
+      std::span<const uint16_t> seq_nums) {
+    RTC_CHECK(!seq_nums.empty());
     uint16_t last_seq = seq_nums[0];
     Timestamp time = Timestamp::Zero();
     std::vector<Timestamp> result;
@@ -166,8 +173,8 @@ class FeedbackTester {
   std::vector<TimeDelta> expected_deltas_;
   size_t expected_size_;
   TimeDelta default_delta_;
-  absl::optional<TransportFeedback> feedback_;
-  rtc::Buffer serialized_;
+  std::optional<TransportFeedback> feedback_;
+  Buffer serialized_;
   bool include_timestamps_;
 };
 
@@ -270,7 +277,7 @@ TEST(RtcpPacketTest, TransportFeedbackWithLargeBaseTimeIsConsistent) {
   constexpr Timestamp kTimestamp =
       Timestamp::Zero() + int64_t{0x7fff'ffff} * TransportFeedback::kDeltaTick;
   tb.SetBase(/*base_sequence=*/0, /*ref_timestamp=*/kTimestamp);
-  tb.AddReceivedPacket(/*base_sequence=*/0, /*ref_timestamp=*/kTimestamp);
+  tb.AddReceivedPacket(/*base_sequence=*/0, /*timestamp=*/kTimestamp);
   EXPECT_TRUE(tb.IsConsistent());
 }
 
@@ -516,7 +523,7 @@ TEST(RtcpPacketTest, TransportFeedbackPadding) {
   feedback.SetBase(0, Timestamp::Zero());
   EXPECT_TRUE(feedback.AddReceivedPacket(0, Timestamp::Zero()));
 
-  rtc::Buffer packet = feedback.Build();
+  Buffer packet = feedback.Build();
   EXPECT_EQ(kExpectedSizeWords * 4, packet.size());
   ASSERT_GT(kExpectedSizeWords * 4, kExpectedSizeBytes);
   for (size_t i = kExpectedSizeBytes; i < (kExpectedSizeWords * 4 - 1); ++i)
@@ -555,7 +562,7 @@ TEST(RtcpPacketTest, TransportFeedbackPaddingBackwardsCompatibility) {
   feedback.SetBase(0, Timestamp::Zero());
   EXPECT_TRUE(feedback.AddReceivedPacket(0, Timestamp::Zero()));
 
-  rtc::Buffer packet = feedback.Build();
+  Buffer packet = feedback.Build();
   EXPECT_EQ(kExpectedSizeWords * 4, packet.size());
   ASSERT_GT(kExpectedSizeWords * 4, kExpectedSizeBytes);
   for (size_t i = kExpectedSizeBytes; i < (kExpectedSizeWords * 4 - 1); ++i)
@@ -633,13 +640,13 @@ TEST(TransportFeedbackTest, ReportsMissingPackets) {
   feedback_builder.AddReceivedPacket(kBaseSeqNo + 3,
                                      kBaseTimestamp + TimeDelta::Millis(2));
 
-  EXPECT_THAT(
-      Parse(feedback_builder.Build()).GetAllPackets(),
-      ElementsAre(
-          Property(&TransportFeedback::ReceivedPacket::received, true),
-          Property(&TransportFeedback::ReceivedPacket::received, false),
-          Property(&TransportFeedback::ReceivedPacket::received, false),
-          Property(&TransportFeedback::ReceivedPacket::received, true)));
+  MockFunction<void(uint16_t, TimeDelta)> handler;
+  InSequence s;
+  EXPECT_CALL(handler, Call(kBaseSeqNo + 0, Ne(TimeDelta::PlusInfinity())));
+  EXPECT_CALL(handler, Call(kBaseSeqNo + 1, TimeDelta::PlusInfinity()));
+  EXPECT_CALL(handler, Call(kBaseSeqNo + 2, TimeDelta::PlusInfinity()));
+  EXPECT_CALL(handler, Call(kBaseSeqNo + 3, Ne(TimeDelta::PlusInfinity())));
+  Parse(feedback_builder.Build()).ForAllPackets(handler.AsStdFunction());
 }
 
 TEST(TransportFeedbackTest, ReportsMissingPacketsWithoutTimestamps) {
@@ -652,13 +659,13 @@ TEST(TransportFeedbackTest, ReportsMissingPacketsWithoutTimestamps) {
   // Packet losses indicated by jump in sequence number.
   feedback_builder.AddReceivedPacket(kBaseSeqNo + 3, Timestamp::Zero());
 
-  EXPECT_THAT(
-      Parse(feedback_builder.Build()).GetAllPackets(),
-      ElementsAre(
-          Property(&TransportFeedback::ReceivedPacket::received, true),
-          Property(&TransportFeedback::ReceivedPacket::received, false),
-          Property(&TransportFeedback::ReceivedPacket::received, false),
-          Property(&TransportFeedback::ReceivedPacket::received, true)));
+  MockFunction<void(uint16_t, TimeDelta)> handler;
+  InSequence s;
+  EXPECT_CALL(handler, Call(kBaseSeqNo + 0, Ne(TimeDelta::PlusInfinity())));
+  EXPECT_CALL(handler, Call(kBaseSeqNo + 1, TimeDelta::PlusInfinity()));
+  EXPECT_CALL(handler, Call(kBaseSeqNo + 2, TimeDelta::PlusInfinity()));
+  EXPECT_CALL(handler, Call(kBaseSeqNo + 3, Ne(TimeDelta::PlusInfinity())));
+  Parse(feedback_builder.Build()).ForAllPackets(handler.AsStdFunction());
 }
 }  // namespace
 }  // namespace webrtc

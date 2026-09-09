@@ -9,19 +9,19 @@
  */
 #include "api/test/metrics/metric.h"
 
-#include <string>
+#include "absl/strings/string_view.h"
 
 namespace webrtc {
 namespace test {
 
 absl::string_view ToString(Unit unit) {
   switch (unit) {
-    case Unit::kTimeMs:
-      return "TimeMs";
+    case Unit::kMilliseconds:
+      return "Milliseconds";
     case Unit::kPercent:
       return "Percent";
-    case Unit::kSizeInBytes:
-      return "SizeInBytes";
+    case Unit::kBytes:
+      return "Bytes";
     case Unit::kKilobitsPerSecond:
       return "KilobitsPerSecond";
     case Unit::kHertz:

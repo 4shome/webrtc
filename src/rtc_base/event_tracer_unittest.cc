@@ -15,22 +15,24 @@
 #include "rtc_base/trace_event.h"
 #include "test/gtest.h"
 
+namespace webrtc {
+
 namespace {
 
 class TestStatistics {
  public:
   void Reset() {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     events_logged_ = 0;
   }
 
   void Increment() {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     ++events_logged_;
   }
 
   int Count() const {
-    webrtc::MutexLock lock(&mutex_);
+    MutexLock lock(&mutex_);
     return events_logged_;
   }
 
@@ -41,37 +43,29 @@ class TestStatistics {
   }
 
  private:
-  mutable webrtc::Mutex mutex_;
+  mutable Mutex mutex_;
   int events_logged_ RTC_GUARDED_BY(mutex_) = 0;
 };
 
 }  // namespace
 
-namespace webrtc {
-
 TEST(EventTracerTest, EventTracerDisabled) {
-  { TRACE_EVENT0("test", "EventTracerDisabled"); }
+  { TRACE_EVENT0("webrtc-test", "EventTracerDisabled"); }
   EXPECT_FALSE(TestStatistics::Get()->Count());
   TestStatistics::Get()->Reset();
 }
 
-#if RTC_TRACE_EVENTS_ENABLED
+#if RTC_TRACE_EVENTS_ENABLED && !defined(RTC_USE_PERFETTO)
 TEST(EventTracerTest, ScopedTraceEvent) {
   SetupEventTracer(
       [](const char* /*name*/) {
-        return reinterpret_cast<const unsigned char*>("test");
+        return reinterpret_cast<const unsigned char*>("webrtc-test");
       },
-      [](char /*phase*/,
-         const unsigned char* /*category_enabled*/,
-         const char* /*name*/,
-         unsigned long long /*id*/,
-         int /*num_args*/,
-         const char** /*arg_names*/,
-         const unsigned char* /*arg_types*/,
+      [](char /*phase*/, const unsigned char* /*category_enabled*/,
+         const char* /*name*/, unsigned long long /*id*/, int /*num_args*/,
+         const char** /*arg_names*/, const unsigned char* /*arg_types*/,
          const unsigned long long* /*arg_values*/,
-         unsigned char /*flags*/) {
-        TestStatistics::Get()->Increment();
-      });
+         unsigned char /*flags*/) { TestStatistics::Get()->Increment(); });
   { TRACE_EVENT0("test", "ScopedTraceEvent"); }
   EXPECT_EQ(2, TestStatistics::Get()->Count());
   TestStatistics::Get()->Reset();

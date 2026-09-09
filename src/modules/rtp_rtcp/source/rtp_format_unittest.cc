@@ -10,8 +10,7 @@
 
 #include "modules/rtp_rtcp/source/rtp_format.h"
 
-#include <memory>
-#include <numeric>
+#include <vector>
 
 #include "absl/algorithm/container.h"
 #include "test/gmock.h"
@@ -230,6 +229,21 @@ TEST(RtpPacketizerSplitAboutEqually,
   // First packet needs two more extra bytes compared to last one,
   // so should have two less payload bytes.
   EXPECT_THAT(RtpPacketizer::SplitAboutEqually(20, limits), ElementsAre(9, 11));
+}
+
+TEST(RtpPacketizerSplitAboutEqually, RejectsZeroSize) {
+  RtpPacketizer::PayloadSizeLimits limits;
+  limits.max_payload_len = 1200;
+
+  EXPECT_THAT(RtpPacketizer::SplitAboutEqually(0, limits), IsEmpty());
+}
+
+TEST(RtpPacketizerSplitAboutEqually, RejectsHugeSize) {
+  RtpPacketizer::PayloadSizeLimits limits;
+  limits.max_payload_len = 1200;
+
+  EXPECT_THAT(RtpPacketizer::SplitAboutEqually(0xFFFF'FFFF, limits), IsEmpty());
+  EXPECT_THAT(RtpPacketizer::SplitAboutEqually(40'000'000, limits), IsEmpty());
 }
 
 TEST(RtpPacketizerSplitAboutEqually, RejectsZeroMaxPayloadLen) {

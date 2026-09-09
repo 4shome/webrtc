@@ -10,17 +10,25 @@
 
 #include "pc/ice_server_parsing.h"
 
-#include <stddef.h>
-
-#include <cctype>  // For std::isdigit.
+#include <array>
+#include <cctype>
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <tuple>
+#include <vector>
 
-#include "p2p/base/port_interface.h"
-#include "rtc_base/arraysize.h"
+#include "absl/strings/string_view.h"
+#include "api/candidate.h"
+#include "api/peer_connection_interface.h"
+#include "api/rtc_error.h"
+#include "p2p/base/p2p_constants.h"
+#include "p2p/base/port.h"
+#include "p2p/base/port_allocator.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/net_helper.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/string_encode.h"
 #include "rtc_base/string_to_number.h"
@@ -45,7 +53,8 @@ const char kRegNameCharacters[] =
     "!$&'()*+,;=";  // sub-delims
 
 // NOTE: Must be in the same order as the ServiceType enum.
-const char* kValidIceServiceTypes[] = {"stun", "stuns", "turn", "turns"};
+constexpr std::array<absl::string_view, 4> kValidIceServiceTypes{
+    "stun", "stuns", "turn", "turns"};
 
 // NOTE: A loop below assumes that the first value of this enum is 0 and all
 // other values are incremental.
@@ -57,7 +66,7 @@ enum class ServiceType {
   INVALID,   // Unknown.
 };
 static_assert(static_cast<size_t>(ServiceType::INVALID) ==
-                  arraysize(kValidIceServiceTypes),
+                  std::size(kValidIceServiceTypes),
               "kValidIceServiceTypes must have as many strings as ServiceType "
               "has values.");
 
@@ -81,7 +90,7 @@ std::tuple<ServiceType, absl::string_view> GetServiceTypeAndHostnameFromUri(
     RTC_LOG(LS_WARNING) << "Empty hostname in ICE URI: " << in_str;
     return {ServiceType::INVALID, ""};
   }
-  for (size_t i = 0; i < arraysize(kValidIceServiceTypes); ++i) {
+  for (size_t i = 0; i < std::size(kValidIceServiceTypes); ++i) {
     if (in_str.compare(0, colonpos, kValidIceServiceTypes[i]) == 0) {
       return {static_cast<ServiceType>(i), in_str.substr(colonpos + 1)};
     }
@@ -89,14 +98,14 @@ std::tuple<ServiceType, absl::string_view> GetServiceTypeAndHostnameFromUri(
   return {ServiceType::INVALID, ""};
 }
 
-absl::optional<int> ParsePort(absl::string_view in_str) {
+std::optional<int> ParsePort(absl::string_view in_str) {
   // Make sure port only contains digits. StringToNumber doesn't check this.
   for (const char& c : in_str) {
     if (!std::isdigit(static_cast<unsigned char>(c))) {
       return false;
     }
   }
-  return rtc::StringToNumber<int>(in_str);
+  return StringToNumber<int>(in_str);
 }
 
 // This method parses IPv6 and IPv4 literal strings, along with hostnames in
@@ -123,7 +132,7 @@ std::tuple<bool, absl::string_view, int> ParseHostnameAndPortFromString(
     }
     auto colonpos = in_str.find(':', closebracket);
     if (absl::string_view::npos != colonpos) {
-      if (absl::optional<int> opt_port =
+      if (std::optional<int> opt_port =
               ParsePort(in_str.substr(closebracket + 2))) {
         port = *opt_port;
       } else {
@@ -135,7 +144,7 @@ std::tuple<bool, absl::string_view, int> ParseHostnameAndPortFromString(
     // IPv4address or reg-name syntax
     auto colonpos = in_str.find(':');
     if (absl::string_view::npos != colonpos) {
-      if (absl::optional<int> opt_port =
+      if (std::optional<int> opt_port =
               ParsePort(in_str.substr(colonpos + 1))) {
         port = *opt_port;
       } else {
@@ -155,11 +164,10 @@ std::tuple<bool, absl::string_view, int> ParseHostnameAndPortFromString(
 
 // Adds a STUN or TURN server to the appropriate list,
 // by parsing `url` and using the username/password in `server`.
-RTCErrorType ParseIceServerUrl(
-    const PeerConnectionInterface::IceServer& server,
-    absl::string_view url,
-    cricket::ServerAddresses* stun_servers,
-    std::vector<cricket::RelayServerConfig>* turn_servers) {
+RTCError ParseIceServerUrl(const PeerConnectionInterface::IceServer& server,
+                           absl::string_view url,
+                           ServerAddresses* stun_servers,
+                           std::vector<RelayServerConfig>* turn_servers) {
   // RFC 7064
   // stunURI       = scheme ":" host [ ":" port ]
   // scheme        = "stun" / "stuns"
@@ -177,106 +185,138 @@ RTCErrorType ParseIceServerUrl(
 
   RTC_DCHECK(stun_servers != nullptr);
   RTC_DCHECK(turn_servers != nullptr);
-  cricket::ProtocolType turn_transport_type = cricket::PROTO_UDP;
+  ProtocolType turn_transport_type = PROTO_UDP;
   RTC_DCHECK(!url.empty());
-  std::vector<absl::string_view> tokens = rtc::split(url, '?');
+  std::vector<absl::string_view> tokens = split(url, '?');
   absl::string_view uri_without_transport = tokens[0];
   // Let's look into transport= param, if it exists.
+  bool transport_given_explicitly = false;
   if (tokens.size() == kTurnTransportTokensNum) {  // ?transport= is present.
-    std::vector<absl::string_view> transport_tokens =
-        rtc::split(tokens[1], '=');
+    std::vector<absl::string_view> transport_tokens = split(tokens[1], '=');
     if (transport_tokens[0] != kTransport) {
-      RTC_LOG(LS_WARNING) << "Invalid transport parameter key.";
-      return RTCErrorType::SYNTAX_ERROR;
+      return RTC_LOG_ERROR(
+          RTCError(RTCErrorType::SYNTAX_ERROR)
+          << "ICE server parsing failed: Invalid transport parameter key.");
     }
     if (transport_tokens.size() < 2) {
-      RTC_LOG(LS_WARNING) << "Transport parameter missing value.";
-      return RTCErrorType::SYNTAX_ERROR;
+      return RTC_LOG_ERROR(
+          RTCError(RTCErrorType::SYNTAX_ERROR)
+          << "ICE server parsing failed: Transport parameter missing value.");
     }
 
-    absl::optional<cricket::ProtocolType> proto =
-        cricket::StringToProto(transport_tokens[1]);
-    if (!proto ||
-        (*proto != cricket::PROTO_UDP && *proto != cricket::PROTO_TCP)) {
-      RTC_LOG(LS_WARNING) << "Transport parameter should always be udp or tcp.";
-      return RTCErrorType::SYNTAX_ERROR;
+    std::optional<ProtocolType> proto = StringToProto(transport_tokens[1]);
+    if (!proto || (*proto != PROTO_UDP && *proto != PROTO_TCP)) {
+      return RTC_LOG_ERROR(RTCError(RTCErrorType::SYNTAX_ERROR)
+                           << "ICE server parsing failed: Transport parameter "
+                              "should always be udp or tcp.");
     }
     turn_transport_type = *proto;
+    transport_given_explicitly = true;
   }
 
   auto [service_type, hoststring] =
       GetServiceTypeAndHostnameFromUri(uri_without_transport);
   if (service_type == ServiceType::INVALID) {
-    RTC_LOG(LS_WARNING) << "Invalid transport parameter in ICE URI: " << url;
-    return RTCErrorType::SYNTAX_ERROR;
+    RTC_LOG(LS_ERROR) << "Invalid transport parameter in ICE URI: " << url;
+    return RTC_LOG_ERROR(
+        RTCError(RTCErrorType::SYNTAX_ERROR)
+        << "ICE server parsing failed: Invalid transport parameter in ICE URI");
   }
 
   // GetServiceTypeAndHostnameFromUri should never give an empty hoststring
   RTC_DCHECK(!hoststring.empty());
 
+  // stun with ?transport (or any ?) is not valid.
+  if ((service_type == ServiceType::STUN ||
+       service_type == ServiceType::STUNS) &&
+      tokens.size() > 1) {
+    return RTC_LOG_ERROR(
+        RTCError(RTCErrorType::SYNTAX_ERROR)
+        << "ICE server parsing failed: Invalid stun url with query parameters");
+  }
+
   int default_port = kDefaultStunPort;
   if (service_type == ServiceType::TURNS) {
     default_port = kDefaultStunTlsPort;
-    turn_transport_type = cricket::PROTO_TLS;
+    turn_transport_type = PROTO_TLS;
+    // When transport is given explicitly, the default transport is not
+    // specified in the RFC, but it's long-standing behavior to use TLS.
+    if (!transport_given_explicitly || turn_transport_type == PROTO_TCP) {
+      turn_transport_type = PROTO_TLS;
+    } else if (turn_transport_type == PROTO_UDP) {
+      turn_transport_type = PROTO_DTLS;
+    }
   }
 
   if (hoststring.find('@') != absl::string_view::npos) {
-    RTC_LOG(LS_WARNING) << "Invalid url: " << uri_without_transport;
-    RTC_LOG(LS_WARNING)
-        << "Note that user-info@ in turn:-urls is long-deprecated.";
-    return RTCErrorType::SYNTAX_ERROR;
+    RTC_LOG(LS_ERROR) << "Invalid url with long deprecated user@host syntax: "
+                      << uri_without_transport;
+    return RTC_LOG_ERROR(RTCError(RTCErrorType::SYNTAX_ERROR)
+                         << "ICE server parsing failed: Invalid url with long "
+                            "deprecated user@host syntax");
   }
 
   auto [success, address, port] =
       ParseHostnameAndPortFromString(hoststring, default_port);
   if (!success) {
-    RTC_LOG(LS_WARNING) << "Invalid hostname format: " << uri_without_transport;
-    return RTCErrorType::SYNTAX_ERROR;
+    RTC_LOG(LS_ERROR) << "Invalid hostname format: " << uri_without_transport;
+    return RTC_LOG_ERROR(
+        RTCError(RTCErrorType::SYNTAX_ERROR)
+        << "ICE server parsing failed: Invalid hostname format");
   }
 
   if (port <= 0 || port > 0xffff) {
-    RTC_LOG(LS_WARNING) << "Invalid port: " << port;
-    return RTCErrorType::SYNTAX_ERROR;
+    RTC_LOG(LS_ERROR) << "Invalid port: " << port;
+    return RTC_LOG_ERROR(RTCError(RTCErrorType::SYNTAX_ERROR)
+                         << "ICE server parsing failed: Invalid port");
   }
 
   switch (service_type) {
     case ServiceType::STUN:
     case ServiceType::STUNS:
-      stun_servers->insert(rtc::SocketAddress(address, port));
+      stun_servers->insert(SocketAddress(address, port));
       break;
     case ServiceType::TURN:
     case ServiceType::TURNS: {
       if (server.username.empty() || server.password.empty()) {
         // The WebRTC spec requires throwing an InvalidAccessError when username
         // or credential are ommitted; this is the native equivalent.
-        RTC_LOG(LS_WARNING) << "TURN server with empty username or password";
-        return RTCErrorType::INVALID_PARAMETER;
+        return RTC_LOG_ERROR(
+            RTCError(RTCErrorType::INVALID_PARAMETER)
+            << "ICE server parsing failed: TURN server with empty "
+               "username or password");
+      }
+      // RFC 8489 limits the size of the STUN username field to 509 characters.
+      if (server.username.size() > kMaxTurnUsernameLength) {
+        return RTC_LOG_ERROR(
+            RTCError(RTCErrorType::INVALID_PARAMETER)
+            << "ICE server parsing failed: TURN server username is too long");
       }
       // If the hostname field is not empty, then the server address must be
       // the resolved IP for that host, the hostname is needed later for TLS
       // handshake (SNI and Certificate verification).
       absl::string_view hostname =
           server.hostname.empty() ? address : server.hostname;
-      rtc::SocketAddress socket_address(hostname, port);
+      SocketAddress socket_address(hostname, port);
       if (!server.hostname.empty()) {
-        rtc::IPAddress ip;
+        IPAddress ip;
         if (!IPFromString(address, &ip)) {
           // When hostname is set, the server address must be a
           // resolved ip address.
-          RTC_LOG(LS_WARNING)
-              << "IceServer has hostname field set, but URI does not "
-                 "contain an IP address.";
-          return RTCErrorType::INVALID_PARAMETER;
+          return RTC_LOG_ERROR(
+              RTCError(RTCErrorType::INVALID_PARAMETER)
+              << "ICE server parsing failed: IceServer has hostname field "
+                 "set, but URI does not contain an IP address.");
         }
         socket_address.SetResolvedIP(ip);
       }
-      cricket::RelayServerConfig config =
-          cricket::RelayServerConfig(socket_address, server.username,
-                                     server.password, turn_transport_type);
+      RelayServerConfig config =
+          RelayServerConfig(socket_address, server.username, server.password,
+                            turn_transport_type);
       if (server.tls_cert_policy ==
           PeerConnectionInterface::kTlsCertPolicyInsecureNoCheck) {
         config.tls_cert_policy =
-            cricket::TlsCertPolicy::TLS_CERT_POLICY_INSECURE_NO_CHECK;
+            TlsCertPolicy::TLS_CERT_POLICY_INSECURE_NO_CHECK;
       }
       config.tls_alpn_protocols = server.tls_alpn_protocols;
       config.tls_elliptic_curves = server.tls_elliptic_curves;
@@ -287,51 +327,75 @@ RTCErrorType ParseIceServerUrl(
     default:
       // We shouldn't get to this point with an invalid service_type, we should
       // have returned an error already.
-      RTC_DCHECK_NOTREACHED() << "Unexpected service type";
-      return RTCErrorType::INTERNAL_ERROR;
+      return RTC_LOG_ERROR(
+          RTCError(RTCErrorType::INTERNAL_ERROR)
+          << "ICE server parsing failed: Unexpected service type");
   }
-  return RTCErrorType::NONE;
+  return RTCError::OK();
 }
 
 }  // namespace
 
-RTCErrorType ParseIceServers(
+RTCError ParseIceServersOrError(
     const PeerConnectionInterface::IceServers& servers,
-    cricket::ServerAddresses* stun_servers,
-    std::vector<cricket::RelayServerConfig>* turn_servers) {
+    ServerAddresses* stun_servers,
+    std::vector<RelayServerConfig>* turn_servers) {
   for (const PeerConnectionInterface::IceServer& server : servers) {
     if (!server.urls.empty()) {
       for (const std::string& url : server.urls) {
         if (url.empty()) {
-          RTC_LOG(LS_WARNING) << "Empty uri.";
-          return RTCErrorType::SYNTAX_ERROR;
+          return RTC_LOG_ERROR(RTCError(RTCErrorType::SYNTAX_ERROR)
+                               << "ICE server parsing failed: Empty uri.");
         }
-        RTCErrorType err =
+        RTCError err =
             ParseIceServerUrl(server, url, stun_servers, turn_servers);
-        if (err != RTCErrorType::NONE) {
+        if (!err.ok()) {
           return err;
         }
       }
     } else if (!server.uri.empty()) {
       // Fallback to old .uri if new .urls isn't present.
-      RTCErrorType err =
+      RTCError err =
           ParseIceServerUrl(server, server.uri, stun_servers, turn_servers);
-      if (err != RTCErrorType::NONE) {
+
+      if (!err.ok()) {
         return err;
       }
     } else {
-      RTC_LOG(LS_WARNING) << "Empty uri.";
-      return RTCErrorType::SYNTAX_ERROR;
+      return RTC_LOG_ERROR(RTCError(RTCErrorType::SYNTAX_ERROR)
+                           << "ICE server parsing failed: Empty uri.");
     }
   }
-  // Candidates must have unique priorities, so that connectivity checks
-  // are performed in a well-defined order.
-  int priority = static_cast<int>(turn_servers->size() - 1);
-  for (cricket::RelayServerConfig& turn_server : *turn_servers) {
-    // First in the list gets highest priority.
-    turn_server.priority = priority--;
+  return RTCError::OK();
+}
+
+RTCError ParseAndValidateIceServersFromConfiguration(
+    const PeerConnectionInterface::RTCConfiguration& configuration,
+    ServerAddresses& stun_servers,
+    std::vector<RelayServerConfig>& turn_servers) {
+  RTC_DCHECK(stun_servers.empty());
+  RTC_DCHECK(turn_servers.empty());
+  RTCError err = ParseIceServersOrError(configuration.servers, &stun_servers,
+                                        &turn_servers);
+  if (!err.ok()) {
+    return err;
   }
-  return RTCErrorType::NONE;
+
+  // Restrict number of TURN servers.
+  if (turn_servers.size() > kMaxTurnServers) {
+    RTC_LOG(LS_WARNING) << "Number of configured TURN servers is "
+                        << turn_servers.size()
+                        << " which exceeds the maximum allowed number of "
+                        << kMaxTurnServers;
+    turn_servers.resize(kMaxTurnServers);
+  }
+
+  // Add the turn logging id to all turn servers
+  for (RelayServerConfig& turn_server : turn_servers) {
+    turn_server.turn_logging_id = configuration.turn_logging_id;
+  }
+
+  return RTCError::OK();
 }
 
 }  // namespace webrtc

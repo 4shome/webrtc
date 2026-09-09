@@ -13,20 +13,22 @@
 #include <memory>
 #include <string>
 
+#include "api/field_trials.h"
+#include "api/field_trials_view.h"
 #include "api/units/time_delta.h"
-#include "rtc_base/checks.h"
+#include "api/video_codecs/video_encoder.h"
 #include "rtc_base/event.h"
 #include "rtc_base/task_queue_for_test.h"
-#include "test/field_trial.h"
+#include "test/create_test_field_trials.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 namespace {
-static const int kFramerate = 30;
-static const int kLowQp = 15;
-static const int kHighQp = 40;
-static const int kMinFramesNeededToScale = 60;  // From quality_scaler.cc.
-static constexpr TimeDelta kDefaultTimeout = TimeDelta::Millis(150);
+constexpr int kFramerate = 30;
+constexpr int kLowQp = 15;
+constexpr int kHighQp = 40;
+constexpr int kMinFramesNeededToScale = 60;  // From quality_scaler.cc.
+constexpr TimeDelta kDefaultTimeout = TimeDelta::Millis(150);
 }  // namespace
 
 class FakeQpUsageHandler : public QualityScalerQpUsageHandlerInterface {
@@ -44,7 +46,7 @@ class FakeQpUsageHandler : public QualityScalerQpUsageHandlerInterface {
     event.Set();
   }
 
-  rtc::Event event;
+  Event event;
   int adapt_up_events_ = 0;
   int adapt_down_events_ = 0;
 };
@@ -53,8 +55,9 @@ class FakeQpUsageHandler : public QualityScalerQpUsageHandlerInterface {
 class QualityScalerUnderTest : public QualityScaler {
  public:
   explicit QualityScalerUnderTest(QualityScalerQpUsageHandlerInterface* handler,
-                                  VideoEncoder::QpThresholds thresholds)
-      : QualityScaler(handler, thresholds, 5) {}
+                                  VideoEncoder::QpThresholds thresholds,
+                                  const FieldTrialsView& field_trials)
+      : QualityScaler(handler, thresholds, field_trials, 5) {}
 };
 
 class QualityScalerTest : public ::testing::Test,
@@ -69,14 +72,14 @@ class QualityScalerTest : public ::testing::Test,
   };
 
   QualityScalerTest()
-      : scoped_field_trial_(GetParam()),
+      : field_trials_(CreateTestFieldTrials(GetParam())),
         task_queue_("QualityScalerTestQueue"),
         handler_(std::make_unique<FakeQpUsageHandler>()) {
-    task_queue_.SendTask(
-        [this] {
-          qs_ = std::unique_ptr<QualityScaler>(new QualityScalerUnderTest(
-              handler_.get(), VideoEncoder::QpThresholds(kLowQp, kHighQp)));
-        });
+    task_queue_.SendTask([this] {
+      qs_ = std::unique_ptr<QualityScaler>(new QualityScalerUnderTest(
+          handler_.get(), VideoEncoder::QpThresholds(kLowQp, kHighQp),
+          field_trials_));
+    });
   }
 
   ~QualityScalerTest() override {
@@ -105,7 +108,7 @@ class QualityScalerTest : public ::testing::Test,
     }
   }
 
-  test::ScopedFieldTrials scoped_field_trial_;
+  FieldTrials field_trials_;
   TaskQueueForTest task_queue_;
   std::unique_ptr<QualityScaler> qs_;
   std::unique_ptr<FakeQpUsageHandler> handler_;

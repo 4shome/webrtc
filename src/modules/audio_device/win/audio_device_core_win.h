@@ -11,14 +11,9 @@
 #ifndef MODULES_AUDIO_DEVICE_WIN_AUDIO_DEVICE_CORE_WIN_H_
 #define MODULES_AUDIO_DEVICE_WIN_AUDIO_DEVICE_CORE_WIN_H_
 
-#if (_MSC_VER >= 1400)  // only include for VS 2005 and higher
+#include <wmcodecdsp.h>  // CLSID_CWMAudioAEC
+//(must be before audioclient.h)
 
-#include "rtc_base/win32.h"
-
-#include "modules/audio_device/audio_device_generic.h"
-
-#include <wmcodecdsp.h>   // CLSID_CWMAudioAEC
-                          // (must be before audioclient.h)
 #include <audioclient.h>  // WASAPI
 #include <audiopolicy.h>
 #include <avrt.h>  // Avrt
@@ -27,8 +22,10 @@
 #include <mmdeviceapi.h>  // MMDevice
 
 #include "api/scoped_refptr.h"
+#include "modules/audio_device/audio_device_generic.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/win/scoped_com_initializer.h"
+#include "rtc_base/win32.h"
 
 // Use Multimedia Class Scheduler Service (MMCSS) to boost the thread priority
 #pragma comment(lib, "avrt.lib")
@@ -239,8 +236,8 @@ class AudioDeviceWindowsCore : public AudioDeviceGeneric {
   ISimpleAudioVolume* _ptrRenderSimpleVolume;
 
   // DirectX Media Object (DMO) for the built-in AEC.
-  rtc::scoped_refptr<IMediaObject> _dmo;
-  rtc::scoped_refptr<IMediaBuffer> _mediaBuffer;
+  scoped_refptr<IMediaObject> _dmo;
+  scoped_refptr<IMediaBuffer> _mediaBuffer;
   bool _builtInAecEnabled;
 
   HANDLE _hRenderSamplesReadyEvent;
@@ -292,8 +289,6 @@ class AudioDeviceWindowsCore : public AudioDeviceGeneric {
   uint16_t _inputDeviceIndex;
   uint16_t _outputDeviceIndex;
 };
-
-#endif  // #if (_MSC_VER >= 1400)
 
 }  // namespace webrtc
 

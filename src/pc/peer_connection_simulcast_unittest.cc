@@ -9,17 +9,15 @@
  */
 
 #include <algorithm>
+#include <cstring>
 #include <iterator>
-#include <map>
 #include <memory>
-#include <ostream>  // no-presubmit-check TODO(webrtc:8982)
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/string_view.h"
-#include "api/audio/audio_mixer.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/create_peerconnection_factory.h"
@@ -32,27 +30,32 @@
 #include "api/rtp_transceiver_direction.h"
 #include "api/rtp_transceiver_interface.h"
 #include "api/scoped_refptr.h"
-#include "api/uma_metrics.h"
 #include "api/video/video_codec_constants.h"
-#include "api/video_codecs/builtin_video_decoder_factory.h"
-#include "api/video_codecs/builtin_video_encoder_factory.h"
+#include "api/video_codecs/video_decoder_factory_template.h"
+#include "api/video_codecs/video_decoder_factory_template_dav1d_adapter.h"
+#include "api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h"
+#include "api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h"
+#include "api/video_codecs/video_decoder_factory_template_open_h264_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template.h"
+#include "api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template_open_h264_adapter.h"
 #include "media/base/rid_description.h"
 #include "media/base/stream_params.h"
-#include "modules/audio_device/include/audio_device.h"
-#include "modules/audio_processing/include/audio_processing.h"
-#include "pc/channel_interface.h"
 #include "pc/peer_connection_wrapper.h"
 #include "pc/session_description.h"
 #include "pc/simulcast_description.h"
 #include "pc/test/fake_audio_capture_module.h"
 #include "pc/test/mock_peer_connection_observers.h"
+#include "pc/test/simulcast_layer_util.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/strings/string_builder.h"
 #include "rtc_base/thread.h"
-#include "rtc_base/unique_id_generator.h"
-#include "system_wrappers/include/metrics.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+
+namespace webrtc {
 
 using ::testing::Contains;
 using ::testing::Each;
@@ -61,82 +64,53 @@ using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::Field;
 using ::testing::IsEmpty;
+using ::testing::Le;
 using ::testing::Ne;
+using ::testing::NotNull;
 using ::testing::Pair;
 using ::testing::Property;
 using ::testing::SizeIs;
-
-using cricket::MediaContentDescription;
-using cricket::RidDescription;
-using cricket::SimulcastDescription;
-using cricket::SimulcastLayer;
-using cricket::StreamParams;
-
-namespace cricket {
-
-std::ostream& operator<<(  // no-presubmit-check TODO(webrtc:8982)
-    std::ostream& os,      // no-presubmit-check TODO(webrtc:8982)
-    const SimulcastLayer& layer) {
-  if (layer.is_paused) {
-    os << "~";
-  }
-  return os << layer.rid;
-}
-
-}  // namespace cricket
-
-namespace {
-
-std::vector<SimulcastLayer> CreateLayers(const std::vector<std::string>& rids,
-                                         const std::vector<bool>& active) {
-  RTC_DCHECK_EQ(rids.size(), active.size());
-  std::vector<SimulcastLayer> result;
-  absl::c_transform(rids, active, std::back_inserter(result),
-                    [](const std::string& rid, bool is_active) {
-                      return SimulcastLayer(rid, !is_active);
-                    });
-  return result;
-}
-std::vector<SimulcastLayer> CreateLayers(const std::vector<std::string>& rids,
-                                         bool active) {
-  return CreateLayers(rids, std::vector<bool>(rids.size(), active));
-}
-
-#if RTC_METRICS_ENABLED
-std::vector<SimulcastLayer> CreateLayers(int num_layers, bool active) {
-  rtc::UniqueStringGenerator rid_generator;
-  std::vector<std::string> rids;
-  for (int i = 0; i < num_layers; ++i) {
-    rids.push_back(rid_generator());
-  }
-  return CreateLayers(rids, active);
-}
-#endif
-
-}  // namespace
-
-namespace webrtc {
+using ::testing::StartsWith;
 
 class PeerConnectionSimulcastTests : public ::testing::Test {
  public:
   PeerConnectionSimulcastTests()
-      : pc_factory_(
-            CreatePeerConnectionFactory(rtc::Thread::Current(),
-                                        rtc::Thread::Current(),
-                                        rtc::Thread::Current(),
-                                        FakeAudioCaptureModule::Create(),
-                                        CreateBuiltinAudioEncoderFactory(),
-                                        CreateBuiltinAudioDecoderFactory(),
-                                        CreateBuiltinVideoEncoderFactory(),
-                                        CreateBuiltinVideoDecoderFactory(),
-                                        nullptr,
-                                        nullptr)) {}
+      : pc_factory_(CreatePeerConnectionFactory(
+            Thread::Current(),
+            Thread::Current(),
+            Thread::Current(),
+            FakeAudioCaptureModule::Create(),
+            CreateBuiltinAudioEncoderFactory(),
+            CreateBuiltinAudioDecoderFactory(),
+            std::make_unique<
+                VideoEncoderFactoryTemplate<LibvpxVp8EncoderTemplateAdapter,
+                                            LibvpxVp9EncoderTemplateAdapter,
+                                            OpenH264EncoderTemplateAdapter,
+                                            LibaomAv1EncoderTemplateAdapter>>(),
+            std::make_unique<
+                VideoDecoderFactoryTemplate<LibvpxVp8DecoderTemplateAdapter,
+                                            LibvpxVp9DecoderTemplateAdapter,
+                                            OpenH264DecoderTemplateAdapter,
+                                            Dav1dDecoderTemplateAdapter>>(),
+            nullptr,
+            nullptr,
+            nullptr,
+            CreateTestFieldTrialsPtr())) {}
 
-  rtc::scoped_refptr<PeerConnectionInterface> CreatePeerConnection(
+  scoped_refptr<PeerConnectionInterface> CreatePeerConnection(
       MockPeerConnectionObserver* observer) {
+    return CreatePeerConnection(observer, "");
+  }
+
+  scoped_refptr<PeerConnectionInterface> CreatePeerConnection(
+      MockPeerConnectionObserver* observer,
+      absl::string_view field_trials) {
     PeerConnectionInterface::RTCConfiguration config;
     config.sdp_semantics = SdpSemantics::kUnifiedPlan;
     PeerConnectionDependencies pcd(observer);
+    if (!field_trials.empty()) {
+      pcd.trials = CreateTestFieldTrialsPtr(field_trials);
+    }
     auto result =
         pc_factory_->CreatePeerConnectionOrError(config, std::move(pcd));
     EXPECT_TRUE(result.ok());
@@ -145,8 +119,13 @@ class PeerConnectionSimulcastTests : public ::testing::Test {
   }
 
   std::unique_ptr<PeerConnectionWrapper> CreatePeerConnectionWrapper() {
+    return CreatePeerConnectionWrapper("");
+  }
+
+  std::unique_ptr<PeerConnectionWrapper> CreatePeerConnectionWrapper(
+      absl::string_view field_trials) {
     auto observer = std::make_unique<MockPeerConnectionObserver>();
-    auto pc = CreatePeerConnection(observer.get());
+    auto pc = CreatePeerConnection(observer.get(), field_trials);
     return std::make_unique<PeerConnectionWrapper>(pc_factory_, pc,
                                                    std::move(observer));
   }
@@ -154,12 +133,14 @@ class PeerConnectionSimulcastTests : public ::testing::Test {
   void ExchangeOfferAnswer(PeerConnectionWrapper* local,
                            PeerConnectionWrapper* remote,
                            const std::vector<SimulcastLayer>& answer_layers) {
-    auto offer = local->CreateOfferAndSetAsLocal();
+    std::unique_ptr<SessionDescriptionInterface> offer =
+        local->CreateOfferAndSetAsLocal();
     // Remove simulcast as the second peer connection won't support it.
     RemoveSimulcast(offer.get());
     std::string err;
     EXPECT_TRUE(remote->SetRemoteDescription(std::move(offer), &err)) << err;
-    auto answer = remote->CreateAnswerAndSetAsLocal();
+    std::unique_ptr<SessionDescriptionInterface> answer =
+        remote->CreateAnswerAndSetAsLocal();
     // Setup the answer to look like a server response.
     auto mcd_answer = answer->description()->contents()[0].media_description();
     auto& receive_layers = mcd_answer->simulcast_description().receive_layers();
@@ -169,31 +150,12 @@ class PeerConnectionSimulcastTests : public ::testing::Test {
     EXPECT_TRUE(local->SetRemoteDescription(std::move(answer), &err)) << err;
   }
 
-  RtpTransceiverInit CreateTransceiverInit(
-      const std::vector<SimulcastLayer>& layers) {
-    RtpTransceiverInit init;
-    for (const SimulcastLayer& layer : layers) {
-      RtpEncodingParameters encoding;
-      encoding.rid = layer.rid;
-      encoding.active = !layer.is_paused;
-      init.send_encodings.push_back(encoding);
-    }
-    return init;
-  }
-
-  rtc::scoped_refptr<RtpTransceiverInterface> AddTransceiver(
+  scoped_refptr<RtpTransceiverInterface> AddTransceiver(
       PeerConnectionWrapper* pc,
       const std::vector<SimulcastLayer>& layers,
-      cricket::MediaType media_type = cricket::MEDIA_TYPE_VIDEO) {
+      MediaType media_type = MediaType::VIDEO) {
     auto init = CreateTransceiverInit(layers);
     return pc->AddTransceiver(media_type, init);
-  }
-
-  SimulcastDescription RemoveSimulcast(SessionDescriptionInterface* sd) {
-    auto mcd = sd->description()->contents()[0].media_description();
-    auto result = mcd->simulcast_description();
-    mcd->set_simulcast_description(SimulcastDescription());
-    return result;
   }
 
   void AddRequestToReceiveSimulcast(const std::vector<SimulcastLayer>& layers,
@@ -208,7 +170,7 @@ class PeerConnectionSimulcastTests : public ::testing::Test {
   }
 
   void ValidateTransceiverParameters(
-      rtc::scoped_refptr<RtpTransceiverInterface> transceiver,
+      scoped_refptr<RtpTransceiverInterface> transceiver,
       const std::vector<SimulcastLayer>& layers) {
     auto parameters = transceiver->sender()->GetParameters();
     std::vector<SimulcastLayer> result_layers;
@@ -220,27 +182,8 @@ class PeerConnectionSimulcastTests : public ::testing::Test {
   }
 
  private:
-  rtc::scoped_refptr<PeerConnectionFactoryInterface> pc_factory_;
+  scoped_refptr<PeerConnectionFactoryInterface> pc_factory_;
 };
-
-#if RTC_METRICS_ENABLED
-// This class is used to test the metrics emitted for simulcast.
-class PeerConnectionSimulcastMetricsTests
-    : public PeerConnectionSimulcastTests,
-      public ::testing::WithParamInterface<int> {
- protected:
-  PeerConnectionSimulcastMetricsTests() { webrtc::metrics::Reset(); }
-
-  std::map<int, int> LocalDescriptionSamples() {
-    return metrics::Samples(
-        "WebRTC.PeerConnection.Simulcast.ApplyLocalDescription");
-  }
-  std::map<int, int> RemoteDescriptionSamples() {
-    return metrics::Samples(
-        "WebRTC.PeerConnection.Simulcast.ApplyRemoteDescription");
-  }
-};
-#endif
 
 // Validates that RIDs are supported arguments when adding a transceiver.
 TEST_F(PeerConnectionSimulcastTests, CanCreateTransceiverWithRid) {
@@ -268,7 +211,7 @@ TEST_F(PeerConnectionSimulcastTests, RidsAreAutogeneratedIfNotProvided) {
   for (RtpEncodingParameters& parameters : init.send_encodings) {
     parameters.rid = "";
   }
-  auto transceiver = pc->AddTransceiver(cricket::MEDIA_TYPE_VIDEO, init);
+  auto transceiver = pc->AddTransceiver(MediaType::VIDEO, init);
   auto parameters = transceiver->sender()->GetParameters();
   ASSERT_EQ(3u, parameters.encodings.size());
   EXPECT_THAT(parameters.encodings,
@@ -284,7 +227,7 @@ TEST_F(PeerConnectionSimulcastTests, MustSupplyAllOrNoRidsInSimulcast) {
   auto layers = CreateLayers({"f", "h", "remove"}, true);
   auto init = CreateTransceiverInit(layers);
   init.send_encodings[2].rid = "";
-  auto error = pc->AddTransceiver(cricket::MEDIA_TYPE_VIDEO, init);
+  auto error = pc->AddTransceiver(MediaType::VIDEO, init);
   EXPECT_EQ(RTCErrorType::INVALID_PARAMETER, error.error().type());
 }
 
@@ -294,7 +237,7 @@ TEST_F(PeerConnectionSimulcastTests, ChecksForIllegalRidValues) {
   auto pc = pc_wrapper->pc();
   auto layers = CreateLayers({"f", "h", "~q"}, true);
   auto init = CreateTransceiverInit(layers);
-  auto error = pc->AddTransceiver(cricket::MEDIA_TYPE_VIDEO, init);
+  auto error = pc->AddTransceiver(MediaType::VIDEO, init);
   EXPECT_EQ(RTCErrorType::INVALID_PARAMETER, error.error().type());
 }
 
@@ -302,8 +245,9 @@ TEST_F(PeerConnectionSimulcastTests, ChecksForIllegalRidValues) {
 TEST_F(PeerConnectionSimulcastTests, SingleRidIsRemovedFromSessionDescription) {
   auto pc = CreatePeerConnectionWrapper();
   auto transceiver = AddTransceiver(pc.get(), CreateLayers({"1"}, true));
-  auto offer = pc->CreateOfferAndSetAsLocal();
-  ASSERT_TRUE(offer);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      pc->CreateOfferAndSetAsLocal();
+  ASSERT_THAT(offer, NotNull());
   auto contents = offer->description()->contents();
   ASSERT_EQ(1u, contents.size());
   EXPECT_THAT(contents[0].media_description()->streams(),
@@ -329,8 +273,8 @@ TEST_F(PeerConnectionSimulcastTests, SimulcastAppearsInSessionDescription) {
   std::vector<std::string> rids({"f", "h", "q"});
   auto layers = CreateLayers(rids, true);
   auto transceiver = AddTransceiver(pc.get(), layers);
-  auto offer = pc->CreateOffer();
-  ASSERT_TRUE(offer);
+  std::unique_ptr<SessionDescriptionInterface> offer = pc->CreateOffer();
+  ASSERT_THAT(offer, NotNull());
   auto contents = offer->description()->contents();
   ASSERT_EQ(1u, contents.size());
   auto content = contents[0];
@@ -359,7 +303,8 @@ TEST_F(PeerConnectionSimulcastTests, SimulcastLayersAreSetInSender) {
   auto remote = CreatePeerConnectionWrapper();
   auto layers = CreateLayers({"f", "h", "q"}, true);
   auto transceiver = AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      local->CreateOfferAndSetAsLocal();
   {
     SCOPED_TRACE("after create offer");
     ValidateTransceiverParameters(transceiver, layers);
@@ -368,7 +313,8 @@ TEST_F(PeerConnectionSimulcastTests, SimulcastLayersAreSetInSender) {
   auto simulcast = RemoveSimulcast(offer.get());
   std::string error;
   EXPECT_TRUE(remote->SetRemoteDescription(std::move(offer), &error)) << error;
-  auto answer = remote->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      remote->CreateAnswerAndSetAsLocal();
 
   // Setup an answer that mimics a server accepting simulcast.
   auto mcd_answer = answer->description()->contents()[0].media_description();
@@ -393,7 +339,8 @@ TEST_F(PeerConnectionSimulcastTests, PausedSimulcastLayersAreDisabledInSender) {
   auto server_layers = CreateLayers({"f", "h", "q"}, {true, false, false});
   RTC_DCHECK_EQ(layers.size(), server_layers.size());
   auto transceiver = AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      local->CreateOfferAndSetAsLocal();
   {
     SCOPED_TRACE("after create offer");
     ValidateTransceiverParameters(transceiver, layers);
@@ -403,7 +350,8 @@ TEST_F(PeerConnectionSimulcastTests, PausedSimulcastLayersAreDisabledInSender) {
   RemoveSimulcast(offer.get());
   std::string error;
   EXPECT_TRUE(remote->SetRemoteDescription(std::move(offer), &error)) << error;
-  auto answer = remote->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      remote->CreateAnswerAndSetAsLocal();
 
   // Setup an answer that mimics a server accepting simulcast.
   auto mcd_answer = answer->description()->contents()[0].media_description();
@@ -441,7 +389,8 @@ TEST_F(PeerConnectionSimulcastTests, RejectedSimulcastLayersAreDeactivated) {
   auto layers = CreateLayers({"1", "2", "3"}, true);
   auto expected_layers = CreateLayers({"2", "3"}, true);
   auto transceiver = AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      local->CreateOfferAndSetAsLocal();
   {
     SCOPED_TRACE("after create offer");
     ValidateTransceiverParameters(transceiver, layers);
@@ -450,7 +399,8 @@ TEST_F(PeerConnectionSimulcastTests, RejectedSimulcastLayersAreDeactivated) {
   auto removed_simulcast = RemoveSimulcast(offer.get());
   std::string error;
   EXPECT_TRUE(remote->SetRemoteDescription(std::move(offer), &error)) << error;
-  auto answer = remote->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      remote->CreateAnswerAndSetAsLocal();
   auto mcd_answer = answer->description()->contents()[0].media_description();
   // Setup the answer to look like a server response.
   // Remove one of the layers to reject it in the answer.
@@ -475,7 +425,8 @@ TEST_F(PeerConnectionSimulcastTests, ServerSendsOfferToReceiveSimulcast) {
   auto remote = CreatePeerConnectionWrapper();
   auto layers = CreateLayers({"f", "h", "q"}, true);
   AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      local->CreateOfferAndSetAsLocal();
   // Remove simulcast as a sender and set it up as a receiver.
   RemoveSimulcast(offer.get());
   AddRequestToReceiveSimulcast(layers, offer.get());
@@ -494,7 +445,8 @@ TEST_F(PeerConnectionSimulcastTests, TransceiverIsNotRecycledWithSimulcast) {
   auto remote = CreatePeerConnectionWrapper();
   auto layers = CreateLayers({"f", "h", "q"}, true);
   AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      local->CreateOfferAndSetAsLocal();
   // Remove simulcast as a sender and set it up as a receiver.
   RemoveSimulcast(offer.get());
   AddRequestToReceiveSimulcast(layers, offer.get());
@@ -547,20 +499,22 @@ TEST_F(PeerConnectionSimulcastTests,
   ValidateTransceiverParameters(transceiver, expected_layers);
 }
 
-// Tests that simulcast is disabled if the RID extension is not negotiated
-// regardless of if the RIDs and simulcast attribute were negotiated properly.
-TEST_F(PeerConnectionSimulcastTests, NegotiationDoesNotHaveRidExtension) {
+// Tests that a simulcast answer is rejected if the RID extension is not
+// negotiated.
+TEST_F(PeerConnectionSimulcastTests, NegotiationDoesNotHaveRidExtensionFails) {
   auto local = CreatePeerConnectionWrapper();
   auto remote = CreatePeerConnectionWrapper();
   auto layers = CreateLayers({"1", "2", "3"}, true);
   auto expected_layers = CreateLayers({"1"}, true);
   auto transceiver = AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      local->CreateOfferAndSetAsLocal();
   // Remove simulcast as the second peer connection won't support it.
   RemoveSimulcast(offer.get());
   std::string err;
   EXPECT_TRUE(remote->SetRemoteDescription(std::move(offer), &err)) << err;
-  auto answer = remote->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      remote->CreateAnswerAndSetAsLocal();
   // Setup the answer to look like a server response.
   // Drop the RID header extension.
   auto mcd_answer = answer->description()->contents()[0].media_description();
@@ -568,7 +522,7 @@ TEST_F(PeerConnectionSimulcastTests, NegotiationDoesNotHaveRidExtension) {
   for (const SimulcastLayer& layer : layers) {
     receive_layers.AddLayer(layer);
   }
-  cricket::RtpHeaderExtensions extensions;
+  RtpHeaderExtensions extensions;
   for (auto extension : mcd_answer->rtp_header_extensions()) {
     if (extension.uri != RtpExtension::kRidUri) {
       extensions.push_back(extension);
@@ -579,16 +533,14 @@ TEST_F(PeerConnectionSimulcastTests, NegotiationDoesNotHaveRidExtension) {
                                .receive_layers()
                                .GetAllLayers()
                                .size());
-  EXPECT_TRUE(local->SetRemoteDescription(std::move(answer), &err)) << err;
-  ValidateTransceiverParameters(transceiver, expected_layers);
+  EXPECT_FALSE(local->SetRemoteDescription(std::move(answer), &err)) << err;
 }
 
 TEST_F(PeerConnectionSimulcastTests, SimulcastAudioRejected) {
   auto local = CreatePeerConnectionWrapper();
   auto remote = CreatePeerConnectionWrapper();
   auto layers = CreateLayers({"1", "2", "3", "4"}, true);
-  auto transceiver =
-      AddTransceiver(local.get(), layers, cricket::MEDIA_TYPE_AUDIO);
+  auto transceiver = AddTransceiver(local.get(), layers, MediaType::AUDIO);
   // Should only have the first layer.
   auto parameters = transceiver->sender()->GetParameters();
   EXPECT_EQ(1u, parameters.encodings.size());
@@ -605,11 +557,13 @@ TEST_F(PeerConnectionSimulcastTests, SimulcastAudioRejected) {
 // Check that modifying the offer to remove simulcast and at the same
 // time leaving in a RID line does not cause an exception.
 TEST_F(PeerConnectionSimulcastTests, SimulcastSldModificationRejected) {
-  auto local = CreatePeerConnectionWrapper();
+  // Munging allowed: kUnknownModification (simulcast modification RID removal)
+  auto local = CreatePeerConnectionWrapper(
+      "WebRTC-NoSdpMangleAllowForTesting/Enabled,1/");
   auto remote = CreatePeerConnectionWrapper();
   auto layers = CreateLayers({"1", "2", "3"}, true);
   AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = local->CreateOffer();
   std::string as_string;
   EXPECT_TRUE(offer->ToString(&as_string));
   auto simulcast_marker = "a=rid:3 send\r\na=simulcast:send 1;2;3\r\n";
@@ -623,175 +577,58 @@ TEST_F(PeerConnectionSimulcastTests, SimulcastSldModificationRejected) {
   EXPECT_TRUE(local->SetLocalDescription(std::move(modified_offer)));
 }
 
-#if RTC_METRICS_ENABLED
-//
-// Checks the logged metrics when simulcast is not used.
-TEST_F(PeerConnectionSimulcastMetricsTests, NoSimulcastUsageIsLogged) {
+// Reproduces the bug reported by @ibc where RTP extension IDs are reassigned
+// to different URIs in subsequent offers, causing SetLocalDescription to fail.
+TEST_F(PeerConnectionSimulcastTests,
+       NoRtpExtensionIdReassignmentWhenAddingTransceiver) {
   auto local = CreatePeerConnectionWrapper();
-  auto remote = CreatePeerConnectionWrapper();
-  auto layers = CreateLayers(0, true);
+  auto layers = CreateLayers({"f", "h", "q"}, true);
+
+  // Add video transceiver with simulcast.
   AddTransceiver(local.get(), layers);
-  ExchangeOfferAnswer(local.get(), remote.get(), layers);
+  ASSERT_TRUE(local->CreateOfferAndSetAsLocal());
 
-  EXPECT_THAT(LocalDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 2)));
-  EXPECT_THAT(RemoteDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 2)));
+  // Set remote answer without header extensions.
+  std::string remote_answer_sdp =
+      "v=0\r\n"
+      "o=- 8403615332048243445 2 IN IP4 127.0.0.1\r\n"
+      "s=-\r\n"
+      "t=0 0\r\n"
+      "a=group:BUNDLE 0\r\n"
+      "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+      "c=IN IP4 0.0.0.0\r\n"
+      "a=mid:0\r\n"
+      "a=ice-ufrag:IZeV\r\n"
+      "a=ice-pwd:uaZhQD4rYM/Tta2qWBT1Bbt4\r\n"
+      "a=fingerprint:sha-256 "
+      "D8:6C:3D:FA:23:E2:2C:63:11:2D:D0:86:BE:C4:D0:65:F9:42:F7:1C:06:04:27:E6:"
+      "1C:2C:74:01:8D:50:67:23\r\n"
+      "a=setup:active\r\n"
+      "a=rtcp-mux\r\n"
+      "a=extmap:9 urn:ietf:params:rtp-hdrext:sdes:mid\r\n"
+      "a=extmap:10 urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id\r\n"
+      "a=extmap:11 urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id\r\n"
+      "a=extmap:2 "
+      "http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time\r\n"
+      "a=extmap:4 "
+      "http://www.ietf.org/id/"
+      "draft-holmer-rmcat-transport-wide-cc-extensions-01\r\n"
+      "a=extmap:3 urn:3gpp:video-orientation\r\n"
+      "a=extmap:1 urn:ietf:params:rtp-hdrext:toffset\r\n"
+      "a=extmap:5 "
+      "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay\r\n"
+      "a=rtpmap:96 VP8/90000\r\n";
+  // Answer recvonly.
+  ASSERT_TRUE(local->SetRemoteDescription(CreateSessionDescription(
+      SdpType::kAnswer, remote_answer_sdp + "a=recvonly\r\n")));
+
+  ASSERT_TRUE(local->CreateOfferAndSetAsLocal());
+  // Answer inactive.
+  ASSERT_TRUE(local->SetRemoteDescription(CreateSessionDescription(
+      SdpType::kAnswer, remote_answer_sdp + "a=inactive\r\n")));
+
+  // Add an audio transceiver.
+  local->AddAudioTrack("audio");
+  EXPECT_TRUE(local->CreateOfferAndSetAsLocal());
 }
-
-// Checks the logged metrics when spec-compliant simulcast is used.
-TEST_F(PeerConnectionSimulcastMetricsTests, SpecComplianceIsLogged) {
-  auto local = CreatePeerConnectionWrapper();
-  auto remote = CreatePeerConnectionWrapper();
-  auto layers = CreateLayers(3, true);
-  AddTransceiver(local.get(), layers);
-  ExchangeOfferAnswer(local.get(), remote.get(), layers);
-
-  // Expecting 2 invocations of each, because we have 2 peer connections.
-  // Only the local peer connection will be aware of simulcast.
-  // The remote peer connection will think that there is no simulcast.
-  EXPECT_THAT(LocalDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 1),
-                          Pair(kSimulcastApiVersionSpecCompliant, 1)));
-  EXPECT_THAT(RemoteDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 1),
-                          Pair(kSimulcastApiVersionSpecCompliant, 1)));
-}
-
-// Checks the logged metrics when and incoming request to send spec-compliant
-// simulcast is received from the remote party.
-TEST_F(PeerConnectionSimulcastMetricsTests, IncomingSimulcastIsLogged) {
-  auto local = CreatePeerConnectionWrapper();
-  auto remote = CreatePeerConnectionWrapper();
-  auto layers = CreateLayers(3, true);
-  AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOfferAndSetAsLocal();
-  EXPECT_THAT(LocalDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionSpecCompliant, 1)));
-
-  // Remove simulcast as a sender and set it up as a receiver.
-  RemoveSimulcast(offer.get());
-  AddRequestToReceiveSimulcast(layers, offer.get());
-  std::string error;
-  EXPECT_TRUE(remote->SetRemoteDescription(std::move(offer), &error)) << error;
-  EXPECT_THAT(RemoteDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionSpecCompliant, 1)));
-
-  auto transceiver = remote->pc()->GetTransceivers()[0];
-  transceiver->SetDirectionWithError(RtpTransceiverDirection::kSendRecv);
-  EXPECT_TRUE(remote->CreateAnswerAndSetAsLocal());
-  EXPECT_THAT(LocalDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionSpecCompliant, 2)));
-}
-
-// Checks that a spec-compliant simulcast offer that is rejected is logged.
-TEST_F(PeerConnectionSimulcastMetricsTests, RejectedSimulcastIsLogged) {
-  auto local = CreatePeerConnectionWrapper();
-  auto remote = CreatePeerConnectionWrapper();
-  auto layers = CreateLayers({"1", "2", "3"}, true);
-  AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOfferAndSetAsLocal();
-  EXPECT_THAT(LocalDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionSpecCompliant, 1)));
-  RemoveSimulcast(offer.get());
-  std::string error;
-  EXPECT_TRUE(remote->SetRemoteDescription(std::move(offer), &error)) << error;
-  EXPECT_THAT(RemoteDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 1)));
-
-  auto answer = remote->CreateAnswerAndSetAsLocal();
-  EXPECT_THAT(LocalDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 1),
-                          Pair(kSimulcastApiVersionSpecCompliant, 1)));
-  EXPECT_TRUE(local->SetRemoteDescription(std::move(answer), &error)) << error;
-  EXPECT_THAT(RemoteDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 2)));
-}
-
-// Checks the logged metrics when legacy munging simulcast technique is used.
-TEST_F(PeerConnectionSimulcastMetricsTests, LegacySimulcastIsLogged) {
-  auto local = CreatePeerConnectionWrapper();
-  auto remote = CreatePeerConnectionWrapper();
-  auto layers = CreateLayers(0, true);
-  AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOffer();
-  // Munge the SDP to set up legacy simulcast.
-  const std::string end_line = "\r\n";
-  std::string sdp;
-  offer->ToString(&sdp);
-  rtc::StringBuilder builder(sdp);
-  builder << "a=ssrc:1111 cname:slimshady" << end_line;
-  builder << "a=ssrc:2222 cname:slimshady" << end_line;
-  builder << "a=ssrc:3333 cname:slimshady" << end_line;
-  builder << "a=ssrc-group:SIM 1111 2222 3333" << end_line;
-
-  SdpParseError parse_error;
-  auto sd =
-      CreateSessionDescription(SdpType::kOffer, builder.str(), &parse_error);
-  ASSERT_TRUE(sd) << parse_error.line << parse_error.description;
-  std::string error;
-  EXPECT_TRUE(local->SetLocalDescription(std::move(sd), &error)) << error;
-  EXPECT_THAT(LocalDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionLegacy, 1)));
-  EXPECT_TRUE(remote->SetRemoteDescription(std::move(offer), &error)) << error;
-  EXPECT_THAT(RemoteDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 1)));
-  auto answer = remote->CreateAnswerAndSetAsLocal();
-  EXPECT_THAT(LocalDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 1),
-                          Pair(kSimulcastApiVersionLegacy, 1)));
-  // Legacy simulcast is not signaled in remote description.
-  EXPECT_TRUE(local->SetRemoteDescription(std::move(answer), &error)) << error;
-  EXPECT_THAT(RemoteDescriptionSamples(),
-              ElementsAre(Pair(kSimulcastApiVersionNone, 2)));
-}
-
-// Checks that disabling simulcast is logged in the metrics.
-TEST_F(PeerConnectionSimulcastMetricsTests, SimulcastDisabledIsLogged) {
-  auto local = CreatePeerConnectionWrapper();
-  auto remote = CreatePeerConnectionWrapper();
-  auto layers = CreateLayers({"1", "2", "3"}, true);
-  AddTransceiver(local.get(), layers);
-  auto offer = local->CreateOfferAndSetAsLocal();
-  RemoveSimulcast(offer.get());
-  std::string error;
-  EXPECT_TRUE(remote->SetRemoteDescription(std::move(offer), &error)) << error;
-  auto answer = remote->CreateAnswerAndSetAsLocal();
-  EXPECT_TRUE(local->SetRemoteDescription(std::move(answer), &error)) << error;
-
-  EXPECT_EQ(1, metrics::NumSamples("WebRTC.PeerConnection.Simulcast.Disabled"));
-  EXPECT_EQ(1,
-            metrics::NumEvents("WebRTC.PeerConnection.Simulcast.Disabled", 1));
-}
-
-// Checks that the disabled metric is not logged if simulcast is not disabled.
-TEST_F(PeerConnectionSimulcastMetricsTests, SimulcastDisabledIsNotLogged) {
-  auto local = CreatePeerConnectionWrapper();
-  auto remote = CreatePeerConnectionWrapper();
-  auto layers = CreateLayers({"1", "2", "3"}, true);
-  AddTransceiver(local.get(), layers);
-  ExchangeOfferAnswer(local.get(), remote.get(), layers);
-
-  EXPECT_EQ(0, metrics::NumSamples("WebRTC.PeerConnection.Simulcast.Disabled"));
-}
-
-const int kMaxLayersInMetricsTest = 8;
-
-// Checks that the number of send encodings is logged in a metric.
-TEST_P(PeerConnectionSimulcastMetricsTests, NumberOfSendEncodingsIsLogged) {
-  auto local = CreatePeerConnectionWrapper();
-  auto num_layers = GetParam();
-  auto layers = CreateLayers(num_layers, true);
-  AddTransceiver(local.get(), layers);
-  EXPECT_EQ(1, metrics::NumSamples(
-                   "WebRTC.PeerConnection.Simulcast.NumberOfSendEncodings"));
-  EXPECT_EQ(1, metrics::NumEvents(
-                   "WebRTC.PeerConnection.Simulcast.NumberOfSendEncodings",
-                   num_layers));
-}
-
-INSTANTIATE_TEST_SUITE_P(NumberOfSendEncodings,
-                         PeerConnectionSimulcastMetricsTests,
-                         ::testing::Range(0, kMaxLayersInMetricsTest));
-#endif
 }  // namespace webrtc

@@ -11,28 +11,23 @@
 #ifndef CALL_RTP_TRANSPORT_CONFIG_H_
 #define CALL_RTP_TRANSPORT_CONFIG_H_
 
-#include <memory>
 
-#include "api/field_trials_view.h"
+#include "api/environment/environment.h"
 #include "api/network_state_predictor.h"
-#include "api/rtc_event_log/rtc_event_log.h"
+#include "api/task_queue/task_queue_base.h"
 #include "api/transport/bitrate_settings.h"
 #include "api/transport/network_control.h"
-#include "rtc_base/task_queue.h"
+#include "api/transport/network_types.h"
+#include "api/units/time_delta.h"
 
 namespace webrtc {
 
 struct RtpTransportConfig {
+  Environment env;
+
   // Bitrate config used until valid bitrate estimates are calculated. Also
   // used to cap total bitrate used. This comes from the remote connection.
   BitrateConstraints bitrate_config;
-
-  // RtcEventLog to use for this call. Required.
-  // Use webrtc::RtcEventLog::CreateNull() for a null implementation.
-  RtcEventLog* event_log = nullptr;
-
-  // Task Queue Factory to be used in this call. Required.
-  TaskQueueFactory* task_queue_factory = nullptr;
 
   // NetworkStatePredictor to use for this call.
   NetworkStatePredictorFactoryInterface* network_state_predictor_factory =
@@ -41,9 +36,10 @@ struct RtpTransportConfig {
   // Network controller factory to use for this call.
   NetworkControllerFactoryInterface* network_controller_factory = nullptr;
 
-  // Key-value mapping of internal configurations to apply,
-  // e.g. field trials.
-  const FieldTrialsView* trials = nullptr;
+  // Time window used for calculating how send packets are paced.
+  TimeDelta default_pacing_time_window = PacerConfig::kDefaultTimeInterval;
+
+  TaskQueueBase* const worker_thread;
 };
 }  // namespace webrtc
 

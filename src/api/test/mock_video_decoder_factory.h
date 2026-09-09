@@ -14,23 +14,25 @@
 #include <memory>
 #include <vector>
 
+#include "api/environment/environment.h"
 #include "api/video_codecs/sdp_video_format.h"
+#include "api/video_codecs/video_decoder.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "test/gmock.h"
 
 namespace webrtc {
 
-class MockVideoDecoderFactory : public webrtc::VideoDecoderFactory {
+class MockVideoDecoderFactory : public VideoDecoderFactory {
  public:
   ~MockVideoDecoderFactory() override { Die(); }
 
-  MOCK_METHOD(std::vector<webrtc::SdpVideoFormat>,
+  MOCK_METHOD(std::vector<SdpVideoFormat>,
               GetSupportedFormats,
               (),
               (const, override));
-  MOCK_METHOD(std::unique_ptr<webrtc::VideoDecoder>,
-              CreateVideoDecoder,
-              (const webrtc::SdpVideoFormat&),
+  MOCK_METHOD(std::unique_ptr<VideoDecoder>,
+              Create,
+              (const Environment&, const SdpVideoFormat&),
               (override));
   MOCK_METHOD(void, Die, ());
 };

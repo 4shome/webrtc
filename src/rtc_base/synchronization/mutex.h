@@ -11,11 +11,7 @@
 #ifndef RTC_BASE_SYNCHRONIZATION_MUTEX_H_
 #define RTC_BASE_SYNCHRONIZATION_MUTEX_H_
 
-#include <atomic>
-
 #include "absl/base/attributes.h"
-#include "absl/base/const_init.h"
-#include "rtc_base/checks.h"
 #include "rtc_base/thread_annotations.h"
 
 #if defined(WEBRTC_ABSL_MUTEX)
@@ -38,9 +34,7 @@ class RTC_LOCKABLE Mutex final {
   Mutex(const Mutex&) = delete;
   Mutex& operator=(const Mutex&) = delete;
 
-  void Lock() RTC_EXCLUSIVE_LOCK_FUNCTION() {
-    impl_.Lock();
-  }
+  void Lock() RTC_EXCLUSIVE_LOCK_FUNCTION() { impl_.Lock(); }
   ABSL_MUST_USE_RESULT bool TryLock() RTC_EXCLUSIVE_TRYLOCK_FUNCTION(true) {
     return impl_.TryLock();
   }
@@ -48,9 +42,7 @@ class RTC_LOCKABLE Mutex final {
   // Otherwise, may report an error (typically by crashing with a diagnostic),
   // or may return immediately.
   void AssertHeld() const RTC_ASSERT_EXCLUSIVE_LOCK() { impl_.AssertHeld(); }
-  void Unlock() RTC_UNLOCK_FUNCTION() {
-    impl_.Unlock();
-  }
+  void Unlock() RTC_UNLOCK_FUNCTION() { impl_.Unlock(); }
 
  private:
   MutexImpl impl_;

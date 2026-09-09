@@ -15,11 +15,12 @@
 
 #include <functional>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "rtc_base/checks.h"
-#include "rtc_base/containers/flat_tree.h"
+#include "rtc_base/containers/flat_tree.h"  // IWYU pragma: export
 
 namespace webrtc {
 

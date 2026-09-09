@@ -13,9 +13,12 @@
 
 #include <stddef.h>
 
+#include <cstdint>
+#include <span>
+
 #include "rtc_base/stream.h"
 
-namespace rtc {
+namespace webrtc {
 
 // MemoryStream dynamically resizes to accomodate written data.
 
@@ -25,14 +28,12 @@ class MemoryStream final : public StreamInterface {
   ~MemoryStream() override;
 
   StreamState GetState() const override;
-  StreamResult Read(void* buffer,
-                    size_t bytes,
-                    size_t* bytes_read,
-                    int* error) override;
-  StreamResult Write(const void* buffer,
-                     size_t bytes,
-                     size_t* bytes_written,
-                     int* error) override;
+  StreamResult Read(std::span<uint8_t> buffer,
+                    size_t& bytes_read,
+                    int& error) override;
+  StreamResult Write(std::span<const uint8_t> buffer,
+                     size_t& bytes_written,
+                     int& error) override;
   void Close() override;
   bool GetSize(size_t* size) const;
   bool ReserveSize(size_t size);
@@ -56,6 +57,7 @@ class MemoryStream final : public StreamInterface {
   size_t seek_position_ = 0;
 };
 
-}  // namespace rtc
+}  //  namespace webrtc
+
 
 #endif  // RTC_BASE_MEMORY_STREAM_H_

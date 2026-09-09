@@ -12,13 +12,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 
 #include "absl/algorithm/container.h"
-#include "rtc_base/time_utils.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
 SamplesStatsCounter::SamplesStatsCounter() = default;
+SamplesStatsCounter::SamplesStatsCounter(size_t expected_samples_count) {
+  samples_.reserve(expected_samples_count);
+}
+
 SamplesStatsCounter::~SamplesStatsCounter() = default;
 SamplesStatsCounter::SamplesStatsCounter(const SamplesStatsCounter&) = default;
 SamplesStatsCounter& SamplesStatsCounter::operator=(
@@ -26,10 +31,6 @@ SamplesStatsCounter& SamplesStatsCounter::operator=(
 SamplesStatsCounter::SamplesStatsCounter(SamplesStatsCounter&&) = default;
 SamplesStatsCounter& SamplesStatsCounter::operator=(SamplesStatsCounter&&) =
     default;
-
-void SamplesStatsCounter::AddSample(double value) {
-  AddSample(StatsSample{value, Timestamp::Micros(rtc::TimeMicros())});
-}
 
 void SamplesStatsCounter::AddSample(StatsSample sample) {
   stats_.AddSample(sample.value);
@@ -78,8 +79,8 @@ SamplesStatsCounter operator*(const SamplesStatsCounter& counter,
                               double value) {
   SamplesStatsCounter out;
   for (const auto& sample : counter.GetTimedSamples()) {
-    out.AddSample(
-        SamplesStatsCounter::StatsSample{sample.value * value, sample.time});
+    out.AddSample(SamplesStatsCounter::StatsSample{
+        .value = sample.value * value, .time = sample.time});
   }
   return out;
 }
@@ -88,8 +89,8 @@ SamplesStatsCounter operator/(const SamplesStatsCounter& counter,
                               double value) {
   SamplesStatsCounter out;
   for (const auto& sample : counter.GetTimedSamples()) {
-    out.AddSample(
-        SamplesStatsCounter::StatsSample{sample.value / value, sample.time});
+    out.AddSample(SamplesStatsCounter::StatsSample{
+        .value = sample.value / value, .time = sample.time});
   }
   return out;
 }

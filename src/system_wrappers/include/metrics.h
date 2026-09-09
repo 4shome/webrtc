@@ -11,14 +11,14 @@
 #ifndef SYSTEM_WRAPPERS_INCLUDE_METRICS_H_
 #define SYSTEM_WRAPPERS_INCLUDE_METRICS_H_
 
-#include <stddef.h>
-
-#include <atomic>
+#include <atomic>  // IWYU pragma: keep
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "api/units/time_delta.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/string_utils.h"
 
@@ -32,13 +32,11 @@ namespace webrtc {
 namespace metrics_impl {
 template <typename... Ts>
 void NoOp(const Ts&...) {}
-}
-}
+}  // namespace metrics_impl
+}  // namespace webrtc
 
 #if RTC_METRICS_ENABLED
 #define EXPECT_METRIC_EQ(val1, val2) EXPECT_EQ(val1, val2)
-#define EXPECT_METRIC_EQ_WAIT(val1, val2, timeout) \
-  EXPECT_EQ_WAIT(val1, val2, timeout)
 #define EXPECT_METRIC_GT(val1, val2) EXPECT_GT(val1, val2)
 #define EXPECT_METRIC_LE(val1, val2) EXPECT_LE(val1, val2)
 #define EXPECT_METRIC_TRUE(conditon) EXPECT_TRUE(conditon)
@@ -46,12 +44,14 @@ void NoOp(const Ts&...) {}
 #define EXPECT_METRIC_THAT(value, matcher) EXPECT_THAT(value, matcher)
 #else
 #define EXPECT_METRIC_EQ(val1, val2) webrtc::metrics_impl::NoOp(val1, val2)
-#define EXPECT_METRIC_EQ_WAIT(val1, val2, timeout) webrtc::metrics_impl::NoOp(val1, val2, timeout)
 #define EXPECT_METRIC_GT(val1, val2) webrtc::metrics_impl::NoOp(val1, val2)
 #define EXPECT_METRIC_LE(val1, val2) webrtc::metrics_impl::NoOp(val1, val2)
-#define EXPECT_METRIC_TRUE(condition) webrtc::metrics_impl::NoOp(condition || true)
-#define EXPECT_METRIC_FALSE(condition) webrtc::metrics_impl::NoOp(condition && false)
-#define EXPECT_METRIC_THAT(value, matcher) webrtc::metrics_impl::NoOp(value, testing::_)
+#define EXPECT_METRIC_TRUE(condition) \
+  webrtc::metrics_impl::NoOp(condition || true)
+#define EXPECT_METRIC_FALSE(condition) \
+  webrtc::metrics_impl::NoOp(condition && false)
+#define EXPECT_METRIC_THAT(value, matcher) \
+  webrtc::metrics_impl::NoOp(value, testing::_)
 #endif
 
 #if RTC_METRICS_ENABLED
@@ -121,11 +121,31 @@ void NoOp(const Ts&...) {}
 #define RTC_HISTOGRAM_COUNTS_100000(name, sample) \
   RTC_HISTOGRAM_COUNTS(name, sample, 1, 100000, 50)
 
+#define RTC_HISTOGRAM_COUNTS_1M(name, sample) \
+  RTC_HISTOGRAM_COUNTS(name, sample, 1, 1'000'000, 50)
+
+#define RTC_HISTOGRAM_COUNTS_1G(name, sample) \
+  RTC_HISTOGRAM_COUNTS(name, sample, 1, 1'000'000'000, 50)
+
 #define RTC_HISTOGRAM_COUNTS(name, sample, min, max, bucket_count)       \
   RTC_HISTOGRAM_COMMON_BLOCK(name, sample,                               \
                              webrtc::metrics::HistogramFactoryGetCounts( \
                                  name, min, max, bucket_count))
 
+// IMPORTANT: To capture the value 0, set `min = 1`. This function creates an
+// implicit underflow bucket for all values `< min`. It also creates an
+// implicit overflow bucket for values `>= max`.
+//
+// The main bucket range covers the values from `min` to `max - 1`.
+//
+// If capturing integers and wanting exact values, the number of buckets
+// has to be equal to (max - min) + 2, to make room for the underflow
+// and overflow buckets.
+//
+// Example usage:
+//   RTC_HISTOGRAM_COUNTS_LINEAR(name, sample, 1, 49, 50);
+//
+// Captures 0 in underflow, [1-48] in main range, >=49 in overflow.
 #define RTC_HISTOGRAM_COUNTS_LINEAR(name, sample, min, max, bucket_count)      \
   RTC_HISTOGRAM_COMMON_BLOCK(name, sample,                                     \
                              webrtc::metrics::HistogramFactoryGetCountsLinear( \
@@ -278,17 +298,29 @@ void NoOp(const Ts&...) {}
 // This section defines no-op alternatives to the metrics macros when
 // RTC_METRICS_ENABLED is defined.
 
-#define RTC_HISTOGRAM_COUNTS_100(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_100(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_200(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_200(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_500(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_500(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_1000(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_1000(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_10000(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_10000(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_100000(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_100000(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
+
+#define RTC_HISTOGRAM_COUNTS_1M(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
+
+#define RTC_HISTOGRAM_COUNTS_1G(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
 #define RTC_HISTOGRAM_COUNTS(name, sample, min, max, bucket_count) \
   webrtc::metrics_impl::NoOp(name, sample, min, max, bucket_count)
@@ -296,31 +328,41 @@ void NoOp(const Ts&...) {}
 #define RTC_HISTOGRAM_COUNTS_LINEAR(name, sample, min, max, bucket_count) \
   webrtc::metrics_impl::NoOp(name, sample, min, max, bucket_count)
 
-#define RTC_HISTOGRAM_COUNTS_SPARSE_100(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_SPARSE_100(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_SPARSE_200(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_SPARSE_200(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_SPARSE_500(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_SPARSE_500(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_SPARSE_1000(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_SPARSE_1000(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_SPARSE_10000(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_SPARSE_10000(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_COUNTS_SPARSE_100000(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_COUNTS_SPARSE_100000(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
 #define RTC_HISTOGRAM_COUNTS_SPARSE(name, sample, min, max, bucket_count) \
   webrtc::metrics_impl::NoOp(name, sample, min, max, bucket_count)
 
-#define RTC_HISTOGRAM_PERCENTAGE_SPARSE(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_PERCENTAGE_SPARSE(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_BOOLEAN_SPARSE(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_BOOLEAN_SPARSE(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
 #define RTC_HISTOGRAM_ENUMERATION_SPARSE(name, sample, boundary) \
   webrtc::metrics_impl::NoOp(name, sample, boundary)
 
-#define RTC_HISTOGRAM_PERCENTAGE(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_PERCENTAGE(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
-#define RTC_HISTOGRAM_BOOLEAN(name, sample) webrtc::metrics_impl::NoOp(name, sample)
+#define RTC_HISTOGRAM_BOOLEAN(name, sample) \
+  webrtc::metrics_impl::NoOp(name, sample)
 
 #define RTC_HISTOGRAM_ENUMERATION(name, sample, boundary) \
   webrtc::metrics_impl::NoOp(name, sample, boundary)
@@ -332,11 +374,14 @@ void NoOp(const Ts&...) {}
 #define RTC_HISTOGRAM_COMMON_BLOCK_SLOW(name, sample, factory_get_invocation) \
   webrtc::metrics_impl::NoOp(name, sample, factory_get_invocation)
 
-#define RTC_HISTOGRAMS_COUNTS_100(index, name, sample) webrtc::metrics_impl::NoOp(index, name, sample)
+#define RTC_HISTOGRAMS_COUNTS_100(index, name, sample) \
+  webrtc::metrics_impl::NoOp(index, name, sample)
 
-#define RTC_HISTOGRAMS_COUNTS_200(index, name, sample) webrtc::metrics_impl::NoOp(index, name, sample)
+#define RTC_HISTOGRAMS_COUNTS_200(index, name, sample) \
+  webrtc::metrics_impl::NoOp(index, name, sample)
 
-#define RTC_HISTOGRAMS_COUNTS_500(index, name, sample) webrtc::metrics_impl::NoOp(index, name, sample)
+#define RTC_HISTOGRAMS_COUNTS_500(index, name, sample) \
+  webrtc::metrics_impl::NoOp(index, name, sample)
 
 #define RTC_HISTOGRAMS_COUNTS_1000(index, name, sample) \
   webrtc::metrics_impl::NoOp(index, name, sample)
@@ -350,7 +395,8 @@ void NoOp(const Ts&...) {}
 #define RTC_HISTOGRAMS_ENUMERATION(index, name, sample, boundary) \
   webrtc::metrics_impl::NoOp(index, name, sample, boundary)
 
-#define RTC_HISTOGRAMS_PERCENTAGE(index, name, sample) webrtc::metrics_impl::NoOp(index, name, sample)
+#define RTC_HISTOGRAMS_PERCENTAGE(index, name, sample) \
+  webrtc::metrics_impl::NoOp(index, name, sample)
 
 #define RTC_HISTOGRAMS_COMMON(index, name, sample, macro_invocation) \
   webrtc::metrics_impl::NoOp(index, name, sample, macro_invocation)
@@ -361,7 +407,7 @@ namespace webrtc {
 namespace metrics {
 
 // Time that should have elapsed for stats that are gathered once per call.
-constexpr int kMinRunTimeInSeconds = 10;
+inline constexpr TimeDelta kMinRunTime = TimeDelta::Seconds(10);
 
 class Histogram;
 
@@ -409,7 +455,7 @@ void Enable();
 
 // Gets histograms and clears all samples.
 void GetAndReset(
-    std::map<std::string, std::unique_ptr<SampleInfo>, rtc::AbslStringViewCmp>*
+    std::map<std::string, std::unique_ptr<SampleInfo>, AbslStringViewCmp>*
         histograms);
 
 // Functions below are mainly for testing.

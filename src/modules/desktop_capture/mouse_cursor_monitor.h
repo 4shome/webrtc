@@ -53,8 +53,8 @@ class MouseCursorMonitor {
     // Called in response to Capture(). `position` indicates cursor position
     // relative to the `window` specified in the constructor.
     // Deprecated: use the following overload instead.
-    virtual void OnMouseCursorPosition(CursorState state,
-                                       const DesktopVector& position) {}
+    virtual void OnMouseCursorPosition(CursorState /* state */,
+                                       const DesktopVector& /* position */) {}
 
     // Called in response to Capture(). `position` indicates cursor absolute
     // position on the system in fullscreen coordinate, i.e. the top-left
@@ -64,7 +64,7 @@ class MouseCursorMonitor {
     // TODO(zijiehe): Ensure all implementations return the absolute position.
     // TODO(zijiehe): Current this overload works correctly only when capturing
     // mouse cursor against fullscreen.
-    virtual void OnMouseCursorPosition(const DesktopVector& position) {}
+    virtual void OnMouseCursorPosition(const DesktopVector& /* position */) {}
 
    protected:
     virtual ~Callback() {}
@@ -91,7 +91,7 @@ class MouseCursorMonitor {
   // Creates a capturer that monitors the mouse cursor shape and position across
   // the entire desktop. The capturer ensures that the top-left monitor starts
   // from (0, 0).
-  static std::unique_ptr<MouseCursorMonitor> Create(
+  static RTC_EXPORT std::unique_ptr<MouseCursorMonitor> Create(
       const DesktopCaptureOptions& options);
 
   // Initializes the monitor with the `callback`, which must remain valid until

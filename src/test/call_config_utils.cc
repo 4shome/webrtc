@@ -13,6 +13,13 @@
 #include <string>
 #include <vector>
 
+#include "api/call/transport.h"
+#include "api/rtp_headers.h"
+#include "api/video_codecs/sdp_video_format.h"
+#include "call/video_receive_stream.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/strings/json.h"
+
 namespace webrtc {
 namespace test {
 
@@ -20,7 +27,7 @@ namespace test {
 // back into a valid object. This will not initialize the decoders or the
 // renderer.
 VideoReceiveStreamInterface::Config ParseVideoReceiveStreamJsonConfig(
-    webrtc::Transport* transport,
+    Transport* transport,
     const Json::Value& json) {
   auto receive_config = VideoReceiveStreamInterface::Config(transport);
   for (const auto& decoder_json : json["decoders"]) {
@@ -38,12 +45,10 @@ VideoReceiveStreamInterface::Config ParseVideoReceiveStreamJsonConfig(
   }
   receive_config.render_delay_ms = json["render_delay_ms"].asInt64();
   receive_config.rtp.remote_ssrc = json["rtp"]["remote_ssrc"].asInt64();
-  receive_config.rtp.local_ssrc = json["rtp"]["local_ssrc"].asInt64();
   receive_config.rtp.rtcp_mode =
       json["rtp"]["rtcp_mode"].asString() == "RtcpMode::kCompound"
           ? RtcpMode::kCompound
           : RtcpMode::kReducedSize;
-  receive_config.rtp.transport_cc = json["rtp"]["transport_cc"].asBool();
   receive_config.rtp.lntf.enabled = json["rtp"]["lntf"]["enabled"].asInt64();
   receive_config.rtp.nack.rtp_history_ms =
       json["rtp"]["nack"]["rtp_history_ms"].asInt64();
@@ -59,11 +64,6 @@ VideoReceiveStreamInterface::Config ParseVideoReceiveStreamJsonConfig(
     Json::Value rtx_payload_type = pl_json[members[0]];
     receive_config.rtp.rtx_associated_payload_types[std::stoi(members[0])] =
         rtx_payload_type.asInt64();
-  }
-  for (const auto& ext_json : json["rtp"]["extensions"]) {
-    receive_config.rtp.extensions.emplace_back(ext_json["uri"].asString(),
-                                               ext_json["id"].asInt64(),
-                                               ext_json["encrypt"].asBool());
   }
   return receive_config;
 }
@@ -88,11 +88,9 @@ Json::Value GenerateVideoReceiveStreamJsonConfig(
 
   Json::Value rtp_json;
   rtp_json["remote_ssrc"] = config.rtp.remote_ssrc;
-  rtp_json["local_ssrc"] = config.rtp.local_ssrc;
   rtp_json["rtcp_mode"] = config.rtp.rtcp_mode == RtcpMode::kCompound
                               ? "RtcpMode::kCompound"
                               : "RtcpMode::kReducedSize";
-  rtp_json["transport_cc"] = config.rtp.transport_cc;
   rtp_json["lntf"]["enabled"] = config.rtp.lntf.enabled;
   rtp_json["nack"]["rtp_history_ms"] = config.rtp.nack.rtp_history_ms;
   rtp_json["ulpfec_payload_type"] = config.rtp.ulpfec_payload_type;
@@ -106,14 +104,6 @@ Json::Value GenerateVideoReceiveStreamJsonConfig(
     rtp_json["rtx_payload_types"].append(val);
   }
 
-  rtp_json["extensions"] = Json::Value(Json::arrayValue);
-  for (auto& ext : config.rtp.extensions) {
-    Json::Value ext_json;
-    ext_json["uri"] = ext.uri;
-    ext_json["id"] = ext.id;
-    ext_json["encrypt"] = ext.encrypt;
-    rtp_json["extensions"].append(ext_json);
-  }
   root_json["rtp"] = rtp_json;
 
   root_json["render_delay_ms"] = config.render_delay_ms;

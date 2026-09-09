@@ -12,10 +12,13 @@
 
 #include <stddef.h>
 
+#include <functional>
+#include <optional>
 #include <string>
+#include <vector>
 
-#include "absl/types/optional.h"
 #include "api/fec_controller.h"
+#include "api/field_trials.h"
 #include "api/rtp_parameters.h"
 #include "api/test/frame_generator_interface.h"
 #include "api/transport/network_control.h"
@@ -24,6 +27,7 @@
 #include "api/units/time_delta.h"
 #include "api/video/video_codec_type.h"
 #include "api/video_codecs/scalability_mode.h"
+#include "test/create_test_field_trials.h"
 #include "test/scenario/performance_stats.h"
 
 namespace webrtc {
@@ -53,7 +57,11 @@ struct TransportControllerConfig {
 
 struct CallClientConfig {
   TransportControllerConfig transport;
-  const FieldTrialsView* field_trials = nullptr;
+  FieldTrials field_trials = CreateTestFieldTrials();
+  // Allows the pacer to send out multiple packets in a burst.
+  // The number of bites that can be sent in one burst is pacer_burst_interval *
+  // current bwe. 40ms is the default Chrome setting.
+  TimeDelta pacer_burst_interval = TimeDelta::Millis(40);
 };
 
 struct PacketStreamConfig {
@@ -87,8 +95,8 @@ struct VideoStreamConfig {
       struct Images {
         struct Crop {
           TimeDelta scroll_duration = TimeDelta::Seconds(0);
-          absl::optional<int> width;
-          absl::optional<int> height;
+          std::optional<int> width;
+          std::optional<int> height;
         } crop;
         int width = 1850;
         int height = 1110;
@@ -129,11 +137,11 @@ struct VideoStreamConfig {
 
     using Codec = VideoCodecType;
     Codec codec = Codec::kVideoCodecGeneric;
-    absl::optional<DataRate> max_data_rate;
-    absl::optional<DataRate> min_data_rate;
-    absl::optional<int> max_framerate;
+    std::optional<DataRate> max_data_rate;
+    std::optional<DataRate> min_data_rate;
+    std::optional<int> max_framerate;
     // Counted in frame count.
-    absl::optional<int> key_frame_interval = 3000;
+    std::optional<int> key_frame_interval = 3000;
     bool frame_dropping = true;
     struct SingleLayer {
       bool denoising = true;
@@ -194,17 +202,18 @@ struct AudioStreamConfig {
     ~Encoder();
     bool allocate_bitrate = false;
     bool enable_dtx = false;
-    absl::optional<DataRate> fixed_rate;
-    absl::optional<DataRate> min_rate;
-    absl::optional<DataRate> max_rate;
+    DataRate fixed_rate = DataRate::KilobitsPerSec(32);
+    // Overrides fixed rate.
+    std::optional<DataRate> min_rate;
+    std::optional<DataRate> max_rate;
     TimeDelta initial_frame_length = TimeDelta::Millis(20);
   } encoder;
   struct Stream {
     Stream();
     Stream(const Stream&);
     ~Stream();
-    bool abs_send_time = false;
-    bool in_bandwidth_estimation = false;
+    bool abs_send_time = true;
+    bool in_bandwidth_estimation = true;
   } stream;
   struct Rendering {
     std::string sync_group;
@@ -217,7 +226,7 @@ struct NetworkSimulationConfig {
   TimeDelta delay = TimeDelta::Zero();
   TimeDelta delay_std_dev = TimeDelta::Zero();
   double loss_rate = 0;
-  absl::optional<int> packet_queue_length_limit;
+  std::optional<int> packet_queue_length_limit;
   DataSize packet_overhead = DataSize::Zero();
 };
 }  // namespace test

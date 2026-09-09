@@ -10,18 +10,22 @@
 
 #include "rtc_base/copy_on_write_buffer.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <span>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 #include "test/gtest.h"
 
-namespace rtc {
+namespace webrtc {
 
 namespace {
 
-// clang-format off
-const uint8_t kTestData[] = {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
-                             0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf};
-// clang-format on
+constexpr uint8_t kTestData[] = {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
+                                 0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf};
 
 }  // namespace
 
@@ -46,21 +50,34 @@ void EnsureBuffersDontShareData(const CopyOnWriteBuffer& buf1,
 
 TEST(CopyOnWriteBufferTest, TestCreateEmptyData) {
   CopyOnWriteBuffer buf(static_cast<const uint8_t*>(nullptr), 0);
+  EXPECT_TRUE(buf.empty());
   EXPECT_EQ(buf.size(), 0u);
   EXPECT_EQ(buf.capacity(), 0u);
   EXPECT_EQ(buf.data(), nullptr);
 }
 
+TEST(CopyOnWriteBufferTest, CreateEmptyDataWithCapacity) {
+  CopyOnWriteBuffer buf(0, 16);
+  EXPECT_TRUE(buf.empty());
+  EXPECT_EQ(buf.size(), 0u);
+  EXPECT_EQ(buf.capacity(), 16u);
+  EXPECT_NE(buf.MutableData(), nullptr);
+}
+
 TEST(CopyOnWriteBufferTest, TestMoveConstruct) {
+  EXPECT_TRUE(std::is_nothrow_move_constructible_v<CopyOnWriteBuffer>);
+
   CopyOnWriteBuffer buf1(kTestData, 3, 10);
   size_t buf1_size = buf1.size();
   size_t buf1_capacity = buf1.capacity();
   const uint8_t* buf1_data = buf1.cdata();
 
   CopyOnWriteBuffer buf2(std::move(buf1));
+  EXPECT_TRUE(buf1.empty());
   EXPECT_EQ(buf1.size(), 0u);
   EXPECT_EQ(buf1.capacity(), 0u);
   EXPECT_EQ(buf1.data(), nullptr);
+  EXPECT_FALSE(buf2.empty());
   EXPECT_EQ(buf2.size(), buf1_size);
   EXPECT_EQ(buf2.capacity(), buf1_capacity);
   EXPECT_EQ(buf2.data(), buf1_data);
@@ -125,6 +142,7 @@ TEST(CopyOnWriteBufferTest, SetEmptyData) {
   buf.SetData<uint8_t>(nullptr, 0);
 
   EXPECT_EQ(0u, buf.size());
+  EXPECT_TRUE(buf.empty());
 }
 
 TEST(CopyOnWriteBufferTest, SetDataNoMoreThanCapacityDoesntCauseReallocation) {
@@ -356,8 +374,8 @@ TEST(CopyOnWriteBufferTest, SlicesAreIndependent) {
 TEST(CopyOnWriteBufferTest, AcceptsVectorLikeTypes) {
   std::vector<uint8_t> a = {1, 2};
   std::vector<int8_t> b = {3, 4};
-  rtc::ArrayView<uint8_t> c(a);
-  rtc::ArrayView<const int8_t> d(b);
+  std::span<uint8_t> c(a);
+  std::span<const int8_t> d(b);
 
   CopyOnWriteBuffer a_buf(a);
   CopyOnWriteBuffer b_buf(b);
@@ -373,4 +391,4 @@ TEST(CopyOnWriteBufferTest, AcceptsVectorLikeTypes) {
   EXPECT_EQ(all.size(), 8U);
 }
 
-}  // namespace rtc
+}  // namespace webrtc

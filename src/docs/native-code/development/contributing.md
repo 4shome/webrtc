@@ -20,7 +20,7 @@ a contribution can be accepted. Please complete the agreement for an
 ### Contributing your First Patch
 You must do some preparation in order to upload your first CL:
 
-* [Check out and build the code][check out and build the code]
+* [Check out and build the code][Check out and build the code]
 * Fill in the Contributor agreement (see above)
 * If you’ve never submitted code before, you must add your
   (or your organization’s in the case the contributor agreement is signed by
@@ -34,10 +34,11 @@ You must do some preparation in order to upload your first CL:
 
 You will not have to repeat the above. After all that, you’re ready to upload:
 
-[Check out and the build code]: https://webrtc.googlesource.com/src/+/refs/heads/main/docs/native-code/development/index.md
+[Check out and build the code]: https://webrtc.googlesource.com/src/+/refs/heads/main/docs/native-code/development/
 [AUTHORS]: https://webrtc.googlesource.com/src/+/refs/heads/main/AUTHORS
 [new-password]: https://webrtc.googlesource.com/new-password
 [discuss-webrtc]: https://groups.google.com/forum/#!forum/discuss-webrtc
+[Chromium recommendations for code reviews]: https://chromium.googlesource.com/chromium/src/+/main/docs/cl_tips.md
 
 ### Uploading your First Patch
 Now that you have your account set up, you can do the actual upload:
@@ -79,6 +80,33 @@ NOTICE: On Windows, you’ll need to run the above in a Git bash shell in order
 for gclient to find the `.gitcookies` file.
 
 [example CL link]: https://webrtc-review.googlesource.com/c/src/+/53121
+
+### Stacked Diffs
+Stacked diffs are an advanced feature to "stack" multiple gerrit changes on top
+of each other. They show up as separate changes in gerrit codereview but the relationship
+is retained. To create a stacked diff:
+
+* Assuming you are on the main branch:
+    * `git checkout -b my-first-work-branch`
+* Make changes, build locally, run tests locally
+    * `git commit -am "Changed x, and it is working"`
+    * `git cl upload`
+* Checkout the second branch from the current branch:
+    * `git checkout -b my-second-work-branch`
+* Set the `upstream` branch to the first branch:
+    * `git cl upstream my-first-work-branch`
+* Make changes, build locally, run tests locally
+    * `git commit -am "Changed y, and it is working too"`
+    * `git cl upload`
+* You can now run tests or ask for review of my-second-work-branch independently
+  of my-first-work-branch.
+* You can go back to the first branch, update, rebase and reupload
+  the second branch afterwards:
+    * `git rebase-update --no-fetch my-second-work-branch`
+    * `git cl upload`
+
+See https://newsletter.pragmaticengineer.com/p/stacked-diffs for an in-depth
+explanation of stacked diffs.
 
 ### Trybots
 

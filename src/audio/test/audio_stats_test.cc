@@ -8,14 +8,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstdint>
+#include <cstdlib>
+
+#include "api/test/simulated_network.h"
 #include "audio/test/audio_end_to_end_test.h"
-#include "rtc_base/numerics/safe_compare.h"
-#include "system_wrappers/include/sleep.h"
+#include "call/audio_receive_stream.h"
+#include "call/audio_send_stream.h"
+#include "rtc_base/thread.h"
+#include "test/call_test.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 namespace test {
 namespace {
+
+// Wait half a second between stopping sending and stopping receiving audio.
+constexpr int kExtraRecordTimeMs = 500;
 
 bool IsNear(int reference, int v) {
   // Margin is 10%.
@@ -32,16 +41,18 @@ class NoLossTest : public AudioEndToEndTest {
 
   NoLossTest() = default;
 
-  BuiltInNetworkBehaviorConfig GetNetworkPipeConfig() const override {
+  BuiltInNetworkBehaviorConfig GetSendTransportConfig() const override {
     BuiltInNetworkBehaviorConfig pipe_config;
     pipe_config.queue_delay_ms = kRttMs / 2;
     return pipe_config;
   }
 
   void PerformTest() override {
-    SleepMs(kTestDurationMs);
+    Thread::SleepMs(kTestDurationMs);
     send_audio_device()->StopRecording();
-    AudioEndToEndTest::PerformTest();
+    // and some extra time to account for network delay.
+    Thread::SleepMs(GetSendTransportConfig().queue_delay_ms +
+                    kExtraRecordTimeMs);
   }
 
   void OnStreamsStopped() override {
@@ -66,9 +77,9 @@ class NoLossTest : public AudioEndToEndTest {
 
     AudioReceiveStreamInterface::Stats recv_stats =
         receive_stream()->GetStats(/*get_and_clear_legacy_stats=*/true);
-    EXPECT_PRED2(IsNear, kBytesSent, recv_stats.payload_bytes_rcvd);
-    EXPECT_PRED2(IsNear, kPacketsSent, recv_stats.packets_rcvd);
-    EXPECT_EQ(0u, recv_stats.packets_lost);
+    EXPECT_PRED2(IsNear, kBytesSent, recv_stats.payload_bytes_received);
+    EXPECT_PRED2(IsNear, kPacketsSent, recv_stats.packets_received);
+    EXPECT_EQ(0, recv_stats.packets_lost);
     EXPECT_EQ("opus", send_stats.codec_name);
     // recv_stats.jitter_ms
     // recv_stats.jitter_buffer_ms

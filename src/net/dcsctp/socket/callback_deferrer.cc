@@ -9,34 +9,23 @@
  */
 #include "net/dcsctp/socket/callback_deferrer.h"
 
-#include "api/make_ref_counted.h"
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include "absl/strings/string_view.h"
+#include "api/task_queue/task_queue_base.h"
+#include "net/dcsctp/public/dcsctp_message.h"
+#include "net/dcsctp/public/dcsctp_socket.h"
+#include "net/dcsctp/public/timeout.h"
+#include "net/dcsctp/public/types.h"
+#include "rtc_base/checks.h"
 
 namespace dcsctp {
-namespace {
-// A wrapper around the move-only DcSctpMessage, to let it be captured in a
-// lambda.
-class MessageDeliverer {
- public:
-  explicit MessageDeliverer(DcSctpMessage&& message)
-      : state_(rtc::make_ref_counted<State>(std::move(message))) {}
-
-  void Deliver(DcSctpSocketCallbacks& c) {
-    // Really ensure that it's only called once.
-    RTC_DCHECK(!state_->has_delivered);
-    state_->has_delivered = true;
-    c.OnMessageReceived(std::move(state_->message));
-  }
-
- private:
-  struct State : public rtc::RefCountInterface {
-    explicit State(DcSctpMessage&& m)
-        : has_delivered(false), message(std::move(m)) {}
-    bool has_delivered;
-    DcSctpMessage message;
-  };
-  rtc::scoped_refptr<State> state_;
-};
-}  // namespace
 
 void CallbackDeferrer::Prepare() {
   RTC_DCHECK(!prepared_);
@@ -48,17 +37,21 @@ void CallbackDeferrer::TriggerDeferred() {
   // callback, and that might result in adding new callbacks to this instance,
   // and the vector can't be modified while iterated on.
   RTC_DCHECK(prepared_);
-  std::vector<std::function<void(DcSctpSocketCallbacks & cb)>> deferred;
-  deferred.swap(deferred_);
   prepared_ = false;
-
-  for (auto& cb : deferred) {
-    cb(underlying_);
+  if (deferred_.empty()) {
+    return;
+  }
+  std::vector<std::pair<Callback, CallbackData>> deferred;
+  // Reserve a small buffer to prevent too much reallocation on growth.
+  deferred.reserve(8);
+  deferred.swap(deferred_);
+  for (auto& [cb, data] : deferred) {
+    cb(std::move(data), underlying_);
   }
 }
 
 SendPacketStatus CallbackDeferrer::SendPacketWithStatus(
-    rtc::ArrayView<const uint8_t> data) {
+    std::span<const uint8_t> data) {
   // Will not be deferred - call directly.
   return underlying_.SendPacketWithStatus(data);
 }
@@ -70,6 +63,8 @@ std::unique_ptr<Timeout> CallbackDeferrer::CreateTimeout(
 }
 
 TimeMs CallbackDeferrer::TimeMillis() {
+  // This should not be called by the library - it's migrated to `Now()`.
+  RTC_DCHECK(false);
   // Will not be deferred - call directly.
   return underlying_.TimeMillis();
 }
@@ -82,83 +77,122 @@ uint32_t CallbackDeferrer::GetRandomInt(uint32_t low, uint32_t high) {
 void CallbackDeferrer::OnMessageReceived(DcSctpMessage message) {
   RTC_DCHECK(prepared_);
   deferred_.emplace_back(
-      [deliverer = MessageDeliverer(std::move(message))](
-          DcSctpSocketCallbacks& cb) mutable { deliverer.Deliver(cb); });
+      +[](CallbackData data, DcSctpSocketCallbacks& cb) {
+        return cb.OnMessageReceived(std::get<DcSctpMessage>(std::move(data)));
+      },
+      std::move(message));
+}
+
+void CallbackDeferrer::OnMessageReady() {
+  RTC_DCHECK(prepared_);
+  deferred_.emplace_back(
+      +[](CallbackData data, DcSctpSocketCallbacks& cb) {
+        return cb.OnMessageReady();
+      },
+      std::monostate{});
 }
 
 void CallbackDeferrer::OnError(ErrorKind error, absl::string_view message) {
   RTC_DCHECK(prepared_);
   deferred_.emplace_back(
-      [error, message = std::string(message)](DcSctpSocketCallbacks& cb) {
-        cb.OnError(error, message);
-      });
+      +[](CallbackData data, DcSctpSocketCallbacks& cb) {
+        Error error = std::get<Error>(std::move(data));
+        return cb.OnError(error.error, error.message);
+      },
+      Error{.error = error, .message = std::string(message)});
 }
 
 void CallbackDeferrer::OnAborted(ErrorKind error, absl::string_view message) {
   RTC_DCHECK(prepared_);
   deferred_.emplace_back(
-      [error, message = std::string(message)](DcSctpSocketCallbacks& cb) {
-        cb.OnAborted(error, message);
-      });
+      +[](CallbackData data, DcSctpSocketCallbacks& cb) {
+        Error error = std::get<Error>(std::move(data));
+        return cb.OnAborted(error.error, error.message);
+      },
+      Error{.error = error, .message = std::string(message)});
 }
 
 void CallbackDeferrer::OnConnected() {
   RTC_DCHECK(prepared_);
-  deferred_.emplace_back([](DcSctpSocketCallbacks& cb) { cb.OnConnected(); });
+  deferred_.emplace_back(
+      +[](CallbackData /* data */, DcSctpSocketCallbacks& cb) {
+        return cb.OnConnected();
+      },
+      std::monostate{});
 }
 
 void CallbackDeferrer::OnClosed() {
   RTC_DCHECK(prepared_);
-  deferred_.emplace_back([](DcSctpSocketCallbacks& cb) { cb.OnClosed(); });
+  deferred_.emplace_back(
+      +[](CallbackData /* data */, DcSctpSocketCallbacks& cb) {
+        return cb.OnClosed();
+      },
+      std::monostate{});
 }
 
 void CallbackDeferrer::OnConnectionRestarted() {
   RTC_DCHECK(prepared_);
   deferred_.emplace_back(
-      [](DcSctpSocketCallbacks& cb) { cb.OnConnectionRestarted(); });
+      +[](CallbackData /* data */, DcSctpSocketCallbacks& cb) {
+        return cb.OnConnectionRestarted();
+      },
+      std::monostate{});
 }
 
 void CallbackDeferrer::OnStreamsResetFailed(
-    rtc::ArrayView<const StreamID> outgoing_streams,
+    std::span<const StreamID> outgoing_streams,
     absl::string_view reason) {
   RTC_DCHECK(prepared_);
   deferred_.emplace_back(
-      [streams = std::vector<StreamID>(outgoing_streams.begin(),
-                                       outgoing_streams.end()),
-       reason = std::string(reason)](DcSctpSocketCallbacks& cb) {
-        cb.OnStreamsResetFailed(streams, reason);
-      });
+      +[](CallbackData data, DcSctpSocketCallbacks& cb) {
+        StreamReset stream_reset = std::get<StreamReset>(std::move(data));
+        return cb.OnStreamsResetFailed(stream_reset.streams,
+                                       stream_reset.message);
+      },
+      StreamReset{.streams = {outgoing_streams.begin(), outgoing_streams.end()},
+                  .message = std::string(reason)});
 }
 
 void CallbackDeferrer::OnStreamsResetPerformed(
-    rtc::ArrayView<const StreamID> outgoing_streams) {
+    std::span<const StreamID> outgoing_streams) {
   RTC_DCHECK(prepared_);
   deferred_.emplace_back(
-      [streams = std::vector<StreamID>(outgoing_streams.begin(),
-                                       outgoing_streams.end())](
-          DcSctpSocketCallbacks& cb) { cb.OnStreamsResetPerformed(streams); });
+      +[](CallbackData data, DcSctpSocketCallbacks& cb) {
+        StreamReset stream_reset = std::get<StreamReset>(std::move(data));
+        return cb.OnStreamsResetPerformed(stream_reset.streams);
+      },
+      StreamReset{
+          .streams = {outgoing_streams.begin(), outgoing_streams.end()}});
 }
 
 void CallbackDeferrer::OnIncomingStreamsReset(
-    rtc::ArrayView<const StreamID> incoming_streams) {
+    std::span<const StreamID> incoming_streams) {
   RTC_DCHECK(prepared_);
   deferred_.emplace_back(
-      [streams = std::vector<StreamID>(incoming_streams.begin(),
-                                       incoming_streams.end())](
-          DcSctpSocketCallbacks& cb) { cb.OnIncomingStreamsReset(streams); });
+      +[](CallbackData data, DcSctpSocketCallbacks& cb) {
+        StreamReset stream_reset = std::get<StreamReset>(std::move(data));
+        return cb.OnIncomingStreamsReset(stream_reset.streams);
+      },
+      StreamReset{
+          .streams = {incoming_streams.begin(), incoming_streams.end()}});
 }
 
 void CallbackDeferrer::OnBufferedAmountLow(StreamID stream_id) {
   RTC_DCHECK(prepared_);
-  deferred_.emplace_back([stream_id](DcSctpSocketCallbacks& cb) {
-    cb.OnBufferedAmountLow(stream_id);
-  });
+  deferred_.emplace_back(
+      +[](CallbackData data, DcSctpSocketCallbacks& cb) {
+        return cb.OnBufferedAmountLow(std::get<StreamID>(std::move(data)));
+      },
+      stream_id);
 }
 
 void CallbackDeferrer::OnTotalBufferedAmountLow() {
   RTC_DCHECK(prepared_);
   deferred_.emplace_back(
-      [](DcSctpSocketCallbacks& cb) { cb.OnTotalBufferedAmountLow(); });
+      +[](CallbackData /* data */, DcSctpSocketCallbacks& cb) {
+        return cb.OnTotalBufferedAmountLow();
+      },
+      std::monostate{});
 }
 
 void CallbackDeferrer::OnLifecycleMessageExpired(LifecycleId lifecycle_id,

@@ -9,17 +9,42 @@
  */
 #include "test/scenario/scenario.h"
 
-#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/flags/flag.h"
-#include "absl/flags/parse.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
+#include "api/rtp_parameters.h"
+#include "api/task_queue/task_queue_factory.h"
+#include "api/test/network_emulation_manager.h"
+#include "api/units/data_size.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/socket_address.h"
+#include "rtc_base/strings/string_builder.h"
+#include "rtc_base/task_utils/repeating_task.h"
+#include "test/gtest.h"
 #include "test/logging/file_log_writer.h"
+#include "test/logging/log_writer.h"
 #include "test/network/network_emulation.h"
+#include "test/network/network_emulation_manager.h"
+#include "test/network/simulated_network.h"
+#include "test/scenario/audio_stream.h"
+#include "test/scenario/call_client.h"
+#include "test/scenario/column_printer.h"
+#include "test/scenario/network_node.h"
+#include "test/scenario/scenario_config.h"
+#include "test/scenario/video_stream.h"
 #include "test/testsupport/file_utils.h"
 
 ABSL_FLAG(bool, scenario_logs, false, "Save logs from scenario framework.");
@@ -65,20 +90,21 @@ Scenario::Scenario(
     std::unique_ptr<LogWriterFactoryInterface> log_writer_factory,
     bool real_time)
     : log_writer_factory_(std::move(log_writer_factory)),
-      network_manager_(real_time ? TimeMode::kRealTime : TimeMode::kSimulated),
+      network_manager_({.time_mode = real_time ? TimeMode::kRealTime
+                                               : TimeMode::kSimulated}),
       clock_(network_manager_.time_controller()->GetClock()),
       audio_decoder_factory_(CreateBuiltinAudioDecoderFactory()),
       audio_encoder_factory_(CreateBuiltinAudioEncoderFactory()),
       task_queue_(network_manager_.time_controller()
                       ->GetTaskQueueFactory()
                       ->CreateTaskQueue("Scenario",
-                                        TaskQueueFactory::Priority::NORMAL)) {}
+                                        TaskQueueFactory::Priority::kNormal)) {}
 
 Scenario::~Scenario() {
   if (start_time_.IsFinite())
     Stop();
   for (auto& call_client : clients_) {
-    call_client->transport_->Disconnect();
+    call_client->SendTask([&] { call_client->transport_->Disconnect(); });
     call_client->UnBind();
   }
 }
@@ -86,7 +112,7 @@ Scenario::~Scenario() {
 ColumnPrinter Scenario::TimePrinter() {
   return ColumnPrinter::Lambda(
       "time",
-      [this](rtc::SimpleStringBuilder& sb) {
+      [this](StringBuilder& sb) {
         sb.AppendFormat("%.3lf", Now().seconds<double>());
       },
       32);
@@ -161,7 +187,7 @@ void Scenario::ChangeRoute(std::pair<CallClient*, CallClient*> clients,
                            DataSize overhead) {
   EmulatedRoute* route = network_manager_.CreateRoute(over_nodes);
   uint16_t port = clients.second->Bind(route->to);
-  auto addr = rtc::SocketAddress(route->to->GetPeerLocalAddress(), port);
+  auto addr = SocketAddress(route->to->GetPeerLocalAddress(), port);
   clients.first->transport_->Connect(route->from, addr, overhead);
 }
 
@@ -223,6 +249,9 @@ VideoStreamPair* Scenario::CreateVideoStream(
 VideoStreamPair* Scenario::CreateVideoStream(
     std::pair<CallClient*, CallClient*> clients,
     VideoStreamConfig config) {
+  std::vector<RtpExtension> extensions = GetVideoRtpExtensions(config);
+  clients.first->SetVideoReceiveRtpHeaderExtensions(extensions);
+  clients.second->SetVideoReceiveRtpHeaderExtensions(extensions);
   video_streams_.emplace_back(
       new VideoStreamPair(clients.first, clients.second, config));
   return video_streams_.back().get();
@@ -239,6 +268,9 @@ AudioStreamPair* Scenario::CreateAudioStream(
 AudioStreamPair* Scenario::CreateAudioStream(
     std::pair<CallClient*, CallClient*> clients,
     AudioStreamConfig config) {
+  std::vector<RtpExtension> extensions = GetAudioRtpExtensions(config);
+  clients.first->SetAudioReceiveRtpHeaderExtensions(extensions);
+  clients.second->SetAudioReceiveRtpHeaderExtensions(extensions);
   audio_streams_.emplace_back(
       new AudioStreamPair(clients.first, audio_encoder_factory_, clients.second,
                           audio_decoder_factory_, config));

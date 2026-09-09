@@ -8,19 +8,39 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
 #include <queue>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/strings/string_view.h"
+#include "api/environment/environment.h"
+#include "api/field_trials.h"
 #include "api/test/network_emulation/create_cross_traffic.h"
 #include "api/test/network_emulation/cross_traffic.h"
 #include "api/transport/goog_cc_factory.h"
+#include "api/transport/network_control.h"
 #include "api/transport/network_types.h"
 #include "api/units/data_rate.h"
-#include "logging/rtc_event_log/mock/mock_rtc_event_log.h"
-#include "test/field_trial.h"
+#include "api/units/data_size.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "call/video_receive_stream.h"
+#include "test/create_test_environment.h"
+#include "test/create_test_field_trials.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/network/network_emulation.h"
+#include "test/scenario/call_client.h"
+#include "test/scenario/column_printer.h"
 #include "test/scenario/scenario.h"
+#include "test/scenario/scenario_config.h"
 
+using ::testing::IsEmpty;
 using ::testing::NiceMock;
 
 namespace webrtc {
@@ -50,15 +70,12 @@ int CountBandwidthDips(std::queue<DataRate> bandwidth_history,
   }
   return dips;
 }
-GoogCcNetworkControllerFactory CreateFeedbackOnlyFactory() {
-  GoogCcFactoryConfig config;
-  config.feedback_only = true;
-  return GoogCcNetworkControllerFactory(std::move(config));
-}
 
-const uint32_t kInitialBitrateKbps = 60;
-const DataRate kInitialBitrate = DataRate::KilobitsPerSec(kInitialBitrateKbps);
-const float kDefaultPacingRate = 2.5f;
+constexpr uint32_t kInitialBitrateKbps = 60;
+constexpr DataRate kInitialBitrate =
+    DataRate::KilobitsPerSec(kInitialBitrateKbps);
+constexpr float kDefaultPacingRate = 2.5f;
+constexpr float kDefaultPacingRateSendSideBwe = 1.1f;
 
 CallClient* CreateVideoSendingClient(
     Scenario* s,
@@ -75,9 +92,9 @@ CallClient* CreateVideoSendingClient(
 
 NetworkRouteChange CreateRouteChange(
     Timestamp time,
-    absl::optional<DataRate> start_rate = absl::nullopt,
-    absl::optional<DataRate> min_rate = absl::nullopt,
-    absl::optional<DataRate> max_rate = absl::nullopt) {
+    std::optional<DataRate> start_rate = std::nullopt,
+    std::optional<DataRate> min_rate = std::nullopt,
+    std::optional<DataRate> max_rate = std::nullopt) {
   NetworkRouteChange route_change;
   route_change.at_time = time;
   route_change.constraints.at_time = time;
@@ -101,14 +118,14 @@ PacketResult CreatePacketResult(Timestamp arrival_time,
 }
 
 // Simulate sending packets and receiving transport feedback during
-// `runtime_ms`.
-absl::optional<DataRate> PacketTransmissionAndFeedbackBlock(
+// `runtime_ms`, then return the final target birate.
+std::optional<DataRate> PacketTransmissionAndFeedbackBlock(
     NetworkControllerInterface* controller,
     int64_t runtime_ms,
     int64_t delay,
     Timestamp& current_time) {
   NetworkControlUpdate update;
-  absl::optional<DataRate> target_bitrate;
+  std::optional<DataRate> target_bitrate;
   int64_t delay_buildup = 0;
   int64_t start_time_ms = current_time.ms();
   while (current_time.ms() - start_time_ms < runtime_ms) {
@@ -139,11 +156,12 @@ absl::optional<DataRate> PacketTransmissionAndFeedbackBlock(
 
 // Scenarios:
 
-void UpdatesTargetRateBasedOnLinkCapacity(absl::string_view test_name = "") {
-  ScopedFieldTrials trial("WebRTC-SendSideBwe-WithOverhead/Enabled/");
-  auto factory = CreateFeedbackOnlyFactory();
+void UpdatesTargetRateBasedOnLinkCapacity(absl::string_view test_name = "",
+                                          absl::string_view field_trials = "") {
+  GoogCcNetworkControllerFactory factory;
   Scenario s("googcc_unit/target_capacity" + std::string(test_name), false);
   CallClientConfig config;
+  config.field_trials.Merge(CreateTestFieldTrials(field_trials));
   config.transport.cc_factory = &factory;
   config.transport.rates.min_rate = DataRate::KilobitsPerSec(10);
   config.transport.rates.max_rate = DataRate::KilobitsPerSec(1500);
@@ -222,7 +240,10 @@ DataRate RunRembDipScenario(absl::string_view test_name) {
 
 class NetworkControllerTestFixture {
  public:
-  NetworkControllerTestFixture() : factory_() {}
+  explicit NetworkControllerTestFixture(absl::string_view field_trials = "")
+      : field_trials_(CreateTestFieldTrials(field_trials)) {}
+  explicit NetworkControllerTestFixture(GoogCcFactoryConfig googcc_config)
+      : factory_(std::move(googcc_config)) {}
 
   std::unique_ptr<NetworkControllerInterface> CreateController() {
     NetworkControllerConfig config = InitialConfig();
@@ -236,7 +257,7 @@ class NetworkControllerTestFixture {
       int starting_bandwidth_kbps = kInitialBitrateKbps,
       int min_data_rate_kbps = 0,
       int max_data_rate_kbps = 5 * kInitialBitrateKbps) {
-    NetworkControllerConfig config;
+    NetworkControllerConfig config(env_);
     config.constraints.at_time = Timestamp::Zero();
     config.constraints.min_data_rate =
         DataRate::KilobitsPerSec(min_data_rate_kbps);
@@ -244,20 +265,24 @@ class NetworkControllerTestFixture {
         DataRate::KilobitsPerSec(max_data_rate_kbps);
     config.constraints.starting_rate =
         DataRate::KilobitsPerSec(starting_bandwidth_kbps);
-    config.event_log = &event_log_;
     return config;
   }
 
-  NiceMock<MockRtcEventLog> event_log_;
+  FieldTrials field_trials_ = CreateTestFieldTrials();
+  const Environment env_ =
+      CreateTestEnvironment({.field_trials = &field_trials_});
   GoogCcNetworkControllerFactory factory_;
 };
 
-TEST(GoogCcNetworkControllerTest, InitializeTargetRateOnFirstProcessInterval) {
+TEST(GoogCcNetworkControllerTest,
+     InitializeTargetRateOnFirstProcessIntervalAfterNetworkAvailable) {
   NetworkControllerTestFixture fixture;
   std::unique_ptr<NetworkControllerInterface> controller =
       fixture.CreateController();
 
-  NetworkControlUpdate update =
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = Timestamp::Millis(123456), .network_available = true});
+  update =
       controller->OnProcessInterval({.at_time = Timestamp::Millis(123456)});
 
   EXPECT_EQ(update.target_rate->target_rate, kInitialBitrate);
@@ -269,13 +294,75 @@ TEST(GoogCcNetworkControllerTest, InitializeTargetRateOnFirstProcessInterval) {
             kInitialBitrate * 5);
 }
 
-TEST(GoogCcNetworkControllerTest, ReactsToChangedNetworkConditions) {
+TEST(GoogCcNetworkControllerTest, ChangeDefaultPacingFactorAfterFirstFeedback) {
+  NetworkControllerTestFixture fixture;
+  std::unique_ptr<NetworkControllerInterface> controller =
+      fixture.CreateController();
+
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = Timestamp::Millis(123456), .network_available = true});
+  update =
+      controller->OnProcessInterval({.at_time = Timestamp::Millis(123456)});
+  ASSERT_EQ(update.pacer_config->data_rate(),
+            kInitialBitrate * kDefaultPacingRate);
+
+  TransportPacketsFeedback feedback;
+  feedback.feedback_time = Timestamp::Millis(123457);
+  feedback.packet_feedbacks.push_back(CreatePacketResult(
+      feedback.feedback_time, feedback.feedback_time, 100, PacedPacketInfo()));
+  update = controller->OnTransportPacketsFeedback(feedback);
+  ASSERT_TRUE(update.pacer_config.has_value());
+  EXPECT_GE(update.pacer_config->data_rate(),
+            kInitialBitrate * kDefaultPacingRateSendSideBwe);
+  EXPECT_LT(update.pacer_config->data_rate(),
+            (kInitialBitrate + DataRate::KilobitsPerSec(5)) *
+                kDefaultPacingRateSendSideBwe);
+}
+
+TEST(GoogCcNetworkControllerTest, RespectsConfiguredPacingFactor) {
+  NetworkControllerTestFixture fixture;
+  std::unique_ptr<NetworkControllerInterface> controller =
+      fixture.CreateController();
+
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = Timestamp::Millis(123456), .network_available = true});
+  update =
+      controller->OnProcessInterval({.at_time = Timestamp::Millis(123456)});
+  ASSERT_EQ(update.pacer_config->data_rate(),
+            kInitialBitrate * kDefaultPacingRate);
+
+  std::optional<PacerConfig> last_pacer_config;
+  StreamsConfig streams_config;
+  streams_config.pacing_factor = 10;
+
+  update = controller->OnStreamsConfig(streams_config);
+  if (update.pacer_config.has_value()) {
+    last_pacer_config = update.pacer_config;
+  }
+
+  TransportPacketsFeedback feedback;
+  feedback.feedback_time = Timestamp::Millis(123457);
+  feedback.packet_feedbacks.push_back(CreatePacketResult(
+      feedback.feedback_time, feedback.feedback_time, 100, PacedPacketInfo()));
+  update = controller->OnTransportPacketsFeedback(feedback);
+  if (update.pacer_config.has_value()) {
+    last_pacer_config = update.pacer_config;
+  }
+
+  ASSERT_TRUE(last_pacer_config.has_value());
+  EXPECT_GE(last_pacer_config->data_rate(), kInitialBitrate * 10);
+  EXPECT_LT(last_pacer_config->data_rate(),
+            (kInitialBitrate + DataRate::KilobitsPerSec(5)) * 10);
+}
+
+TEST(GoogCcNetworkControllerTest, ReactsToChangedNetworkConditionsFromRemote) {
   NetworkControllerTestFixture fixture;
   std::unique_ptr<NetworkControllerInterface> controller =
       fixture.CreateController();
   Timestamp current_time = Timestamp::Millis(123);
-  NetworkControlUpdate update =
-      controller->OnProcessInterval({.at_time = current_time});
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = current_time, .network_available = true});
+  update = controller->OnProcessInterval({.at_time = current_time});
   update = controller->OnRemoteBitrateReport(
       {.receive_time = current_time, .bandwidth = kInitialBitrate * 2});
 
@@ -299,8 +386,11 @@ TEST(GoogCcNetworkControllerTest, OnNetworkRouteChanged) {
   std::unique_ptr<NetworkControllerInterface> controller =
       fixture.CreateController();
   Timestamp current_time = Timestamp::Millis(123);
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = current_time, .network_available = true});
   DataRate new_bitrate = DataRate::BitsPerSec(200000);
-  NetworkControlUpdate update = controller->OnNetworkRouteChange(
+
+  update = controller->OnNetworkRouteChange(
       CreateRouteChange(current_time, new_bitrate));
   EXPECT_EQ(update.target_rate->target_rate, new_bitrate);
   EXPECT_EQ(update.pacer_config->data_rate(), new_bitrate * kDefaultPacingRate);
@@ -311,8 +401,9 @@ TEST(GoogCcNetworkControllerTest, OnNetworkRouteChanged) {
   const DataRate kDefaultMinBitrate = DataRate::KilobitsPerSec(5);
   update = controller->OnNetworkRouteChange(CreateRouteChange(current_time));
   EXPECT_EQ(update.target_rate->target_rate, kDefaultMinBitrate);
-  EXPECT_NEAR(update.pacer_config->data_rate().bps<double>(),
-              kDefaultMinBitrate.bps<double>() * kDefaultPacingRate, 10);
+  EXPECT_EQ(update.pacer_config->data_window,
+            kDefaultMinBitrate * kDefaultPacingRate *
+                PacerConfig::kDefaultTimeInterval);
   EXPECT_EQ(update.probe_cluster_configs.size(), 2u);
 }
 
@@ -321,7 +412,11 @@ TEST(GoogCcNetworkControllerTest, ProbeOnRouteChange) {
   std::unique_ptr<NetworkControllerInterface> controller =
       fixture.CreateController();
   Timestamp current_time = Timestamp::Millis(123);
-  NetworkControlUpdate update = controller->OnNetworkRouteChange(
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = current_time, .network_available = true});
+  current_time += TimeDelta::Seconds(3);
+
+  update = controller->OnNetworkRouteChange(
       CreateRouteChange(current_time, 2 * kInitialBitrate, DataRate::Zero(),
                         20 * kInitialBitrate));
 
@@ -336,6 +431,28 @@ TEST(GoogCcNetworkControllerTest, ProbeOnRouteChange) {
   update = controller->OnProcessInterval({.at_time = current_time});
 }
 
+TEST(GoogCcNetworkControllerTest, ProbeAfterRouteChangeWhenTransportWritable) {
+  NetworkControllerTestFixture fixture;
+  std::unique_ptr<NetworkControllerInterface> controller =
+      fixture.CreateController();
+  Timestamp current_time = Timestamp::Millis(123);
+
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = current_time, .network_available = false});
+  EXPECT_THAT(update.probe_cluster_configs, IsEmpty());
+
+  update = controller->OnNetworkRouteChange(
+      CreateRouteChange(current_time, 2 * kInitialBitrate, DataRate::Zero(),
+                        20 * kInitialBitrate));
+  // Transport is not writable. So not point in sending a probe.
+  EXPECT_THAT(update.probe_cluster_configs, IsEmpty());
+
+  // Probe is sent when transport becomes writable.
+  update = controller->OnNetworkAvailability(
+      {.at_time = current_time, .network_available = true});
+  EXPECT_THAT(update.probe_cluster_configs, Not(IsEmpty()));
+}
+
 // Bandwidth estimation is updated when feedbacks are received.
 // Feedbacks which show an increasing delay cause the estimation to be reduced.
 TEST(GoogCcNetworkControllerTest, UpdatesDelayBasedEstimate) {
@@ -344,35 +461,38 @@ TEST(GoogCcNetworkControllerTest, UpdatesDelayBasedEstimate) {
       fixture.CreateController();
   const int64_t kRunTimeMs = 6000;
   Timestamp current_time = Timestamp::Millis(123);
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = current_time, .network_available = true});
 
   // The test must run and insert packets/feedback long enough that the
   // BWE computes a valid estimate. This is first done in an environment which
   // simulates no bandwidth limitation, and therefore not built-up delay.
-  absl::optional<DataRate> target_bitrate_before_delay =
+  std::optional<DataRate> target_bitrate_before_delay =
       PacketTransmissionAndFeedbackBlock(controller.get(), kRunTimeMs, 0,
                                          current_time);
   ASSERT_TRUE(target_bitrate_before_delay.has_value());
 
   // Repeat, but this time with a building delay, and make sure that the
   // estimation is adjusted downwards.
-  absl::optional<DataRate> target_bitrate_after_delay =
+  std::optional<DataRate> target_bitrate_after_delay =
       PacketTransmissionAndFeedbackBlock(controller.get(), kRunTimeMs, 50,
                                          current_time);
   EXPECT_LT(*target_bitrate_after_delay, *target_bitrate_before_delay);
 }
 
-TEST(GoogCcNetworkControllerTest, PaceAtMaxOfLowerLinkCapacityAndBwe) {
-  ScopedFieldTrials trial(
-      "WebRTC-Bwe-PaceAtMaxOfBweAndLowerLinkCapacity/Enabled/");
-  NetworkControllerTestFixture fixture;
+TEST(GoogCcNetworkControllerTest, LimitPacingFactorToUpperLinkCapacity) {
+  NetworkControllerTestFixture fixture(
+      /*field_trials=*/
+      "WebRTC-Bwe-LimitPacingFactorByUpperLinkCapacityEstimate/Enabled/");
   std::unique_ptr<NetworkControllerInterface> controller =
       fixture.CreateController();
   Timestamp current_time = Timestamp::Millis(123);
-  NetworkControlUpdate update =
-      controller->OnProcessInterval({.at_time = current_time});
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = current_time, .network_available = true});
+  update = controller->OnProcessInterval({.at_time = current_time});
   current_time += TimeDelta::Millis(100);
-  NetworkStateEstimate network_estimate = {.link_capacity_lower =
-                                               10 * kInitialBitrate};
+  NetworkStateEstimate network_estimate = {
+      .link_capacity_upper = kInitialBitrate * kDefaultPacingRate / 2};
   update = controller->OnNetworkStateEstimate(network_estimate);
   // OnNetworkStateEstimate does not trigger processing a new estimate. So add a
   // dummy loss report to trigger a BWE update in the next process interval.
@@ -386,37 +506,14 @@ TEST(GoogCcNetworkControllerTest, PaceAtMaxOfLowerLinkCapacityAndBwe) {
   update = controller->OnProcessInterval({.at_time = current_time});
   ASSERT_TRUE(update.pacer_config);
   ASSERT_TRUE(update.target_rate);
-  ASSERT_LT(update.target_rate->target_rate,
-            network_estimate.link_capacity_lower);
-  EXPECT_EQ(update.pacer_config->data_rate().kbps(),
-            network_estimate.link_capacity_lower.kbps() * kDefaultPacingRate);
-
-  current_time += TimeDelta::Millis(100);
-  // Set a low link capacity estimate and verify that pacing rate is set
-  // relative to loss based/delay based estimate.
-  network_estimate = {.link_capacity_lower = 0.5 * kInitialBitrate};
-  update = controller->OnNetworkStateEstimate(network_estimate);
-  // Again, we need to inject a dummy loss report to trigger an update of the
-  // BWE in the next process interval.
-  loss_report.start_time = current_time;
-  loss_report.end_time = current_time;
-  loss_report.receive_time = current_time;
-  loss_report.packets_received_delta = 50;
-  loss_report.packets_lost_delta = 0;
-  update = controller->OnTransportLossReport(loss_report);
-  update = controller->OnProcessInterval({.at_time = current_time});
-  ASSERT_TRUE(update.target_rate);
-  ASSERT_GT(update.target_rate->target_rate,
-            network_estimate.link_capacity_lower);
-  EXPECT_EQ(update.pacer_config->data_rate().kbps(),
-            update.target_rate->target_rate.kbps() * kDefaultPacingRate);
+  EXPECT_GE(update.target_rate->target_rate, kInitialBitrate);
+  EXPECT_EQ(update.pacer_config->data_rate(),
+            network_estimate.link_capacity_upper);
 }
 
 // Test congestion window pushback on network delay happens.
 TEST(GoogCcScenario, CongestionWindowPushbackOnNetworkDelay) {
-  auto factory = CreateFeedbackOnlyFactory();
-  ScopedFieldTrials trial(
-      "WebRTC-CongestionWindow/QueueSize:800,MinBitrate:30000/");
+  GoogCcNetworkControllerFactory factory;
   Scenario s("googcc_unit/cwnd_on_delay", false);
   auto send_net =
       s.CreateMutableSimulationNode([=](NetworkSimulationConfig* c) {
@@ -426,6 +523,8 @@ TEST(GoogCcScenario, CongestionWindowPushbackOnNetworkDelay) {
   auto ret_net = s.CreateSimulationNode(
       [](NetworkSimulationConfig* c) { c->delay = TimeDelta::Millis(100); });
   CallClientConfig config;
+  config.field_trials.Set("WebRTC-CongestionWindow",
+                          "QueueSize:800,MinBitrate:30000");
   config.transport.cc_factory = &factory;
   // Start high so bandwidth drop has max effect.
   config.transport.rates.start_rate = DataRate::KilobitsPerSec(300);
@@ -448,9 +547,7 @@ TEST(GoogCcScenario, CongestionWindowPushbackOnNetworkDelay) {
 
 // Test congestion window pushback on network delay happens.
 TEST(GoogCcScenario, CongestionWindowPushbackDropFrameOnNetworkDelay) {
-  auto factory = CreateFeedbackOnlyFactory();
-  ScopedFieldTrials trial(
-      "WebRTC-CongestionWindow/QueueSize:800,MinBitrate:30000,DropFrame:true/");
+  GoogCcNetworkControllerFactory factory;
   Scenario s("googcc_unit/cwnd_on_delay", false);
   auto send_net =
       s.CreateMutableSimulationNode([=](NetworkSimulationConfig* c) {
@@ -460,6 +557,8 @@ TEST(GoogCcScenario, CongestionWindowPushbackDropFrameOnNetworkDelay) {
   auto ret_net = s.CreateSimulationNode(
       [](NetworkSimulationConfig* c) { c->delay = TimeDelta::Millis(100); });
   CallClientConfig config;
+  config.field_trials.Set("WebRTC-CongestionWindow",
+                          "QueueSize:800,MinBitrate:30000,DropFrame:true");
   config.transport.cc_factory = &factory;
   // Start high so bandwidth drop has max effect.
   config.transport.rates.start_rate = DataRate::KilobitsPerSec(300);
@@ -480,9 +579,6 @@ TEST(GoogCcScenario, CongestionWindowPushbackDropFrameOnNetworkDelay) {
 }
 
 TEST(GoogCcScenario, PaddingRateLimitedByCongestionWindowInTrial) {
-  ScopedFieldTrials trial(
-      "WebRTC-CongestionWindow/QueueSize:200,MinBitrate:30000/");
-
   Scenario s("googcc_unit/padding_limited", false);
   auto send_net =
       s.CreateMutableSimulationNode([=](NetworkSimulationConfig* c) {
@@ -492,6 +588,8 @@ TEST(GoogCcScenario, PaddingRateLimitedByCongestionWindowInTrial) {
   auto ret_net = s.CreateSimulationNode(
       [](NetworkSimulationConfig* c) { c->delay = TimeDelta::Millis(100); });
   CallClientConfig config;
+  config.field_trials.Set("WebRTC-CongestionWindow",
+                          "QueueSize:200,MinBitrate:30000");
   // Start high so bandwidth drop has max effect.
   config.transport.rates.start_rate = DataRate::KilobitsPerSec(1000);
   config.transport.rates.max_rate = DataRate::KilobitsPerSec(2000);
@@ -520,8 +618,6 @@ TEST(GoogCcScenario, LimitsToFloorIfRttIsHighInTrial) {
   // allows the RTT to recover faster than the regular control mechanism would
   // achieve.
   const DataRate kBandwidthFloor = DataRate::KilobitsPerSec(50);
-  ScopedFieldTrials trial("WebRTC-Bwe-MaxRttLimit/limit:2s,floor:" +
-                          std::to_string(kBandwidthFloor.kbps()) + "kbps/");
   // In the test case, we limit the capacity and add a cross traffic packet
   // burst that blocks media from being sent. This causes the RTT to quickly
   // increase above the threshold in the trial.
@@ -535,6 +631,9 @@ TEST(GoogCcScenario, LimitsToFloorIfRttIsHighInTrial) {
   auto ret_net = s.CreateSimulationNode(
       [](NetworkSimulationConfig* c) { c->delay = TimeDelta::Millis(100); });
   CallClientConfig config;
+  config.field_trials.Set(
+      "WebRTC-Bwe-MaxRttLimit",
+      "limit:2s,floor:" + std::to_string(kBandwidthFloor.kbps()) + "kbps");
   config.transport.rates.start_rate = kLinkCapacity;
 
   auto* client = CreateVideoSendingClient(&s, config, {send_net}, {ret_net});
@@ -555,51 +654,7 @@ TEST(GoogCcScenario, UpdatesTargetRateBasedOnLinkCapacity) {
   UpdatesTargetRateBasedOnLinkCapacity();
 }
 
-TEST(GoogCcScenario, StableEstimateDoesNotVaryInSteadyState) {
-  auto factory = CreateFeedbackOnlyFactory();
-  Scenario s("googcc_unit/stable_target", false);
-  CallClientConfig config;
-  config.transport.cc_factory = &factory;
-  NetworkSimulationConfig net_conf;
-  net_conf.bandwidth = DataRate::KilobitsPerSec(500);
-  net_conf.delay = TimeDelta::Millis(100);
-  auto send_net = s.CreateSimulationNode(net_conf);
-  auto ret_net = s.CreateSimulationNode(net_conf);
-
-  auto* client = CreateVideoSendingClient(&s, config, {send_net}, {ret_net});
-  // Run for a while to allow the estimate to stabilize.
-  s.RunFor(TimeDelta::Seconds(30));
-  DataRate min_stable_target = DataRate::PlusInfinity();
-  DataRate max_stable_target = DataRate::MinusInfinity();
-  DataRate min_target = DataRate::PlusInfinity();
-  DataRate max_target = DataRate::MinusInfinity();
-
-  // Measure variation in steady state.
-  for (int i = 0; i < 20; ++i) {
-    auto stable_target_rate = client->stable_target_rate();
-    auto target_rate = client->target_rate();
-    EXPECT_LE(stable_target_rate, target_rate);
-
-    min_stable_target = std::min(min_stable_target, stable_target_rate);
-    max_stable_target = std::max(max_stable_target, stable_target_rate);
-    min_target = std::min(min_target, target_rate);
-    max_target = std::max(max_target, target_rate);
-    s.RunFor(TimeDelta::Seconds(1));
-  }
-  // We should expect drops by at least 15% (default backoff.)
-  EXPECT_LT(min_target / max_target, 0.85);
-  // We should expect the stable target to be more stable than the immediate one
-  EXPECT_GE(min_stable_target / max_stable_target, min_target / max_target);
-}
-
-TEST(GoogCcScenario, LossBasedControlUpdatesTargetRateBasedOnLinkCapacity) {
-  ScopedFieldTrials trial("WebRTC-Bwe-LossBasedControl/Enabled/");
-  // TODO(srte): Should the behavior be unaffected at low loss rates?
-  UpdatesTargetRateBasedOnLinkCapacity("_loss_based");
-}
-
 TEST(GoogCcScenario, LossBasedControlDoesModestBackoffToHighLoss) {
-  ScopedFieldTrials trial("WebRTC-Bwe-LossBasedControl/Enabled/");
   Scenario s("googcc_unit/high_loss_channel", false);
   CallClientConfig config;
   config.transport.rates.min_rate = DataRate::KilobitsPerSec(10);
@@ -616,7 +671,6 @@ TEST(GoogCcScenario, LossBasedControlDoesModestBackoffToHighLoss) {
   auto* client = CreateVideoSendingClient(&s, config, {send_net}, {ret_net});
 
   s.RunFor(TimeDelta::Seconds(120));
-  // Without LossBasedControl trial, bandwidth drops to ~10 kbps.
   EXPECT_GT(client->target_rate().kbps(), 100);
 }
 
@@ -665,66 +719,17 @@ DataRate AverageBitrateAfterCrossInducedLoss(absl::string_view name) {
          s.TimeSinceStart();
 }
 
-TEST(GoogCcScenario, LossBasedRecoversFasterAfterCrossInducedLoss) {
-  // This test acts as a reference for the test below, showing that without the
-  // trial, we have worse behavior.
-  DataRate average_bitrate_without_loss_based =
-      AverageBitrateAfterCrossInducedLoss("googcc_unit/no_cross_loss_based");
-
-  // We recover bitrate better when subject to loss spikes from cross traffic
-  // when loss based controller is used.
-  ScopedFieldTrials trial("WebRTC-Bwe-LossBasedControl/Enabled/");
-  DataRate average_bitrate_with_loss_based =
-      AverageBitrateAfterCrossInducedLoss("googcc_unit/cross_loss_based");
-
-  EXPECT_GE(average_bitrate_with_loss_based,
-            average_bitrate_without_loss_based * 1.05);
-}
-
-TEST(GoogCcScenario, LossBasedEstimatorCapsRateAtModerateLoss) {
-  ScopedFieldTrials trial("WebRTC-Bwe-LossBasedControl/Enabled/");
-  Scenario s("googcc_unit/moderate_loss_channel", false);
-  CallClientConfig config;
-  config.transport.rates.min_rate = DataRate::KilobitsPerSec(10);
-  config.transport.rates.max_rate = DataRate::KilobitsPerSec(5000);
-  config.transport.rates.start_rate = DataRate::KilobitsPerSec(1000);
-
-  NetworkSimulationConfig network;
-  network.bandwidth = DataRate::KilobitsPerSec(2000);
-  network.delay = TimeDelta::Millis(100);
-  // 3% loss rate is in the moderate loss rate region at 2000 kbps, limiting the
-  // bitrate increase.
-  network.loss_rate = 0.03;
-  auto send_net = s.CreateMutableSimulationNode(network);
-  auto* client = s.CreateClient("send", std::move(config));
-  auto* route = s.CreateRoutes(client, {send_net->node()},
-                               s.CreateClient("return", CallClientConfig()),
-                               {s.CreateSimulationNode(network)});
-  s.CreateVideoStream(route->forward(), VideoStreamConfig());
-  // Allow the controller to stabilize at the lower bitrate.
-  s.RunFor(TimeDelta::Seconds(1));
-  // This increase in capacity would cause the target bitrate to increase to
-  // over 4000 kbps without LossBasedControl.
-  send_net->UpdateConfig([](NetworkSimulationConfig* c) {
-    c->bandwidth = DataRate::KilobitsPerSec(5000);
-  });
-  s.RunFor(TimeDelta::Seconds(20));
-  // Using LossBasedControl, the bitrate will not increase over 2500 kbps since
-  // we have detected moderate loss.
-  EXPECT_LT(client->target_rate().kbps(), 2500);
-}
-
 TEST(GoogCcScenario, MaintainsLowRateInSafeResetTrial) {
   const DataRate kLinkCapacity = DataRate::KilobitsPerSec(200);
   const DataRate kStartRate = DataRate::KilobitsPerSec(300);
 
-  ScopedFieldTrials trial("WebRTC-Bwe-SafeResetOnRouteChange/Enabled/");
   Scenario s("googcc_unit/safe_reset_low");
   auto* send_net = s.CreateSimulationNode([&](NetworkSimulationConfig* c) {
     c->bandwidth = kLinkCapacity;
     c->delay = TimeDelta::Millis(10);
   });
   auto* client = s.CreateClient("send", [&](CallClientConfig* c) {
+    c->field_trials.Set("WebRTC-Bwe-SafeResetOnRouteChange", "Enabled");
     c->transport.rates.start_rate = kStartRate;
   });
   auto* route = s.CreateRoutes(
@@ -741,19 +746,21 @@ TEST(GoogCcScenario, MaintainsLowRateInSafeResetTrial) {
   EXPECT_NEAR(client->send_bandwidth().kbps(), kLinkCapacity.kbps(), 50);
 }
 
-TEST(GoogCcScenario, CutsHighRateInSafeResetTrial) {
+TEST(GoogCcScenario, DoNotResetBweUnlessNetworkAdapterChangeOnRoutChange) {
+  Scenario s("googcc_unit/do_not_reset_bwe_unless_adapter_change");
+
   const DataRate kLinkCapacity = DataRate::KilobitsPerSec(1000);
   const DataRate kStartRate = DataRate::KilobitsPerSec(300);
 
-  ScopedFieldTrials trial("WebRTC-Bwe-SafeResetOnRouteChange/Enabled/");
-  Scenario s("googcc_unit/safe_reset_high_cut");
   auto send_net = s.CreateSimulationNode([&](NetworkSimulationConfig* c) {
     c->bandwidth = kLinkCapacity;
     c->delay = TimeDelta::Millis(50);
   });
   auto* client = s.CreateClient("send", [&](CallClientConfig* c) {
+    c->field_trials.Set("WebRTC-Bwe-ResetOnAdapterIdChange", "Enabled");
     c->transport.rates.start_rate = kStartRate;
   });
+  client->UpdateNetworkAdapterId(0);
   auto* route = s.CreateRoutes(
       client, {send_net}, s.CreateClient("return", CallClientConfig()),
       {s.CreateSimulationNode(NetworkSimulationConfig())});
@@ -764,14 +771,48 @@ TEST(GoogCcScenario, CutsHighRateInSafeResetTrial) {
   s.ChangeRoute(route->forward(), {send_net});
   // Allow new settings to propagate.
   s.RunFor(TimeDelta::Millis(50));
+  // Under the trial, the target should not drop.
+  EXPECT_NEAR(client->send_bandwidth().kbps(), kLinkCapacity.kbps(), 300);
+
+  s.RunFor(TimeDelta::Millis(500));
+  // But if adapter id change, BWE should reset and start from the beginning if
+  // the network route changes.
+  client->UpdateNetworkAdapterId(1);
+  s.ChangeRoute(route->forward(), {send_net});
+  // Allow new settings to propagate.
+  s.RunFor(TimeDelta::Millis(50));
+  EXPECT_NEAR(client->send_bandwidth().kbps(), kStartRate.kbps(), 30);
+}
+
+TEST(GoogCcScenario, CutsHighRateInSafeResetTrial) {
+  const DataRate kLinkCapacity = DataRate::KilobitsPerSec(1000);
+  const DataRate kStartRate = DataRate::KilobitsPerSec(300);
+
+  Scenario s("googcc_unit/safe_reset_high_cut");
+  auto send_net = s.CreateSimulationNode([&](NetworkSimulationConfig* c) {
+    c->bandwidth = kLinkCapacity;
+    c->delay = TimeDelta::Millis(50);
+  });
+  auto* client = s.CreateClient("send", [&](CallClientConfig* c) {
+    c->field_trials.Set("WebRTC-Bwe-SafeResetOnRouteChange", "Enabled");
+    c->transport.rates.start_rate = kStartRate;
+  });
+  auto* route = s.CreateRoutes(
+      client, {send_net}, s.CreateClient("return", CallClientConfig()),
+      {s.CreateSimulationNode(NetworkSimulationConfig())});
+  s.CreateVideoStream(route->forward(), VideoStreamConfig());
+  // Allow the controller to stabilize.
+  s.RunFor(TimeDelta::Millis(500));
+  EXPECT_NEAR(client->send_bandwidth().kbps(), kLinkCapacity.kbps(), 300);
+  client->UpdateNetworkAdapterId(1);
+  s.ChangeRoute(route->forward(), {send_net});
+  // Allow new settings to propagate.
+  s.RunFor(TimeDelta::Millis(50));
   // Under the trial, the target should be reset from high values.
   EXPECT_NEAR(client->send_bandwidth().kbps(), kStartRate.kbps(), 30);
 }
 
 TEST(GoogCcScenario, DetectsHighRateInSafeResetTrial) {
-  ScopedFieldTrials trial(
-      "WebRTC-Bwe-SafeResetOnRouteChange/Enabled,ack/"
-      "WebRTC-SendSideBwe-WithOverhead/Enabled/");
   const DataRate kInitialLinkCapacity = DataRate::KilobitsPerSec(200);
   const DataRate kNewLinkCapacity = DataRate::KilobitsPerSec(800);
   const DataRate kStartRate = DataRate::KilobitsPerSec(300);
@@ -786,6 +827,7 @@ TEST(GoogCcScenario, DetectsHighRateInSafeResetTrial) {
     c->delay = TimeDelta::Millis(50);
   });
   auto* client = s.CreateClient("send", [&](CallClientConfig* c) {
+    c->field_trials.Set("WebRTC-Bwe-SafeResetOnRouteChange", "Enabled,ack");
     c->transport.rates.start_rate = kStartRate;
   });
   auto* route = s.CreateRoutes(
@@ -795,6 +837,7 @@ TEST(GoogCcScenario, DetectsHighRateInSafeResetTrial) {
   // Allow the controller to stabilize.
   s.RunFor(TimeDelta::Millis(2000));
   EXPECT_NEAR(client->send_bandwidth().kbps(), kInitialLinkCapacity.kbps(), 50);
+  client->UpdateNetworkAdapterId(1);
   s.ChangeRoute(route->forward(), {new_net});
   // Allow new settings to propagate, but not probes to be received.
   s.RunFor(TimeDelta::Millis(50));
@@ -809,12 +852,6 @@ TEST(GoogCcScenario, DetectsHighRateInSafeResetTrial) {
 }
 
 TEST(GoogCcScenario, TargetRateReducedOnPacingBufferBuildupInTrial) {
-  // Configure strict pacing to ensure build-up.
-  ScopedFieldTrials trial(
-      "WebRTC-CongestionWindow/QueueSize:100,MinBitrate:30000/"
-      "WebRTC-Video-Pacing/factor:1.0/"
-      "WebRTC-AddPacingToCongestionWindowPushback/Enabled/");
-
   const DataRate kLinkCapacity = DataRate::KilobitsPerSec(1000);
   const DataRate kStartRate = DataRate::KilobitsPerSec(1000);
 
@@ -824,6 +861,11 @@ TEST(GoogCcScenario, TargetRateReducedOnPacingBufferBuildupInTrial) {
     c->delay = TimeDelta::Millis(50);
   });
   auto* client = s.CreateClient("send", [&](CallClientConfig* c) {
+    c->field_trials.Set("WebRTC-CongestionWindow",
+                        "QueueSize:100,MinBitrate:30000");
+    c->field_trials.Set("WebRTC-Video-Pacing", "factor:1.0");
+    c->field_trials.Set("WebRTC-AddPacingToCongestionWindowPushback",
+                        "Enabled");
     c->transport.rates.start_rate = kStartRate;
   });
   auto* route = s.CreateRoutes(
@@ -838,7 +880,6 @@ TEST(GoogCcScenario, TargetRateReducedOnPacingBufferBuildupInTrial) {
 }
 
 TEST(GoogCcScenario, NoBandwidthTogglingInLossControlTrial) {
-  ScopedFieldTrials trial("WebRTC-Bwe-LossBasedControl/Enabled/");
   Scenario s("googcc_unit/no_toggling");
   auto* send_net = s.CreateSimulationNode([&](NetworkSimulationConfig* c) {
     c->bandwidth = DataRate::KilobitsPerSec(2000);
@@ -847,6 +888,7 @@ TEST(GoogCcScenario, NoBandwidthTogglingInLossControlTrial) {
   });
 
   auto* client = s.CreateClient("send", [&](CallClientConfig* c) {
+    c->field_trials.Set("WebRTC-Bwe-LossBasedControl", "Enabled");
     c->transport.rates.start_rate = DataRate::KilobitsPerSec(300);
   });
   auto* route = s.CreateRoutes(
@@ -872,7 +914,6 @@ TEST(GoogCcScenario, NoBandwidthTogglingInLossControlTrial) {
 }
 
 TEST(GoogCcScenario, NoRttBackoffCollapseWhenVideoStops) {
-  ScopedFieldTrials trial("WebRTC-Bwe-MaxRttLimit/limit:2s/");
   Scenario s("googcc_unit/rttbackoff_video_stop");
   auto* send_net = s.CreateSimulationNode([&](NetworkSimulationConfig* c) {
     c->bandwidth = DataRate::KilobitsPerSec(2000);
@@ -880,6 +921,7 @@ TEST(GoogCcScenario, NoRttBackoffCollapseWhenVideoStops) {
   });
 
   auto* client = s.CreateClient("send", [&](CallClientConfig* c) {
+    c->field_trials.Set("WebRTC-Bwe-MaxRttLimit", "limit:2s");
     c->transport.rates.start_rate = DataRate::KilobitsPerSec(1000);
   });
   auto* route = s.CreateRoutes(
@@ -947,11 +989,106 @@ TEST(GoogCcScenario, FastRampupOnRembCapLifted) {
   EXPECT_GT(final_estimate.kbps(), 1500);
 }
 
-TEST(GoogCcScenario, SlowRampupOnRembCapLiftedWithFieldTrial) {
-  ScopedFieldTrials trial("WebRTC-Bwe-ReceiverLimitCapsOnly/Disabled/");
-  DataRate final_estimate =
-      RunRembDipScenario("googcc_unit/legacy_slow_rampup_on_remb_cap_lifted");
-  EXPECT_LT(final_estimate.kbps(), 1000);
+TEST(GoogCcScenario, FallbackToLossBasedBweWithoutPacketFeedback) {
+  const DataRate kLinkCapacity = DataRate::KilobitsPerSec(1000);
+  const DataRate kStartRate = DataRate::KilobitsPerSec(1000);
+
+  Scenario s("googcc_unit/high_loss_channel", false);
+  auto* net = s.CreateMutableSimulationNode([&](NetworkSimulationConfig* c) {
+    c->bandwidth = kLinkCapacity;
+    c->delay = TimeDelta::Millis(100);
+  });
+  auto* client = s.CreateClient("send", [&](CallClientConfig* c) {
+    c->transport.rates.start_rate = kStartRate;
+  });
+  auto* route = s.CreateRoutes(
+      client, {net->node()}, s.CreateClient("return", CallClientConfig()),
+      {s.CreateSimulationNode(NetworkSimulationConfig())});
+
+  // Create a config without packet feedback.
+  VideoStreamConfig video_config;
+  video_config.stream.packet_feedback = false;
+  s.CreateVideoStream(route->forward(), video_config);
+
+  s.RunFor(TimeDelta::Seconds(20));
+  // Bandwith does not backoff because network is normal.
+  EXPECT_GE(client->target_rate().kbps(), 500);
+
+  // Update the network to create high loss ratio
+  net->UpdateConfig([](NetworkSimulationConfig* c) { c->loss_rate = 0.15; });
+  s.RunFor(TimeDelta::Seconds(20));
+
+  // Bandwidth decreases thanks to loss based bwe v0.
+  EXPECT_LE(client->target_rate().kbps(), 300);
+}
+
+TEST(GoogCcNetworkControllerTest,
+     TriggersTargetRateUpdateWhenBandwidthLimitedChanges) {
+  NetworkControllerTestFixture fixture;
+  std::unique_ptr<NetworkControllerInterface> controller =
+      fixture.CreateController();
+  Timestamp current_time = Timestamp::Millis(123456);
+
+  NetworkControlUpdate update = controller->OnNetworkAvailability(
+      {.at_time = current_time, .network_available = true});
+  update = controller->OnProcessInterval({.at_time = current_time});
+  ASSERT_TRUE(update.target_rate.has_value());
+  EXPECT_TRUE(update.target_rate->is_bandwidth_limited);
+
+  // Send packet to initialize ALR detector
+  SentPacket sent_packet;
+  sent_packet.send_time = current_time;
+  sent_packet.size = DataSize::Bytes(1000);
+  update = controller->OnSentPacket(sent_packet);
+
+  // Wait 10 seconds without sending any packets (this will make budget ratio
+  // accumulate and enter ALR)
+  current_time += TimeDelta::Seconds(10);
+  // Send a tiny packet to trigger AlrDetector state change evaluation
+  sent_packet.send_time = current_time;
+  sent_packet.size = DataSize::Bytes(1);
+  update = controller->OnSentPacket(sent_packet);
+
+  bool alr_detected = false;
+  if (update.target_rate.has_value() &&
+      !update.target_rate->is_bandwidth_limited) {
+    alr_detected = true;
+  } else {
+    // Process interval should trigger target rate update if not already
+    // triggered by OnSentPacket
+    update = controller->OnProcessInterval({.at_time = current_time});
+    if (update.target_rate.has_value() &&
+        !update.target_rate->is_bandwidth_limited) {
+      alr_detected = true;
+    }
+  }
+  EXPECT_TRUE(alr_detected);
+
+  // Now send a large burst of packets to leave ALR.
+  // Target rate is kInitialBitrate (60kbps). Budget ratio needs to drop below
+  // 0.5. We send 50 packets of 1000 bytes.
+  bool bandwidth_limited_detected = false;
+  for (int i = 0; i < 50; ++i) {
+    current_time += TimeDelta::Millis(1);
+    sent_packet.send_time = current_time;
+    sent_packet.size = DataSize::Bytes(1000);
+    update = controller->OnSentPacket(sent_packet);
+    if (update.target_rate.has_value() &&
+        update.target_rate->is_bandwidth_limited) {
+      bandwidth_limited_detected = true;
+    }
+  }
+
+  if (!bandwidth_limited_detected) {
+    // Process interval should trigger target rate update if not already
+    // triggered by OnSentPacket
+    update = controller->OnProcessInterval({.at_time = current_time});
+    if (update.target_rate.has_value() &&
+        update.target_rate->is_bandwidth_limited) {
+      bandwidth_limited_detected = true;
+    }
+  }
+  EXPECT_TRUE(bandwidth_limited_detected);
 }
 
 }  // namespace test

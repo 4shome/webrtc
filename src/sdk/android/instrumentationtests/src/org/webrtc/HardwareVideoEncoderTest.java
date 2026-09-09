@@ -11,7 +11,6 @@
 package org.webrtc;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -74,7 +73,7 @@ public class HardwareVideoEncoderTest {
    * frame such as width and height. Also used from AndroidVideoDecoderInstrumentationTest.
    */
   static class MockEncoderCallback implements VideoEncoder.Callback {
-    private BlockingQueue<EncodedImage> frameQueue = new LinkedBlockingQueue<>();
+    private final BlockingQueue<EncodedImage> frameQueue = new LinkedBlockingQueue<>();
 
     @Override
     public void onEncodedFrame(EncodedImage frame, VideoEncoder.CodecSpecificInfo info) {
@@ -265,7 +264,7 @@ public class HardwareVideoEncoderTest {
   private final Object referencedFramesLock = new Object();
   private int referencedFrames;
 
-  private Runnable releaseFrameCallback = new Runnable() {
+  private final Runnable releaseFrameCallback = new Runnable() {
     @Override
     public void run() {
       synchronized (referencedFramesLock) {
@@ -342,14 +341,6 @@ public class HardwareVideoEncoderTest {
           fail("encoder.encode returned: " + returnValue); // Error
       }
     }
-  }
-
-  private static int getAlignedNumber(int number, int alignment) {
-    return (number / alignment) * alignment;
-  }
-
-  public static int getPixelAlignmentRequired() {
-    return PIXEL_ALIGNMENT_REQUIRED;
   }
 
   // # Tests
@@ -448,46 +439,9 @@ public class HardwareVideoEncoderTest {
     callback.assertFrameEncoded(frame);
     frame.release();
 
-    // Android MediaCodec only guarantees of proper operation with 16-pixel-aligned input frame.
-    // Force the size of input frame with the greatest multiple of 16 below the original size.
-    frame = generateFrame(getAlignedNumber(SETTINGS.width / 4, PIXEL_ALIGNMENT_REQUIRED),
-        getAlignedNumber(SETTINGS.height / 4, PIXEL_ALIGNMENT_REQUIRED));
+    frame = generateFrame(SETTINGS.width / 4, SETTINGS.height / 4);
     testEncodeFrame(encoder, frame, info);
     callback.assertFrameEncoded(frame);
-    frame.release();
-
-    assertEquals(VideoCodecStatus.OK, encoder.release());
-  }
-
-  @Test
-  @SmallTest
-  public void testEncodeAlignmentCheck() {
-    VideoEncoder encoder = createEncoder();
-    org.webrtc.HardwareVideoEncoderTest.MockEncoderCallback callback =
-        new org.webrtc.HardwareVideoEncoderTest.MockEncoderCallback();
-    assertEquals(VideoCodecStatus.OK, encoder.initEncode(SETTINGS, callback));
-
-    VideoFrame frame;
-    VideoEncoder.EncodeInfo info = new VideoEncoder.EncodeInfo(
-        new EncodedImage.FrameType[] {EncodedImage.FrameType.VideoFrameDelta});
-
-    frame = generateFrame(SETTINGS.width / 2, SETTINGS.height / 2);
-    assertEquals(VideoCodecStatus.OK, testEncodeFrame(encoder, frame, info));
-    frame.release();
-
-    // Android MediaCodec only guarantees of proper operation with 16-pixel-aligned input frame.
-    // Following input frame with non-aligned size would return ERR_SIZE.
-    frame = generateFrame(SETTINGS.width / 4, SETTINGS.height / 4);
-    assertNotEquals(VideoCodecStatus.OK, testEncodeFrame(encoder, frame, info));
-    frame.release();
-
-    // Since our encoder has returned with an error, we reinitialize the encoder.
-    assertEquals(VideoCodecStatus.OK, encoder.release());
-    assertEquals(VideoCodecStatus.OK, encoder.initEncode(SETTINGS, callback));
-
-    frame = generateFrame(getAlignedNumber(SETTINGS.width / 4, PIXEL_ALIGNMENT_REQUIRED),
-        getAlignedNumber(SETTINGS.height / 4, PIXEL_ALIGNMENT_REQUIRED));
-    assertEquals(VideoCodecStatus.OK, testEncodeFrame(encoder, frame, info));
     frame.release();
 
     assertEquals(VideoCodecStatus.OK, encoder.release());

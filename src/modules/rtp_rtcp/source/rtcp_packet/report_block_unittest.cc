@@ -10,7 +10,9 @@
 
 #include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
 
-#include <limits>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 
 #include "rtc_base/random.h"
 #include "test/gtest.h"
@@ -20,15 +22,15 @@ using webrtc::rtcp::ReportBlock;
 namespace webrtc {
 namespace {
 
-const uint32_t kRemoteSsrc = 0x23456789;
-const uint8_t kFractionLost = 55;
+constexpr uint32_t kRemoteSsrc = 0x23456789;
+constexpr uint8_t kFractionLost = 55;
 // Use values that are streamed differently LE and BE.
-const int32_t kCumulativeLost = 0x111213;
-const uint32_t kExtHighestSeqNum = 0x22232425;
-const uint32_t kJitter = 0x33343536;
-const uint32_t kLastSr = 0x44454647;
-const uint32_t kDelayLastSr = 0x55565758;
-const size_t kBufferLength = ReportBlock::kLength;
+constexpr int32_t kCumulativeLost = 0x111213;
+constexpr uint32_t kExtHighestSeqNum = 0x22232425;
+constexpr uint32_t kJitter = 0x33343536;
+constexpr uint32_t kLastSr = 0x44454647;
+constexpr uint32_t kDelayLastSr = 0x55565758;
+constexpr size_t kBufferLength = ReportBlock::kLength;
 
 TEST(RtcpPacketReportBlockTest, ParseChecksLength) {
   uint8_t buffer[kBufferLength];
@@ -68,7 +70,7 @@ TEST(RtcpPacketReportBlockTest, ParseMatchCreate) {
 
   EXPECT_EQ(kRemoteSsrc, parsed.source_ssrc());
   EXPECT_EQ(kFractionLost, parsed.fraction_lost());
-  EXPECT_EQ(kCumulativeLost, parsed.cumulative_lost_signed());
+  EXPECT_EQ(kCumulativeLost, parsed.cumulative_lost());
   EXPECT_EQ(kExtHighestSeqNum, parsed.extended_high_seq_num());
   EXPECT_EQ(kJitter, parsed.jitter());
   EXPECT_EQ(kLastSr, parsed.last_sr());
@@ -77,9 +79,6 @@ TEST(RtcpPacketReportBlockTest, ParseMatchCreate) {
 
 TEST(RtcpPacketReportBlockTest, ValidateCumulativeLost) {
   // CumulativeLost is a signed 24-bit integer.
-  // However, existing code expects it to be an unsigned integer.
-  // The case of negative values should be unusual; we return 0
-  // when caller wants an unsigned integer.
   const int32_t kMaxCumulativeLost = 0x7fffff;
   const int32_t kMinCumulativeLost = -0x800000;
   ReportBlock rb;
@@ -87,8 +86,7 @@ TEST(RtcpPacketReportBlockTest, ValidateCumulativeLost) {
   EXPECT_TRUE(rb.SetCumulativeLost(kMaxCumulativeLost));
   EXPECT_FALSE(rb.SetCumulativeLost(kMinCumulativeLost - 1));
   EXPECT_TRUE(rb.SetCumulativeLost(kMinCumulativeLost));
-  EXPECT_EQ(kMinCumulativeLost, rb.cumulative_lost_signed());
-  EXPECT_EQ(0u, rb.cumulative_lost());
+  EXPECT_EQ(rb.cumulative_lost(), kMinCumulativeLost);
 }
 
 TEST(RtcpPacketReportBlockTest, ParseNegativeCumulativeLost) {
@@ -103,7 +101,7 @@ TEST(RtcpPacketReportBlockTest, ParseNegativeCumulativeLost) {
   ReportBlock parsed;
   EXPECT_TRUE(parsed.Parse(buffer, kBufferLength));
 
-  EXPECT_EQ(kNegativeCumulativeLost, parsed.cumulative_lost_signed());
+  EXPECT_EQ(kNegativeCumulativeLost, parsed.cumulative_lost());
 }
 
 }  // namespace

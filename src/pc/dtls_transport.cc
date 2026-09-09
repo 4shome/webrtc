@@ -10,46 +10,36 @@
 
 #include "pc/dtls_transport.h"
 
-#include <utility>
+#include <optional>
 
-#include "absl/types/optional.h"
 #include "api/dtls_transport_interface.h"
+#include "api/ice_transport_interface.h"
 #include "api/make_ref_counted.h"
+#include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
+#include "p2p/dtls/dtls_transport_internal.h"
 #include "pc/ice_transport.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/ssl_stream_adapter.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread.h"
 
 namespace webrtc {
 
 // Implementation of DtlsTransportInterface
-DtlsTransport::DtlsTransport(
-    std::unique_ptr<cricket::DtlsTransportInternal> internal)
-    : owner_thread_(rtc::Thread::Current()),
+DtlsTransport::DtlsTransport(DtlsTransportInternal* internal,
+                             DtlsTransportObserverInterface* observer)
+    : observer_(observer),
+      owner_thread_(Thread::Current()),
       info_(DtlsTransportState::kNew),
-      internal_dtls_transport_(std::move(internal)),
-      ice_transport_(rtc::make_ref_counted<IceTransportWithPointer>(
-          internal_dtls_transport_->ice_transport())) {
-  RTC_DCHECK(internal_dtls_transport_.get());
-  internal_dtls_transport_->SubscribeDtlsTransportState(
-      [this](cricket::DtlsTransportInternal* transport,
-             DtlsTransportState state) {
-        OnInternalDtlsState(transport, state);
-      });
-  UpdateInformation();
+      ice_transport_(make_ref_counted<IceTransportWithPointer>(
+          internal->ice_transport())) {
+  RTC_DCHECK(internal);
+  UpdateInformation(internal);
 }
 
-DtlsTransport::~DtlsTransport() {
-  // We depend on the signaling thread to call Clear() before dropping
-  // its last reference to this object.
-  RTC_DCHECK(owner_thread_->IsCurrent() || !internal_dtls_transport_);
-}
-
-DtlsTransportInformation DtlsTransport::Information() {
-  MutexLock lock(&lock_);
-  return info_;
-}
+DtlsTransport::~DtlsTransport() = default;
 
 void DtlsTransport::RegisterObserver(DtlsTransportObserverInterface* observer) {
   RTC_DCHECK_RUN_ON(owner_thread_);
@@ -62,86 +52,80 @@ void DtlsTransport::UnregisterObserver() {
   observer_ = nullptr;
 }
 
-rtc::scoped_refptr<IceTransportInterface> DtlsTransport::ice_transport() {
+DtlsTransportInformation DtlsTransport::Information() {
+  MutexLock lock(&lock_);
+  return info_;
+}
+
+scoped_refptr<IceTransportInterface> DtlsTransport::ice_transport() {
   return ice_transport_;
 }
 
 // Internal functions
-void DtlsTransport::Clear() {
+void DtlsTransport::Clear(DtlsTransportInternal* internal) {
   RTC_DCHECK_RUN_ON(owner_thread_);
-  RTC_DCHECK(internal());
   bool must_send_event =
-      (internal()->dtls_state() != DtlsTransportState::kClosed);
-  // The destructor of cricket::DtlsTransportInternal calls back
-  // into DtlsTransport, so we can't hold the lock while releasing.
-  std::unique_ptr<cricket::DtlsTransportInternal> transport_to_release;
-  {
-    MutexLock lock(&lock_);
-    transport_to_release = std::move(internal_dtls_transport_);
-    ice_transport_->Clear();
-  }
-  UpdateInformation();
+      (internal->dtls_state() != DtlsTransportState::kClosed);
+  ice_transport_->Clear();
+  UpdateInformation(nullptr);
   if (observer_ && must_send_event) {
     observer_->OnStateChange(Information());
   }
 }
 
-void DtlsTransport::OnInternalDtlsState(
-    cricket::DtlsTransportInternal* transport,
-    DtlsTransportState state) {
+void DtlsTransport::OnInternalDtlsState(DtlsTransportInternal* transport) {
   RTC_DCHECK_RUN_ON(owner_thread_);
-  RTC_DCHECK(transport == internal());
-  RTC_DCHECK(state == internal()->dtls_state());
-  UpdateInformation();
+  UpdateInformation(transport);
   if (observer_) {
     observer_->OnStateChange(Information());
   }
 }
 
-void DtlsTransport::UpdateInformation() {
+void DtlsTransport::UpdateInformation(DtlsTransportInternal* internal) {
   RTC_DCHECK_RUN_ON(owner_thread_);
-  MutexLock lock(&lock_);
-  if (internal_dtls_transport_) {
-    if (internal_dtls_transport_->dtls_state() ==
-        DtlsTransportState::kConnected) {
+  if (internal) {
+    SSLRole internal_role;
+    std::optional<DtlsTransportTlsRole> role;
+    if (internal->GetDtlsRole(&internal_role)) {
+      switch (internal_role) {
+        case SSL_CLIENT:
+          role = DtlsTransportTlsRole::kClient;
+          break;
+        case SSL_SERVER:
+          role = DtlsTransportTlsRole::kServer;
+          break;
+      }
+    }
+
+    if (internal->dtls_state() == DtlsTransportState::kConnected) {
       bool success = true;
-      rtc::SSLRole internal_role;
-      absl::optional<DtlsTransportTlsRole> role;
       int ssl_cipher_suite;
       int tls_version;
       int srtp_cipher;
-      success &= internal_dtls_transport_->GetDtlsRole(&internal_role);
+      success &= internal->GetSslVersionBytes(&tls_version);
+      success &= internal->GetSslCipherSuite(&ssl_cipher_suite);
+      success &= internal->GetSrtpCryptoSuite(&srtp_cipher);
       if (success) {
-        switch (internal_role) {
-          case rtc::SSL_CLIENT:
-            role = DtlsTransportTlsRole::kClient;
-            break;
-          case rtc::SSL_SERVER:
-            role = DtlsTransportTlsRole::kServer;
-            break;
-        }
-      }
-      success &= internal_dtls_transport_->GetSslVersionBytes(&tls_version);
-      success &= internal_dtls_transport_->GetSslCipherSuite(&ssl_cipher_suite);
-      success &= internal_dtls_transport_->GetSrtpCryptoSuite(&srtp_cipher);
-      if (success) {
-        info_ = DtlsTransportInformation(
-            internal_dtls_transport_->dtls_state(), role, tls_version,
-            ssl_cipher_suite, srtp_cipher,
-            internal_dtls_transport_->GetRemoteSSLCertChain());
+        set_info(DtlsTransportInformation(
+            internal->dtls_state(), role, tls_version, ssl_cipher_suite,
+            srtp_cipher, internal->GetRemoteSSLCertChain(),
+            internal->GetSslGroupId()));
       } else {
         RTC_LOG(LS_ERROR) << "DtlsTransport in connected state has incomplete "
                              "TLS information";
-        info_ = DtlsTransportInformation(
-            internal_dtls_transport_->dtls_state(), role, absl::nullopt,
-            absl::nullopt, absl::nullopt,
-            internal_dtls_transport_->GetRemoteSSLCertChain());
+        set_info(DtlsTransportInformation(
+            internal->dtls_state(), role, std::nullopt, std::nullopt,
+            std::nullopt, internal->GetRemoteSSLCertChain(),
+            /* ssl_group_id= */ std::nullopt));
       }
     } else {
-      info_ = DtlsTransportInformation(internal_dtls_transport_->dtls_state());
+      set_info(DtlsTransportInformation(
+          internal->dtls_state(), role, std::nullopt, std::nullopt,
+          std::nullopt, internal->GetRemoteSSLCertChain(),
+          /* ssl_group_id= */ std::nullopt));
     }
   } else {
-    info_ = DtlsTransportInformation(DtlsTransportState::kClosed);
+    set_info(DtlsTransportInformation(DtlsTransportState::kClosed));
   }
 }
 

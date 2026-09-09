@@ -15,11 +15,11 @@ import static org.junit.Assert.fail;
 
 import android.annotation.SuppressLint;
 import android.graphics.Point;
-import android.support.test.InstrumentationRegistry;
-import android.support.test.annotation.UiThreadTest;
-import android.support.test.rule.UiThreadTestRule;
 import android.view.View.MeasureSpec;
+import androidx.test.InstrumentationRegistry;
+import androidx.test.annotation.UiThreadTest;
 import androidx.test.filters.MediumTest;
+import androidx.test.rule.UiThreadTestRule;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
@@ -126,9 +126,8 @@ public class SurfaceViewRendererOnMeasureTest {
   public void testFrame1280x720() throws InterruptedException {
     final SurfaceViewRenderer surfaceViewRenderer =
         new SurfaceViewRenderer(InstrumentationRegistry.getContext());
-    /**
-     * Mock renderer events with blocking wait functionality for frame size changes.
-     */
+
+     // Mock renderer events with blocking wait functionality for frame size changes.
     class MockRendererEvents implements RendererCommon.RendererEvents {
       private int frameWidth;
       private int frameHeight;

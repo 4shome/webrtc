@@ -8,6 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstdint>
+
 #include "benchmark/benchmark.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/system/unused.h"
@@ -38,7 +40,8 @@ void BM_LockWithMutex(benchmark::State& state) {
   static PerfTestData test_data;
   for (auto s : state) {
     RTC_UNUSED(s);
-    benchmark::DoNotOptimize(test_data.AddToCounter(2));
+    int add_to_counter = test_data.AddToCounter(2);
+    benchmark::DoNotOptimize(add_to_counter);
   }
 }
 

@@ -19,83 +19,24 @@ rtc_library("agc") {
   ]
   configs += [ "..:apm_debug_dump" ]
   deps = [
-    ":clipping_predictor",
-    ":clipping_predictor_evaluator",
     ":gain_control_interface",
-    ":gain_map",
     ":level_estimation",
-    "..:api",
     "..:apm_logging",
     "..:audio_buffer",
     "..:audio_frame_view",
-    "../../../api:array_view",
+    "../../../api:field_trials_view",
+    "../../../api/audio:audio_processing",
+    "../../../api/environment",
     "../../../common_audio",
-    "../../../common_audio:common_audio_c",
     "../../../rtc_base:checks",
     "../../../rtc_base:gtest_prod",
     "../../../rtc_base:logging",
     "../../../rtc_base:safe_minmax",
-    "../../../system_wrappers:field_trial",
     "../../../system_wrappers:metrics",
-    "../vad",
+    "../agc2:clipping_predictor",
+    "../agc2:gain_map",
+    "../agc2:input_volume_stats_reporter",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
-}
-
-rtc_library("analog_gain_stats_reporter") {
-  sources = [
-    "analog_gain_stats_reporter.cc",
-    "analog_gain_stats_reporter.h",
-  ]
-  deps = [
-    "../../../rtc_base:gtest_prod",
-    "../../../rtc_base:logging",
-    "../../../rtc_base:safe_minmax",
-    "../../../system_wrappers:metrics",
-  ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
-}
-
-rtc_library("clipping_predictor") {
-  sources = [
-    "clipping_predictor.cc",
-    "clipping_predictor.h",
-  ]
-  deps = [
-    ":clipping_predictor_level_buffer",
-    ":gain_map",
-    "..:api",
-    "..:audio_frame_view",
-    "../../../common_audio",
-    "../../../rtc_base:checks",
-    "../../../rtc_base:logging",
-    "../../../rtc_base:safe_minmax",
-  ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
-}
-
-rtc_library("clipping_predictor_evaluator") {
-  sources = [
-    "clipping_predictor_evaluator.cc",
-    "clipping_predictor_evaluator.h",
-  ]
-  deps = [
-    "../../../rtc_base:checks",
-    "../../../rtc_base:logging",
-  ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
-}
-
-rtc_library("clipping_predictor_level_buffer") {
-  sources = [
-    "clipping_predictor_level_buffer.cc",
-    "clipping_predictor_level_buffer.h",
-  ]
-  deps = [
-    "../../../rtc_base:checks",
-    "../../../rtc_base:logging",
-  ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_library("level_estimation") {
@@ -108,7 +49,6 @@ rtc_library("level_estimation") {
     "utility.h",
   ]
   deps = [
-    "../../../api:array_view",
     "../../../rtc_base:checks",
     "../vad",
   ]
@@ -131,11 +71,9 @@ rtc_library("legacy_agc") {
   ]
 
   deps = [
-    "../../../common_audio",
     "../../../common_audio:common_audio_c",
-    "../../../common_audio/third_party/ooura:fft_size_256",
+    "../../../common_audio:common_audio_cc",
     "../../../rtc_base:checks",
-    "../../../system_wrappers",
   ]
 
   if (rtc_build_with_neon) {
@@ -147,48 +85,58 @@ rtc_library("legacy_agc") {
   }
 }
 
-rtc_source_set("gain_map") {
-  sources = [ "gain_map_internal.h" ]
-}
-
 if (rtc_include_tests) {
-  rtc_library("agc_unittests") {
+  rtc_library("mock_agc") {
     testonly = true
-    sources = [
-      "agc_manager_direct_unittest.cc",
-      "analog_gain_stats_reporter_unittest.cc",
-      "clipping_predictor_evaluator_unittest.cc",
-      "clipping_predictor_level_buffer_unittest.cc",
-      "clipping_predictor_unittest.cc",
-      "loudness_histogram_unittest.cc",
-      "mock_agc.h",
+    sources = [ "mock_agc.h" ]
+    deps = [
+      ":level_estimation",
+      "../../../test:test_support",
     ]
-    configs += [ "..:apm_debug_dump" ]
+  }
 
+  rtc_library("agc_manager_direct_unittest") {
+    testonly = true
+    sources = [ "agc_manager_direct_unittest.cc" ]
     deps = [
       ":agc",
-      ":analog_gain_stats_reporter",
-      ":clipping_predictor",
-      ":clipping_predictor_evaluator",
-      ":clipping_predictor_level_buffer",
       ":gain_control_interface",
       ":level_estimation",
-      "..:mocks",
-      "../../../api:array_view",
+      ":mock_agc",
+      "..:audio_buffer",
+      "../../../api/audio:audio_processing",
+      "../../../api/environment",
+      "../../../api/environment:environment_factory",
       "../../../rtc_base:checks",
-      "../../../rtc_base:random",
-      "../../../rtc_base:safe_conversions",
       "../../../rtc_base:safe_minmax",
       "../../../rtc_base:stringutils",
-      "../../../system_wrappers:metrics",
-      "../../../test:field_trial",
+      "../../../test:create_test_environment",
+      "../../../test:create_test_field_trials",
       "../../../test:fileutils",
       "../../../test:test_support",
-      "//testing/gtest",
     ]
-    absl_deps = [
-      "//third_party/abseil-cpp/absl/strings",
-      "//third_party/abseil-cpp/absl/types:optional",
+    configs += [ "..:apm_debug_dump" ]
+  }
+
+  rtc_library("loudness_histogram_unittest") {
+    testonly = true
+    sources = [ "loudness_histogram_unittest.cc" ]
+    deps = [
+      ":level_estimation",
+      ":mock_agc",
+      "../../../test:fileutils",
+      "../../../test:test_support",
+      "//third_party/abseil-cpp/absl/strings:string_view",
+    ]
+    configs += [ "..:apm_debug_dump" ]
+  }
+
+  rtc_library("agc_unittests") {
+    testonly = true
+    sources = []
+    deps = [
+      ":agc_manager_direct_unittest",
+      ":loudness_histogram_unittest",
     ]
   }
 }

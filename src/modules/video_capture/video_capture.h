@@ -11,13 +11,18 @@
 #ifndef MODULES_VIDEO_CAPTURE_VIDEO_CAPTURE_H_
 #define MODULES_VIDEO_CAPTURE_VIDEO_CAPTURE_H_
 
+#include <cstdint>
+
+#include "api/ref_count.h"
+#include "api/video/video_frame.h"
 #include "api/video/video_rotation.h"
 #include "api/video/video_sink_interface.h"
+#include "modules/video_capture/raw_video_sink_interface.h"
 #include "modules/video_capture/video_capture_defines.h"
 
 namespace webrtc {
 
-class VideoCaptureModule : public rtc::RefCountInterface {
+class VideoCaptureModule : public RefCountInterface {
  public:
   // Interface for receiving information about available camera devices.
   class DeviceInfo {
@@ -73,7 +78,9 @@ class VideoCaptureModule : public rtc::RefCountInterface {
 
   //   Register capture data callback
   virtual void RegisterCaptureDataCallback(
-      rtc::VideoSinkInterface<VideoFrame>* dataCallback) = 0;
+      VideoSinkInterface<VideoFrame>* dataCallback) = 0;
+  virtual void RegisterCaptureDataCallback(
+      RawVideoSinkInterface* dataCallback) = 0;
 
   //  Remove capture data callback
   virtual void DeRegisterCaptureDataCallback() = 0;

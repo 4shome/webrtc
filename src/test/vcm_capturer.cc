@@ -10,13 +10,17 @@
 
 #include "test/vcm_capturer.h"
 
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 
+#include "api/video/video_frame.h"
+#include "common_video/libyuv/include/webrtc_libyuv.h"
+#include "modules/video_capture/video_capture.h"
 #include "modules/video_capture/video_capture_factory.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "test/test_video_capturer.h"
 
 namespace webrtc {
 namespace test {
@@ -27,6 +31,8 @@ bool VcmCapturer::Init(size_t width,
                        size_t height,
                        size_t target_fps,
                        size_t capture_device_index) {
+  width_ = width;
+  height_ = height;
   std::unique_ptr<VideoCaptureModule::DeviceInfo> device_info(
       VideoCaptureFactory::CreateDeviceInfo());
 
@@ -39,7 +45,7 @@ bool VcmCapturer::Init(size_t width,
     return false;
   }
 
-  vcm_ = webrtc::VideoCaptureFactory::Create(unique_name);
+  vcm_ = VideoCaptureFactory::Create(unique_name);
   if (!vcm_) {
     return false;
   }

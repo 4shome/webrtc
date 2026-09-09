@@ -10,15 +10,28 @@
 
 #include "modules/video_coding/frame_helpers.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <optional>
 #include <utility>
 
+#include "absl/container/inlined_vector.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "api/video/encoded_frame.h"
+#include "api/video/encoded_image.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 
 namespace webrtc {
 
-bool FrameHasBadRenderTiming(Timestamp render_time,
-                             Timestamp now,
-                             TimeDelta target_video_delay) {
+namespace {
+constexpr TimeDelta kMaxVideoDelay = TimeDelta::Millis(10000);
+}  // namespace
+
+bool FrameHasBadRenderTiming(Timestamp render_time, Timestamp now) {
   // Zero render time means render immediately.
   if (render_time.IsZero()) {
     return false;
@@ -26,19 +39,23 @@ bool FrameHasBadRenderTiming(Timestamp render_time,
   if (render_time < Timestamp::Zero()) {
     return true;
   }
-  constexpr TimeDelta kMaxVideoDelay = TimeDelta::Millis(10000);
-  TimeDelta frame_delay = (render_time - now).Abs();
-  if (frame_delay > kMaxVideoDelay) {
-    RTC_LOG(LS_WARNING)
-        << "A frame about to be decoded is out of the configured "
-           "delay bounds ("
-        << frame_delay.ms() << " > " << kMaxVideoDelay.ms()
-        << "). Resetting the video jitter buffer.";
+  TimeDelta frame_delay = render_time - now;
+  if (frame_delay.Abs() > kMaxVideoDelay) {
+    RTC_LOG(LS_WARNING) << "Frame has bad render timing because it is out of "
+                           "the delay bounds (frame_delay_ms="
+                        << frame_delay.ms()
+                        << ", kMaxVideoDelay_ms=" << kMaxVideoDelay.ms() << ")";
     return true;
   }
+  return false;
+}
+
+bool TargetVideoDelayIsTooLarge(TimeDelta target_video_delay) {
   if (target_video_delay > kMaxVideoDelay) {
-    RTC_LOG(LS_WARNING) << "The video target delay has grown larger than "
-                        << kMaxVideoDelay.ms() << " ms.";
+    RTC_LOG(LS_WARNING)
+        << "Target video delay is too large. (target_video_delay_ms="
+        << target_video_delay.ms()
+        << ", kMaxVideoDelay_ms=" << kMaxVideoDelay.ms() << ")";
     return true;
   }
   return false;
@@ -50,6 +67,27 @@ std::unique_ptr<EncodedFrame> CombineAndDeleteFrames(
 
   if (frames.size() == 1) {
     return std::move(frames[0]);
+  }
+
+  // Check if any of the spatial layers explicitly define the spatial id.
+  // If they do the spatial ids must be strictly increasing.
+  bool any_spatial_index_defined = false;
+  for (const auto& frame : frames) {
+    if (frame->SpatialIndex().has_value()) {
+      any_spatial_index_defined = true;
+      break;
+    }
+  }
+
+  if (any_spatial_index_defined) {
+    for (size_t i = 1; i < frames.size(); ++i) {
+      if (frames[i]->SpatialIndex().value_or(0) <=
+          frames[i - 1]->SpatialIndex().value_or(0)) {
+        RTC_LOG(LS_ERROR)
+            << "Failed to combine frames - invalid spatial index order.";
+        return nullptr;
+      }
+    }
   }
 
   size_t total_length = 0;
@@ -68,6 +106,15 @@ std::unique_ptr<EncodedFrame> CombineAndDeleteFrames(
   // Spatial index of combined frame is set equal to spatial index of its top
   // spatial layer.
   first_frame->SetSpatialIndex(last_frame.SpatialIndex().value_or(0));
+  // Each spatial layer (at the same rtp_timestamp) sends corruption data.
+  // Reconstructed (combined) frame will be of resolution of the highest spatial
+  // layer and that's why the corruption data for the highest layer should be
+  // used to calculate the metric on the combined frame for the best outcome.
+  //
+  // TODO: bugs.webrtc.org/358039777 - Fix for LxTy scalability, currently only
+  // works for LxTy_KEY and L1Ty.
+  first_frame->SetFrameInstrumentationData(
+      last_frame.CodecSpecific()->frame_instrumentation_data);
 
   first_frame->video_timing_mutable()->network2_timestamp_ms =
       last_frame.video_timing().network2_timestamp_ms;

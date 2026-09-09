@@ -9,22 +9,54 @@
  */
 #include "test/scenario/call_client.h"
 
-#include <iostream>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <span>
+#include <string>
 #include <utility>
 
+#include "api/audio/builtin_audio_processing_builder.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
+#include "api/media_types.h"
 #include "api/rtc_event_log/rtc_event_log.h"
 #include "api/rtc_event_log/rtc_event_log_factory.h"
+#include "api/rtc_event_log_output.h"
+#include "api/rtp_parameters.h"
+#include "api/scoped_refptr.h"
+#include "api/task_queue/task_queue_factory.h"
+#include "api/test/network_emulation/network_emulation_interfaces.h"
+#include "api/test/time_controller.h"
+#include "api/transport/bitrate_settings.h"
+#include "api/transport/network_control.h"
 #include "api/transport/network_types.h"
+#include "api/units/data_rate.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "call/audio_state.h"
 #include "call/call.h"
-#include "call/rtp_transport_controller_send_factory.h"
+#include "call/call_config.h"
+#include "modules/audio_device/include/test_audio_device.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
+#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "modules/rtp_rtcp/source/rtp_util.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/event.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/strings/string_builder.h"
+#include "test/create_test_environment.h"
+#include "test/logging/log_writer.h"
+#include "test/scenario/column_printer.h"
+#include "test/scenario/network_node.h"
+#include "test/scenario/scenario_config.h"
 
 namespace webrtc {
 namespace test {
 namespace {
-static constexpr size_t kNumSsrcs = 6;
+constexpr size_t kNumSsrcs = 6;
 const uint32_t kSendRtxSsrcs[kNumSsrcs] = {0xBADCAFD, 0xBADCAFE, 0xBADCAFF,
                                            0xBADCB00, 0xBADCB01, 0xBADCB02};
 const uint32_t kVideoSendSsrcs[kNumSsrcs] = {0xC0FFED, 0xC0FFEE, 0xC0FFEF,
@@ -36,14 +68,13 @@ const uint32_t kReceiverLocalAudioSsrc = 0x1234567;
 
 constexpr int kEventLogOutputIntervalMs = 5000;
 
-CallClientFakeAudio InitAudio(TimeController* time_controller) {
+CallClientFakeAudio InitAudio(const Environment& env) {
   CallClientFakeAudio setup;
   auto capturer = TestAudioDeviceModule::CreatePulsedNoiseCapturer(256, 48000);
   auto renderer = TestAudioDeviceModule::CreateDiscardRenderer(48000);
   setup.fake_audio_device = TestAudioDeviceModule::Create(
-      time_controller->GetTaskQueueFactory(), std::move(capturer),
-      std::move(renderer), 1.f);
-  setup.apm = AudioProcessingBuilder().Create();
+      env, std::move(capturer), std::move(renderer), 1.f);
+  setup.apm = BuiltinAudioProcessingBuilder().Build(env);
   setup.fake_audio_device->Init();
   AudioState::Config audio_state_config;
   audio_state_config.audio_mixer = AudioMixerImpl::Create();
@@ -55,37 +86,28 @@ CallClientFakeAudio InitAudio(TimeController* time_controller) {
   return setup;
 }
 
-Call* CreateCall(TimeController* time_controller,
-                 RtcEventLog* event_log,
-                 CallClientConfig config,
-                 LoggingNetworkControllerFactory* network_controller_factory,
-                 rtc::scoped_refptr<AudioState> audio_state) {
-  CallConfig call_config(event_log);
+std::unique_ptr<Call> CreateCall(
+    const Environment& env,
+    CallClientConfig config,
+    LoggingNetworkControllerFactory* network_controller_factory,
+    scoped_refptr<AudioState> audio_state) {
+  CallConfig call_config = CallConfig::CreateSingleThreaded(env);
   call_config.bitrate_config.max_bitrate_bps =
       config.transport.rates.max_rate.bps_or(-1);
   call_config.bitrate_config.min_bitrate_bps =
       config.transport.rates.min_rate.bps();
   call_config.bitrate_config.start_bitrate_bps =
       config.transport.rates.start_rate.bps();
-  call_config.task_queue_factory = time_controller->GetTaskQueueFactory();
   call_config.network_controller_factory = network_controller_factory;
   call_config.audio_state = audio_state;
-  call_config.trials = config.field_trials;
-  Clock* clock = time_controller->GetClock();
-  return Call::Create(call_config, clock,
-                      RtpTransportControllerSendFactory().Create(
-                          call_config.ExtractTransportConfig(), clock));
+  return Call::Create(std::move(call_config));
 }
 
 std::unique_ptr<RtcEventLog> CreateEventLog(
-    TaskQueueFactory* task_queue_factory,
-    LogWriterFactoryInterface* log_writer_factory) {
-  if (!log_writer_factory) {
-    return std::make_unique<RtcEventLogNull>();
-  }
-  auto event_log = RtcEventLogFactory(task_queue_factory)
-                       .CreateRtcEventLog(RtcEventLog::EncodingType::NewFormat);
-  bool success = event_log->StartLogging(log_writer_factory->Create(".rtc.dat"),
+    const Environment& env,
+    LogWriterFactoryInterface& log_writer_factory) {
+  auto event_log = RtcEventLogFactory().Create(env);
+  bool success = event_log->StartLogging(log_writer_factory.Create(".rtc.dat"),
                                          kEventLogOutputIntervalMs);
   RTC_CHECK(success);
   return event_log;
@@ -213,22 +235,26 @@ CallClient::CallClient(
     std::unique_ptr<LogWriterFactoryInterface> log_writer_factory,
     CallClientConfig config)
     : time_controller_(time_controller),
-      clock_(time_controller->GetClock()),
+      env_(
+          CreateTestEnvironment({.field_trials = std::move(config.field_trials),
+                                 .time = time_controller_})),
       log_writer_factory_(std::move(log_writer_factory)),
       network_controller_factory_(log_writer_factory_.get(), config.transport),
-      task_queue_(time_controller->GetTaskQueueFactory()->CreateTaskQueue(
+      task_queue_(env_.task_queue_factory().CreateTaskQueue(
           "CallClient",
-          TaskQueueFactory::Priority::NORMAL)) {
-  config.field_trials = &field_trials_;
+          TaskQueueFactory::Priority::kNormal)) {
   SendTask([this, config] {
-    event_log_ = CreateEventLog(time_controller_->GetTaskQueueFactory(),
-                                log_writer_factory_.get());
-    fake_audio_setup_ = InitAudio(time_controller_);
+    if (log_writer_factory_ != nullptr) {
+      EnvironmentFactory env_factory(env_);
+      env_factory.Set(CreateEventLog(env_, *log_writer_factory_));
+      env_ = env_factory.Create();
+    }
+    fake_audio_setup_ = InitAudio(env_);
 
-    call_.reset(CreateCall(time_controller_, event_log_.get(), config,
-                           &network_controller_factory_,
-                           fake_audio_setup_.audio_state));
-    transport_ = std::make_unique<NetworkNodeTransport>(clock_, call_.get());
+    call_ = CreateCall(env_, config, &network_controller_factory_,
+                       fake_audio_setup_.audio_state);
+    transport_ =
+        std::make_unique<NetworkNodeTransport>(&env_.clock(), call_.get());
   });
 }
 
@@ -236,17 +262,16 @@ CallClient::~CallClient() {
   SendTask([&] {
     call_.reset();
     fake_audio_setup_ = {};
-    rtc::Event done;
-    event_log_->StopLogging([&done] { done.Set(); });
-    done.Wait(rtc::Event::kForever);
-    event_log_.reset();
+    Event done;
+    env_.event_log().StopLogging([&done] { done.Set(); });
+    done.Wait(Event::kForever);
   });
 }
 
 ColumnPrinter CallClient::StatsPrinter() {
   return ColumnPrinter::Lambda(
       "pacer_delay call_send_bw",
-      [this](rtc::SimpleStringBuilder& sb) {
+      [this](StringBuilder& sb) {
         Call::Stats call_stats = call_->GetStats();
         sb.AppendFormat("%.3lf %.0lf", call_stats.pacer_delay_ms / 1000.0,
                         call_stats.send_bandwidth_bps / 8.0);
@@ -265,11 +290,6 @@ DataRate CallClient::target_rate() const {
   return network_controller_factory_.GetUpdate().target_rate->target_rate;
 }
 
-DataRate CallClient::stable_target_rate() const {
-  return network_controller_factory_.GetUpdate()
-      .target_rate->stable_target_rate;
-}
-
 DataRate CallClient::padding_rate() const {
   return network_controller_factory_.GetUpdate().pacer_config->pad_rate();
 }
@@ -277,7 +297,7 @@ DataRate CallClient::padding_rate() const {
 void CallClient::SetRemoteBitrate(DataRate bitrate) {
   RemoteBitrateReport msg;
   msg.bandwidth = bitrate;
-  msg.receive_time = clock_->CurrentTime();
+  msg.receive_time = env_.clock().CurrentTime();
   network_controller_factory_.SetRemoteBitrateEstimate(msg);
 }
 
@@ -288,16 +308,44 @@ void CallClient::UpdateBitrateConstraints(
   });
 }
 
+void CallClient::SetAudioReceiveRtpHeaderExtensions(
+    std::span<RtpExtension> extensions) {
+  SendTask([this, &extensions]() {
+    audio_extensions_ = RtpHeaderExtensionMap(extensions);
+  });
+}
+
+void CallClient::SetVideoReceiveRtpHeaderExtensions(
+    std::span<RtpExtension> extensions) {
+  SendTask([this, &extensions]() {
+    video_extensions_ = RtpHeaderExtensionMap(extensions);
+  });
+}
+
 void CallClient::OnPacketReceived(EmulatedIpPacket packet) {
   MediaType media_type = MediaType::ANY;
   if (IsRtpPacket(packet.data)) {
     media_type = ssrc_media_types_[ParseRtpSsrc(packet.data)];
+    task_queue_.PostTask([this, media_type,
+                          packet = std::move(packet)]() mutable {
+      RtpHeaderExtensionMap& extension_map = media_type == MediaType::AUDIO
+                                                 ? audio_extensions_
+                                                 : video_extensions_;
+      RtpPacketReceived received_packet(&extension_map, packet.arrival_time);
+      RTC_CHECK(received_packet.Parse(packet.data));
+      call_->Receiver()->DeliverRtpPacket(media_type, received_packet,
+                                          /*undemuxable_packet_handler=*/
+                                          [](const RtpPacketReceived& packet) {
+                                            RTC_CHECK_NOTREACHED();
+                                            return false;
+                                          });
+    });
+  } else {
+    task_queue_.PostTask(
+        [call = call_.get(), packet = std::move(packet)]() mutable {
+          call->Receiver()->DeliverRtcpPacket(packet.data);
+        });
   }
-  task_queue_.PostTask(
-      [call = call_.get(), media_type, packet = std::move(packet)]() mutable {
-        call->Receiver()->DeliverPacket(media_type, packet.data,
-                                        packet.arrival_time.us());
-      });
 }
 
 std::unique_ptr<RtcEventLogOutput> CallClient::GetLogWriter(std::string name) {
@@ -335,6 +383,10 @@ uint32_t CallClient::GetNextRtxSsrc() {
 
 void CallClient::SendTask(std::function<void()> task) {
   task_queue_.SendTask(std::move(task));
+}
+
+void CallClient::UpdateNetworkAdapterId(int adapter_id) {
+  transport_->UpdateAdapterId(adapter_id);
 }
 
 int16_t CallClient::Bind(EmulatedEndpoint* endpoint) {

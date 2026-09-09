@@ -12,6 +12,7 @@
 #define SDK_ANDROID_SRC_JNI_PC_SESSION_DESCRIPTION_H_
 
 #include <jni.h>
+
 #include <memory>
 #include <string>
 
@@ -28,7 +29,7 @@ std::unique_ptr<SessionDescriptionInterface> JavaToNativeSessionDescription(
 ScopedJavaLocalRef<jobject> NativeToJavaSessionDescription(
     JNIEnv* jni,
     const std::string& sdp,
-    const std::string& type);
+    SdpType type);
 
 }  // namespace jni
 }  // namespace webrtc

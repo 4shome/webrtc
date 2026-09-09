@@ -32,13 +32,16 @@ enum class VideoType {
   kI420,
   kIYUV,
   kRGB24,
+  kBGR24,
   kARGB,
+  kABGR,
   kRGB565,
   kYUY2,
   kYV12,
   kUYVY,
   kMJPEG,
   kBGRA,
+  kNV12,
 };
 
 // This is the max PSNR value our algorithms can return.
@@ -61,7 +64,7 @@ size_t CalcBufferSize(VideoType type, int width, int height);
 //                   insufficient, an error will be returned.
 //   - buffer      : Pointer to buffer
 // Return value: length of buffer if OK, < 0 otherwise.
-int ExtractBuffer(const rtc::scoped_refptr<I420BufferInterface>& input_frame,
+int ExtractBuffer(const scoped_refptr<I420BufferInterface>& input_frame,
                   size_t size,
                   uint8_t* buffer);
 int ExtractBuffer(const VideoFrame& input_frame, size_t size, uint8_t* buffer);
@@ -78,7 +81,7 @@ int ConvertFromI420(const VideoFrame& src_frame,
                     int dst_sample_size,
                     uint8_t* dst_frame);
 
-rtc::scoped_refptr<I420BufferInterface> ScaleVideoFrameBuffer(
+scoped_refptr<I420BufferInterface> ScaleVideoFrameBuffer(
     const I420BufferInterface& source,
     int dst_width,
     int dst_height);

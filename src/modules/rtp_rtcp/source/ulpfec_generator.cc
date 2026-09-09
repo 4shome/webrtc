@@ -10,17 +10,21 @@
 
 #include "modules/rtp_rtcp/source/ulpfec_generator.h"
 
-#include <string.h>
-
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <utility>
+#include <vector>
 
+#include "api/environment/environment.h"
+#include "api/units/data_rate.h"
+#include "api/units/time_delta.h"
+#include "modules/include/module_fec_types.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
-#include "modules/rtp_rtcp/source/byte_io.h"
 #include "modules/rtp_rtcp/source/forward_error_correction.h"
 #include "modules/rtp_rtcp/source/forward_error_correction_internal.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/race_checker.h"
 #include "rtc_base/synchronization/mutex.h"
 
 namespace webrtc {
@@ -67,29 +71,29 @@ UlpfecGenerator::Params::Params(FecProtectionParams delta_params,
                                 FecProtectionParams keyframe_params)
     : delta_params(delta_params), keyframe_params(keyframe_params) {}
 
-UlpfecGenerator::UlpfecGenerator(int red_payload_type,
-                                 int ulpfec_payload_type,
-                                 Clock* clock)
-    : red_payload_type_(red_payload_type),
+UlpfecGenerator::UlpfecGenerator(const Environment& env,
+                                 int red_payload_type,
+                                 int ulpfec_payload_type)
+    : env_(env),
+      red_payload_type_(red_payload_type),
       ulpfec_payload_type_(ulpfec_payload_type),
-      clock_(clock),
       fec_(ForwardErrorCorrection::CreateUlpfec(kUnknownSsrc)),
       num_protected_frames_(0),
       min_num_media_packets_(1),
       media_contains_keyframe_(false),
-      fec_bitrate_(/*max_window_size_ms=*/1000, RateStatistics::kBpsScale) {}
+      fec_bitrate_(/*max_window_size=*/TimeDelta::Seconds(1)) {}
 
 // Used by FlexFecSender, payload types are unused.
-UlpfecGenerator::UlpfecGenerator(std::unique_ptr<ForwardErrorCorrection> fec,
-                                 Clock* clock)
-    : red_payload_type_(0),
+UlpfecGenerator::UlpfecGenerator(const Environment& env,
+                                 std::unique_ptr<ForwardErrorCorrection> fec)
+    : env_(env),
+      red_payload_type_(0),
       ulpfec_payload_type_(0),
-      clock_(clock),
       fec_(std::move(fec)),
       num_protected_frames_(0),
       min_num_media_packets_(1),
       media_contains_keyframe_(false),
-      fec_bitrate_(/*max_window_size_ms=*/1000, RateStatistics::kBpsScale) {}
+      fec_bitrate_(/*max_window_size=*/TimeDelta::Seconds(1)) {}
 
 UlpfecGenerator::~UlpfecGenerator() = default;
 
@@ -235,22 +239,22 @@ std::vector<std::unique_ptr<RtpPacketToSend>> UlpfecGenerator::GetFecPackets() {
   ResetState();
 
   MutexLock lock(&mutex_);
-  fec_bitrate_.Update(total_fec_size_bytes, clock_->TimeInMilliseconds());
+  fec_bitrate_.Update(total_fec_size_bytes, env_.clock().CurrentTime());
 
   return fec_packets;
 }
 
 DataRate UlpfecGenerator::CurrentFecRate() const {
   MutexLock lock(&mutex_);
-  return DataRate::BitsPerSec(
-      fec_bitrate_.Rate(clock_->TimeInMilliseconds()).value_or(0));
+  return fec_bitrate_.Rate(env_.clock().CurrentTime())
+      .value_or(DataRate::Zero());
 }
 
 int UlpfecGenerator::Overhead() const {
   RTC_DCHECK_RUNS_SERIALIZED(&race_checker_);
   RTC_DCHECK(!media_packets_.empty());
-  int num_fec_packets =
-      fec_->NumFecPackets(media_packets_.size(), CurrentParams().fec_rate);
+  int num_fec_packets = ForwardErrorCorrection::NumFecPackets(
+      media_packets_.size(), CurrentParams().fec_rate);
 
   // Return the overhead in Q8.
   return (num_fec_packets << 8) / media_packets_.size();

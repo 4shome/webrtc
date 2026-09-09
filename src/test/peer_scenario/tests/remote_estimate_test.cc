@@ -8,23 +8,28 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <atomic>
+
+#include "api/audio_options.h"
+#include "api/jsep.h"
+#include "api/test/network_emulation/network_emulation_interfaces.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet.h"
-#include "modules/rtp_rtcp/source/rtp_util.h"
 #include "pc/media_session.h"
 #include "pc/session_description.h"
-#include "test/field_trial.h"
+#include "rtc_base/checks.h"
 #include "test/gtest.h"
 #include "test/peer_scenario/peer_scenario.h"
+#include "test/peer_scenario/peer_scenario_client.h"
 
 namespace webrtc {
 namespace test {
 namespace {
 RtpHeaderExtensionMap AudioExtensions(
     const SessionDescriptionInterface& session) {
-  auto* audio_desc =
-      cricket::GetFirstAudioContentDescription(session.description());
+  auto* audio_desc = GetFirstAudioContentDescription(session.description());
   return RtpHeaderExtensionMap(audio_desc->rtp_header_extensions());
 }
 
@@ -61,7 +66,8 @@ TEST(RemoteEstimateEndToEnd, OfferedCapabilityIsInAnswer) {
 }
 
 TEST(RemoteEstimateEndToEnd, AudioUsesAbsSendTimeExtension) {
-  // Defined before PeerScenario so it gets destructed after, to avoid use after free.
+  // Defined before PeerScenario so it gets destructed after, to avoid use after
+  // free.
   std::atomic<bool> received_abs_send_time(false);
   PeerScenario s(*test_info_);
 
@@ -75,7 +81,7 @@ TEST(RemoteEstimateEndToEnd, AudioUsesAbsSendTimeExtension) {
   s.net()->CreateRoute(callee->endpoint(), {ret_node}, caller->endpoint());
 
   auto signaling = s.ConnectSignaling(caller, callee, {send_node}, {ret_node});
-  caller->CreateAudio("AUDIO", cricket::AudioOptions());
+  caller->CreateAudio("AUDIO", AudioOptions());
   signaling.StartIceSignaling();
   RtpHeaderExtensionMap extension_map;
   std::atomic<bool> offer_exchange_done(false);
@@ -96,7 +102,10 @@ TEST(RemoteEstimateEndToEnd, AudioUsesAbsSendTimeExtension) {
         // want to ignore those and we can do that on the basis that the first
         // byte of RTP packets are guaranteed to not be 0.
         RtpPacket rtp_packet(&extension_map);
-        if (rtp_packet.Parse(packet.data)) {
+        // TODO(bugs.webrtc.org/14525): Look why there are RTP packets with
+        // payload 72 or 73 (these don't have the RTP AbsoluteSendTime
+        // Extension).
+        if (rtp_packet.Parse(packet.data) && rtp_packet.PayloadType() == 111) {
           EXPECT_TRUE(rtp_packet.HasExtension<AbsoluteSendTime>());
           received_abs_send_time = true;
         }

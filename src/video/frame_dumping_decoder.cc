@@ -10,10 +10,14 @@
 
 #include "video/frame_dumping_decoder.h"
 
+#include <cstdint>
 #include <memory>
 #include <utility>
 
-#include "modules/video_coding/include/video_codec_interface.h"
+#include "absl/strings/string_view.h"
+#include "api/video/encoded_image.h"
+#include "api/video/video_codec_type.h"
+#include "api/video_codecs/video_decoder.h"
 #include "modules/video_coding/utility/ivf_file_writer.h"
 
 namespace webrtc {
@@ -21,12 +25,12 @@ namespace {
 
 class FrameDumpingDecoder : public VideoDecoder {
  public:
-  FrameDumpingDecoder(std::unique_ptr<VideoDecoder> decoder, FileWrapper file);
+  FrameDumpingDecoder(std::unique_ptr<VideoDecoder> decoder,
+                      absl::string_view filename);
   ~FrameDumpingDecoder() override;
 
   bool Configure(const Settings& settings) override;
   int32_t Decode(const EncodedImage& input_image,
-                 bool missing_frames,
                  int64_t render_time_ms) override;
   int32_t RegisterDecodeCompleteCallback(
       DecodedImageCallback* callback) override;
@@ -41,9 +45,9 @@ class FrameDumpingDecoder : public VideoDecoder {
 };
 
 FrameDumpingDecoder::FrameDumpingDecoder(std::unique_ptr<VideoDecoder> decoder,
-                                         FileWrapper file)
+                                         absl::string_view filename)
     : decoder_(std::move(decoder)),
-      writer_(IvfFileWriter::Wrap(std::move(file),
+      writer_(IvfFileWriter::Wrap(filename,
                                   /* byte_limit= */ 100000000)) {}
 
 FrameDumpingDecoder::~FrameDumpingDecoder() = default;
@@ -54,9 +58,8 @@ bool FrameDumpingDecoder::Configure(const Settings& settings) {
 }
 
 int32_t FrameDumpingDecoder::Decode(const EncodedImage& input_image,
-                                    bool missing_frames,
                                     int64_t render_time_ms) {
-  int32_t ret = decoder_->Decode(input_image, missing_frames, render_time_ms);
+  int32_t ret = decoder_->Decode(input_image, render_time_ms);
   writer_->WriteFrame(input_image, codec_type_);
 
   return ret;
@@ -83,9 +86,8 @@ const char* FrameDumpingDecoder::ImplementationName() const {
 
 std::unique_ptr<VideoDecoder> CreateFrameDumpingDecoderWrapper(
     std::unique_ptr<VideoDecoder> decoder,
-    FileWrapper file) {
-  return std::make_unique<FrameDumpingDecoder>(std::move(decoder),
-                                               std::move(file));
+    absl::string_view filename) {
+  return std::make_unique<FrameDumpingDecoder>(std::move(decoder), filename);
 }
 
 }  // namespace webrtc

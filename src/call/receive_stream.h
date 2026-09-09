@@ -11,14 +11,14 @@
 #ifndef CALL_RECEIVE_STREAM_H_
 #define CALL_RECEIVE_STREAM_H_
 
+#include <cstdint>
 #include <vector>
 
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/frame_transformer_interface.h"
-#include "api/media_types.h"
+#include "api/rtp_headers.h"
 #include "api/scoped_refptr.h"
 #include "api/transport/rtp/rtp_source.h"
-#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 
 namespace webrtc {
 
@@ -34,40 +34,11 @@ class ReceiveStreamInterface {
     // This member will not change mid-stream and can be assumed to be const
     // post initialization.
     uint32_t remote_ssrc = 0;
-
-    // Sender SSRC used for sending RTCP (such as receiver reports).
-    // This value may change mid-stream and must be done on the same thread
-    // that the value is read on (i.e. packet delivery).
-    uint32_t local_ssrc = 0;
-
-    // Enable feedback for send side bandwidth estimation.
-    // See
-    // https://tools.ietf.org/html/draft-holmer-rmcat-transport-wide-cc-extensions
-    // for details.
-    // This value may change mid-stream and must be done on the same thread
-    // that the value is read on (i.e. packet delivery).
-    bool transport_cc = false;
-
-    // RTP header extensions used for the received stream.
-    // This value may change mid-stream and must be done on the same thread
-    // that the value is read on (i.e. packet delivery).
-    std::vector<RtpExtension> extensions;
+    // This member is no longer used by WebRTC, but retained in order to
+    // allow downstream code to compile.
+    // TODO: issues.webrtc.org/41480926 - Delete when downstream changed.
+    [[deprecated("No longer used")]] uint32_t local_ssrc = 0;
   };
-
-  // Set/change the rtp header extensions. Must be called on the packet
-  // delivery thread.
-  virtual void SetRtpExtensions(std::vector<RtpExtension> extensions) = 0;
-  virtual RtpHeaderExtensionMap GetRtpExtensionMap() const = 0;
-
-  // Returns a bool for whether feedback for send side bandwidth estimation is
-  // enabled. See
-  // https://tools.ietf.org/html/draft-holmer-rmcat-transport-wide-cc-extensions
-  // for details.
-  // This value may change mid-stream and must be done on the same thread
-  // that the value is read on (i.e. packet delivery).
-  virtual bool transport_cc() const = 0;
-
-  virtual void SetTransportCc(bool transport_cc) = 0;
 
  protected:
   virtual ~ReceiveStreamInterface() {}
@@ -87,13 +58,14 @@ class MediaReceiveStreamInterface : public ReceiveStreamInterface {
   virtual void Stop() = 0;
 
   virtual void SetDepacketizerToDecoderFrameTransformer(
-      rtc::scoped_refptr<webrtc::FrameTransformerInterface>
-          frame_transformer) = 0;
+      scoped_refptr<webrtc::FrameTransformerInterface> frame_transformer) = 0;
 
   virtual void SetFrameDecryptor(
-      rtc::scoped_refptr<webrtc::FrameDecryptorInterface> frame_decryptor) = 0;
+      scoped_refptr<webrtc::FrameDecryptorInterface> frame_decryptor) = 0;
 
   virtual std::vector<RtpSource> GetSources() const = 0;
+
+  virtual void SetRtcpMode(RtcpMode mode) = 0;
 };
 
 }  // namespace webrtc

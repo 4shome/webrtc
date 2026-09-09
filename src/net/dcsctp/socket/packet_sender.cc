@@ -9,24 +9,28 @@
  */
 #include "net/dcsctp/socket/packet_sender.h"
 
+#include <cstdint>
+#include <functional>
+#include <span>
 #include <utility>
 #include <vector>
 
-#include "net/dcsctp/public/types.h"
+#include "net/dcsctp/packet/sctp_packet.h"
+#include "net/dcsctp/public/dcsctp_socket.h"
 
 namespace dcsctp {
 
 PacketSender::PacketSender(DcSctpSocketCallbacks& callbacks,
-                           std::function<void(rtc::ArrayView<const uint8_t>,
+                           std::function<void(std::span<const uint8_t>,
                                               SendPacketStatus)> on_sent_packet)
     : callbacks_(callbacks), on_sent_packet_(std::move(on_sent_packet)) {}
 
-bool PacketSender::Send(SctpPacket::Builder& builder) {
+bool PacketSender::Send(SctpPacket::Builder& builder, bool write_checksum) {
   if (builder.empty()) {
     return false;
   }
 
-  std::vector<uint8_t> payload = builder.Build();
+  std::vector<uint8_t> payload = builder.Build(write_checksum);
 
   SendPacketStatus status = callbacks_.SendPacketWithStatus(payload);
   on_sent_packet_(payload, status);

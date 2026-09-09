@@ -8,23 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdio.h>
 
-#include <string>
-#include <vector>
-
-#include "modules/audio_coding/include/audio_coding_module.h"
 #include "modules/audio_coding/test/EncodeDecodeTest.h"
 #include "modules/audio_coding/test/PacketLossTest.h"
 #include "modules/audio_coding/test/TestAllCodecs.h"
 #include "modules/audio_coding/test/TestRedFec.h"
 #include "modules/audio_coding/test/TestStereo.h"
 #include "modules/audio_coding/test/TestVADDTX.h"
-#include "modules/audio_coding/test/TwoWayCommunication.h"
-#include "modules/audio_coding/test/iSACTest.h"
 #include "modules/audio_coding/test/opus_test.h"
 #include "test/gtest.h"
-#include "test/testsupport/file_utils.h"
 
 TEST(AudioCodingModuleTest, TestAllCodecs) {
   webrtc::TestAllCodecs().Perform();
@@ -41,25 +33,6 @@ TEST(AudioCodingModuleTest, TestEncodeDecode) {
 TEST(AudioCodingModuleTest, TestRedFec) {
   webrtc::TestRedFec().Perform();
 }
-
-#if defined(WEBRTC_ANDROID)
-TEST(AudioCodingModuleTest, DISABLED_TestIsac) {
-#else
-TEST(AudioCodingModuleTest, TestIsac) {
-#endif
-  webrtc::ISACTest().Perform();
-}
-
-#if (defined(WEBRTC_CODEC_ISAC) || defined(WEBRTC_CODEC_ISACFX)) && \
-    defined(WEBRTC_CODEC_ILBC)
-#if defined(WEBRTC_ANDROID)
-TEST(AudioCodingModuleTest, DISABLED_TwoWayCommunication) {
-#else
-TEST(AudioCodingModuleTest, TwoWayCommunication) {
-#endif
-  webrtc::TwoWayCommunication().Perform();
-}
-#endif
 
 // Disabled on ios as flaky, see https://crbug.com/webrtc/7057
 #if defined(WEBRTC_ANDROID) || defined(WEBRTC_IOS)

@@ -8,10 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstdio>
 #include <iostream>
-#include <vector>
-
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
@@ -20,6 +22,7 @@
 #include "modules/audio_processing/test/conversational_speech/simulator.h"
 #include "modules/audio_processing/test/conversational_speech/timing.h"
 #include "modules/audio_processing/test/conversational_speech/wavreader_factory.h"
+#include "rtc_base/checks.h"
 #include "test/testsupport/file_utils.h"
 
 ABSL_FLAG(std::string, i, "", "Directory containing the speech turn wav files");

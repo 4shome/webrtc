@@ -74,7 +74,7 @@ DeviceInfoDS::DeviceInfoDS()
       RTC_DLOG(LS_INFO) << __FUNCTION__
                         << ": CoInitializeEx(NULL, COINIT_APARTMENTTHREADED)"
                            " => RPC_E_CHANGED_MODE, error 0x"
-                        << rtc::ToHex(hr);
+                        << webrtc::ToHex(hr);
     }
   }
 }
@@ -92,7 +92,7 @@ int32_t DeviceInfoDS::Init() {
                                 IID_ICreateDevEnum, (void**)&_dsDevEnum);
   if (hr != NOERROR) {
     RTC_LOG(LS_INFO) << "Failed to create CLSID_SystemDeviceEnum, error 0x"
-                     << rtc::ToHex(hr);
+                     << webrtc::ToHex(hr);
     return -1;
   }
   return 0;
@@ -131,7 +131,7 @@ int32_t DeviceInfoDS::GetDeviceInfo(uint32_t deviceNumber,
                                                  &_dsMonikerDevEnum, 0);
   if (hr != NOERROR) {
     RTC_LOG(LS_INFO) << "Failed to enumerate CLSID_SystemDeviceEnum, error 0x"
-                     << rtc::ToHex(hr) << ". No webcam exist?";
+                     << webrtc::ToHex(hr) << ". No webcam exist?";
     return 0;
   }
 
@@ -223,7 +223,7 @@ IBaseFilter* DeviceInfoDS::GetDeviceFilter(const char* deviceUniqueIdUTF8,
                                                  &_dsMonikerDevEnum, 0);
   if (hr != NOERROR) {
     RTC_LOG(LS_INFO) << "Failed to enumerate CLSID_SystemDeviceEnum, error 0x"
-                     << rtc::ToHex(hr) << ". No webcam exist?";
+                     << webrtc::ToHex(hr) << ". No webcam exist?";
     return 0;
   }
   _dsMonikerDevEnum->Reset();
@@ -259,12 +259,11 @@ IBaseFilter* DeviceInfoDS::GetDeviceFilter(const char* deviceUniqueIdUTF8,
             deviceFound = true;
             hr =
                 pM->BindToObject(0, 0, IID_IBaseFilter, (void**)&captureFilter);
-            if
-              FAILED(hr) {
-                RTC_LOG(LS_ERROR) << "Failed to bind to the selected "
-                                     "capture device "
-                                  << hr;
-              }
+            if FAILED (hr) {
+              RTC_LOG(LS_ERROR) << "Failed to bind to the selected "
+                                   "capture device "
+                                << hr;
+            }
 
             if (productUniqueIdUTF8 &&
                 productUniqueIdUTF8Length > 0)  // Get the device name
@@ -317,7 +316,7 @@ int32_t DeviceInfoDS::CreateCapabilityMap(const char* deviceUniqueIdUTF8)
       deviceUniqueIdUTF8, productId, kVideoCaptureProductIdLength);
   if (!captureDevice)
     return -1;
-  IPin* outputCapturePin = GetOutputPin(captureDevice, GUID_NULL);
+  IPin* outputCapturePin = GetOutputPin(captureDevice, PIN_CATEGORY_CAPTURE);
   if (!outputCapturePin) {
     RTC_LOG(LS_INFO) << "Failed to get capture device output pin";
     RELEASE_AND_CLEAR(captureDevice);
@@ -440,25 +439,34 @@ int32_t DeviceInfoDS::CreateCapabilityMap(const char* deviceUniqueIdUTF8)
       }
 
       if (hrVC == S_OK) {
-        LONGLONG* frameDurationList;
-        LONGLONG maxFPS;
-        long listSize;
-        SIZE size;
-        size.cx = capability.width;
-        size.cy = capability.height;
+        LONGLONG* frameDurationList = NULL;
+        LONGLONG maxFPS = 0;
+        long listSize = 0;
+        SIZE requested_size;
+        requested_size.cx = capability.width;
+        requested_size.cy = capability.height;
 
         // GetMaxAvailableFrameRate doesn't return max frame rate always
         // eg: Logitech Notebook. This may be due to a bug in that API
         // because GetFrameRateList array is reversed in the above camera. So
         // a util method written. Can't assume the first value will return
         // the max fps.
-        hrVC = videoControlConfig->GetFrameRateList(
-            outputCapturePin, tmp, size, &listSize, &frameDurationList);
+        hrVC = videoControlConfig->GetFrameRateList(outputCapturePin, tmp,
+                                                    requested_size, &listSize,
+                                                    &frameDurationList);
 
-        // On some odd cameras, you may get a 0 for duration.
-        // GetMaxOfFrameArray returns the lowest duration (highest FPS)
-        if (hrVC == S_OK && listSize > 0 &&
-            0 != (maxFPS = GetMaxOfFrameArray(frameDurationList, listSize))) {
+        if (hrVC == S_OK) {
+          maxFPS = GetMaxOfFrameArray(frameDurationList, listSize);
+        }
+
+        CoTaskMemFree(frameDurationList);
+        frameDurationList = NULL;
+        listSize = 0;
+
+        // On some odd cameras, you may get a 0 for duration. Some others may
+        // not update the out vars. GetMaxOfFrameArray returns the lowest
+        // duration (highest FPS), or 0 if there was no list with elements.
+        if (0 != maxFPS) {
           capability.maxFPS = static_cast<int>(10000000 / maxFPS);
           capability.supportFrameRateControl = true;
         } else  // use existing method

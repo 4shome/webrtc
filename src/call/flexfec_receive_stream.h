@@ -18,9 +18,9 @@
 
 #include "api/call/transport.h"
 #include "api/rtp_headers.h"
-#include "api/rtp_parameters.h"
 #include "call/receive_stream.h"
 #include "call/rtp_packet_sink_interface.h"
+#include "modules/rtp_rtcp/include/receive_statistics.h"
 
 namespace webrtc {
 
@@ -43,7 +43,10 @@ class FlexfecReceiveStream : public RtpPacketSinkInterface,
     // Payload type for FlexFEC.
     int payload_type = -1;
 
-    ReceiveStreamRtpConfig rtp;
+    // Synchronization source (stream identifier) to be received.
+    // This member will not change mid-stream and can be assumed to be const
+    // post initialization.
+    uint32_t remote_ssrc = 0;
 
     // Vector containing a single element, corresponding to the SSRC of the
     // media stream being protected by this FlexFEC stream. The vector MUST have
@@ -69,6 +72,8 @@ class FlexfecReceiveStream : public RtpPacketSinkInterface,
   // Called to change the payload type after initialization.
   virtual void SetPayloadType(int payload_type) = 0;
   virtual int payload_type() const = 0;
+
+  virtual const ReceiveStatistics* GetStats() const = 0;
 };
 
 }  // namespace webrtc

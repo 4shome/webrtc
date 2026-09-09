@@ -27,7 +27,7 @@
 namespace libyuv {
 
 #ifdef LIBYUV_HAVE_PTHREAD
-void* ThreadMain(void* arg) {
+static void* ThreadMain(void* arg) {
   int* flags = static_cast<int*>(arg);
 
   *flags = TestCpuFlag(kCpuInitialized);
@@ -51,10 +51,10 @@ TEST(LibYUVCpuThreadTest, TestCpuFlagMultipleThreads) {
   ret = pthread_create(&thread2, nullptr, ThreadMain, &cpu_flags2);
   ASSERT_EQ(ret, 0);
   ret = pthread_join(thread1, nullptr);
-  EXPECT_EQ(ret, 0);
+  ASSERT_EQ(ret, 0);
   ret = pthread_join(thread2, nullptr);
-  EXPECT_EQ(ret, 0);
-  EXPECT_EQ(cpu_flags1, cpu_flags2);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(cpu_flags1, cpu_flags2);
 #else
   printf("pthread unavailable; Test skipped.");
 #endif  // LIBYUV_HAVE_PTHREAD

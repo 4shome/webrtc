@@ -10,7 +10,7 @@
 
 #include "api/video/color_space.h"
 
-#include <stdint.h>
+#include <cstdint>
 
 #include "test/gtest.h"
 
@@ -69,6 +69,15 @@ TEST(ColorSpace, TestSettingChromaSitingVerticalFromUint8) {
   EXPECT_EQ(ColorSpace::ChromaSiting::kHalf,
             color_space.chroma_siting_vertical());
   EXPECT_FALSE(color_space.set_chroma_siting_vertical_from_uint8(3));
+}
+
+TEST(ColorSpace, TestAsStringFunction) {
+  ColorSpace color_space(
+      ColorSpace::PrimaryID::kBT709, ColorSpace::TransferID::kBT709,
+      ColorSpace::MatrixID::kBT709, ColorSpace::RangeID::kLimited);
+  EXPECT_EQ(
+      color_space.AsString(),
+      "{primaries:kBT709, transfer:kBT709, matrix:kBT709, range:kLimited}");
 }
 
 }  // namespace webrtc

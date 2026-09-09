@@ -12,6 +12,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <optional>
+#include <span>
 
 #include "modules/audio_device/audio_device_buffer.h"
 #include "rtc_base/checks.h"
@@ -22,9 +24,9 @@ namespace webrtc {
 
 FineAudioBuffer::FineAudioBuffer(AudioDeviceBuffer* audio_device_buffer)
     : audio_device_buffer_(audio_device_buffer),
-      playout_samples_per_channel_10ms_(rtc::dchecked_cast<size_t>(
+      playout_samples_per_channel_10ms_(dchecked_cast<size_t>(
           audio_device_buffer->PlayoutSampleRate() * 10 / 1000)),
-      record_samples_per_channel_10ms_(rtc::dchecked_cast<size_t>(
+      record_samples_per_channel_10ms_(dchecked_cast<size_t>(
           audio_device_buffer->RecordingSampleRate() * 10 / 1000)),
       playout_channels_(audio_device_buffer->PlayoutChannels()),
       record_channels_(audio_device_buffer->RecordingChannels()) {
@@ -62,7 +64,7 @@ bool FineAudioBuffer::IsReadyForRecord() const {
   return record_samples_per_channel_10ms_ > 0 && record_channels_ > 0;
 }
 
-void FineAudioBuffer::GetPlayoutData(rtc::ArrayView<int16_t> audio_buffer,
+void FineAudioBuffer::GetPlayoutData(std::span<int16_t> audio_buffer,
                                      int playout_delay_ms) {
   RTC_DCHECK(IsReadyForPlayout());
   // Ask WebRTC for new data in chunks of 10ms until we have enough to
@@ -79,7 +81,7 @@ void FineAudioBuffer::GetPlayoutData(rtc::ArrayView<int16_t> audio_buffer,
       const size_t num_elements_10ms =
           playout_channels_ * playout_samples_per_channel_10ms_;
       const size_t written_elements = playout_buffer_.AppendData(
-          num_elements_10ms, [&](rtc::ArrayView<int16_t> buf) {
+          num_elements_10ms, [&](std::span<int16_t> buf) {
             const size_t samples_per_channel_10ms =
                 audio_device_buffer_->GetPlayoutData(buf.data());
             return playout_channels_ * samples_per_channel_10ms;
@@ -106,8 +108,9 @@ void FineAudioBuffer::GetPlayoutData(rtc::ArrayView<int16_t> audio_buffer,
 }
 
 void FineAudioBuffer::DeliverRecordedData(
-    rtc::ArrayView<const int16_t> audio_buffer,
-    int record_delay_ms) {
+    std::span<const int16_t> audio_buffer,
+    int record_delay_ms,
+    std::optional<int64_t> capture_time_ns) {
   RTC_DCHECK(IsReadyForRecord());
   // Always append new data and grow the buffer when needed.
   record_buffer_.AppendData(audio_buffer.data(), audio_buffer.size());
@@ -118,7 +121,8 @@ void FineAudioBuffer::DeliverRecordedData(
       record_channels_ * record_samples_per_channel_10ms_;
   while (record_buffer_.size() >= num_elements_10ms) {
     audio_device_buffer_->SetRecordedBuffer(record_buffer_.data(),
-                                            record_samples_per_channel_10ms_);
+                                            record_samples_per_channel_10ms_,
+                                            capture_time_ns);
     audio_device_buffer_->SetVQEData(playout_delay_ms_, record_delay_ms);
     audio_device_buffer_->DeliverRecordedData();
     memmove(record_buffer_.data(), record_buffer_.data() + num_elements_10ms,

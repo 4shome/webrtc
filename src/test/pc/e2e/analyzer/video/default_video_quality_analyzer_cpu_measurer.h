@@ -11,14 +11,17 @@
 #ifndef TEST_PC_E2E_ANALYZER_VIDEO_DEFAULT_VIDEO_QUALITY_ANALYZER_CPU_MEASURER_H_
 #define TEST_PC_E2E_ANALYZER_VIDEO_DEFAULT_VIDEO_QUALITY_ANALYZER_CPU_MEASURER_H_
 
+#include <cstdint>
+
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
 // This class is thread safe.
 class DefaultVideoQualityAnalyzerCpuMeasurer {
  public:
-  double GetCpuUsagePercent();
+  double GetCpuUsagePercent() const;
 
   void StartMeasuringCpuProcessTime();
   void StopMeasuringCpuProcessTime();
@@ -26,7 +29,7 @@ class DefaultVideoQualityAnalyzerCpuMeasurer {
   void StopExcludingCpuThreadTime();
 
  private:
-  Mutex mutex_;
+  mutable Mutex mutex_;
   int64_t cpu_time_ RTC_GUARDED_BY(mutex_) = 0;
   int64_t wallclock_time_ RTC_GUARDED_BY(mutex_) = 0;
 };

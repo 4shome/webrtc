@@ -8,8 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstdint>
+#include <vector>
+
+#include "api/test/simulated_network.h"
 #include "audio/test/audio_end_to_end_test.h"
-#include "system_wrappers/include/sleep.h"
+#include "call/audio_receive_stream.h"
+#include "call/audio_send_stream.h"
+#include "rtc_base/thread.h"
+#include "test/call_test.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -25,7 +32,7 @@ TEST_F(NackTest, ShouldNackInLossyNetwork) {
     const int64_t kLossPercent = 30;
     const int kNackHistoryMs = 1000;
 
-    BuiltInNetworkBehaviorConfig GetNetworkPipeConfig() const override {
+    BuiltInNetworkBehaviorConfig GetSendTransportConfig() const override {
       BuiltInNetworkBehaviorConfig pipe_config;
       pipe_config.queue_delay_ms = kRttMs / 2;
       pipe_config.loss_percent = kLossPercent;
@@ -40,7 +47,7 @@ TEST_F(NackTest, ShouldNackInLossyNetwork) {
       AudioEndToEndTest::ModifyAudioConfigs(send_config, receive_configs);
     }
 
-    void PerformTest() override { SleepMs(kTestDurationMs); }
+    void PerformTest() override { Thread::SleepMs(kTestDurationMs); }
 
     void OnStreamsStopped() override {
       AudioReceiveStreamInterface::Stats recv_stats =
@@ -48,7 +55,7 @@ TEST_F(NackTest, ShouldNackInLossyNetwork) {
       EXPECT_GT(recv_stats.nacks_sent, 0U);
       AudioSendStream::Stats send_stats = send_stream()->GetStats();
       EXPECT_GT(send_stats.retransmitted_packets_sent, 0U);
-      EXPECT_GT(send_stats.nacks_rcvd, 0U);
+      EXPECT_GT(send_stats.nacks_received, 0U);
     }
   } test;
 

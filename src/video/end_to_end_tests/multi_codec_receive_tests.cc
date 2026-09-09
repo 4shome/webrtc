@@ -8,22 +8,43 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
+#include <set>
+#include <span>
+#include <string>
+#include <vector>
 
+#include "api/environment/environment.h"
 #include "api/test/simulated_network.h"
+#include "api/test/video/function_video_decoder_factory.h"
 #include "api/test/video/function_video_encoder_factory.h"
-#include "call/fake_network_pipe.h"
-#include "call/simulated_network.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_sink_interface.h"
+#include "api/video_codecs/sdp_video_format.h"
+#include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_decoder.h"
+#include "api/video_codecs/video_decoder_factory.h"
+#include "api/video_codecs/video_encoder.h"
+#include "api/video_codecs/video_encoder_factory.h"
+#include "call/video_receive_stream.h"
 #include "modules/include/module_common_types_public.h"
 #include "modules/rtp_rtcp/source/rtp_packet.h"
 #include "modules/video_coding/codecs/h264/include/h264.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "modules/video_coding/codecs/vp9/include/vp9.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/task_queue_for_test.h"
+#include "rtc_base/thread_annotations.h"
 #include "test/call_test.h"
+#include "test/encoder_settings.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/rtp_rtcp_observer.h"
+#include "test/video_test_constants.h"
 
 using ::testing::Contains;
 
@@ -36,11 +57,11 @@ constexpr int kFramesToObserve = 10;
 
 uint8_t PayloadNameToPayloadType(const std::string& payload_name) {
   if (payload_name == "VP8") {
-    return test::CallTest::kPayloadTypeVP8;
+    return test::VideoTestConstants::kPayloadTypeVP8;
   } else if (payload_name == "VP9") {
-    return test::CallTest::kPayloadTypeVP9;
+    return test::VideoTestConstants::kPayloadTypeVP9;
   } else if (payload_name == "H264") {
-    return test::CallTest::kPayloadTypeH264;
+    return test::VideoTestConstants::kPayloadTypeH264;
   } else {
     RTC_DCHECK_NOTREACHED();
     return 0;
@@ -61,9 +82,10 @@ int RemoveOlderOrEqual(uint32_t timestamp, std::vector<uint32_t>* timestamps) {
 }
 
 class FrameObserver : public test::RtpRtcpObserver,
-                      public rtc::VideoSinkInterface<VideoFrame> {
+                      public VideoSinkInterface<VideoFrame> {
  public:
-  FrameObserver() : test::RtpRtcpObserver(test::CallTest::kDefaultTimeout) {}
+  FrameObserver()
+      : test::RtpRtcpObserver(test::VideoTestConstants::kDefaultTimeout) {}
 
   void Reset(uint8_t expected_payload_type) {
     MutexLock lock(&mutex_);
@@ -74,12 +96,12 @@ class FrameObserver : public test::RtpRtcpObserver,
 
  private:
   // Sends kFramesToObserve.
-  Action OnSendRtp(const uint8_t* packet, size_t length) override {
+  Action OnSendRtp(std::span<const uint8_t> packet) override {
     MutexLock lock(&mutex_);
 
     RtpPacket rtp_packet;
-    EXPECT_TRUE(rtp_packet.Parse(packet, length));
-    EXPECT_EQ(rtp_packet.Ssrc(), test::CallTest::kVideoSendSsrcs[0]);
+    EXPECT_TRUE(rtp_packet.Parse(packet));
+    EXPECT_EQ(rtp_packet.Ssrc(), test::VideoTestConstants::kVideoSendSsrcs[0]);
     if (rtp_packet.payload_size() == 0)
       return SEND_PACKET;  // Skip padding, may be sent after OnFrame is called.
 
@@ -105,11 +127,11 @@ class FrameObserver : public test::RtpRtcpObserver,
   // Verifies that all sent frames are decoded and rendered.
   void OnFrame(const VideoFrame& rendered_frame) override {
     MutexLock lock(&mutex_);
-    EXPECT_THAT(sent_timestamps_, Contains(rendered_frame.timestamp()));
+    EXPECT_THAT(sent_timestamps_, Contains(rendered_frame.rtp_timestamp()));
 
     // Remove old timestamps too, only the newest decoded frame is rendered.
     num_rendered_frames_ +=
-        RemoveOlderOrEqual(rendered_frame.timestamp(), &sent_timestamps_);
+        RemoveOlderOrEqual(rendered_frame.rtp_timestamp(), &sent_timestamps_);
 
     if (num_rendered_frames_ >= kFramesToObserve) {
       EXPECT_TRUE(sent_timestamps_.empty()) << "All sent frames not decoded.";
@@ -118,8 +140,8 @@ class FrameObserver : public test::RtpRtcpObserver,
   }
 
   Mutex mutex_;
-  absl::optional<uint32_t> last_timestamp_;  // Only accessed from pacer thread.
-  absl::optional<uint8_t> expected_payload_type_ RTC_GUARDED_BY(mutex_);
+  std::optional<uint32_t> last_timestamp_;  // Only accessed from pacer thread.
+  std::optional<uint8_t> expected_payload_type_ RTC_GUARDED_BY(mutex_);
   int num_sent_frames_ RTC_GUARDED_BY(mutex_) = 0;
   int num_rendered_frames_ RTC_GUARDED_BY(mutex_) = 0;
   std::vector<uint32_t> sent_timestamps_ RTC_GUARDED_BY(mutex_);
@@ -131,26 +153,12 @@ class MultiCodecReceiveTest : public test::CallTest {
   MultiCodecReceiveTest() {
     SendTask(task_queue(), [this]() {
       CreateCalls();
-
-      send_transport_.reset(new test::PacketTransport(
-          task_queue(), sender_call_.get(), &observer_,
-          test::PacketTransport::kSender, kPayloadTypeMap,
-          std::make_unique<FakeNetworkPipe>(
-              Clock::GetRealTimeClock(), std::make_unique<SimulatedNetwork>(
-                                             BuiltInNetworkBehaviorConfig()))));
-      send_transport_->SetReceiver(receiver_call_->Receiver());
-
-      receive_transport_.reset(new test::PacketTransport(
-          task_queue(), receiver_call_.get(), &observer_,
-          test::PacketTransport::kReceiver, kPayloadTypeMap,
-          std::make_unique<FakeNetworkPipe>(
-              Clock::GetRealTimeClock(), std::make_unique<SimulatedNetwork>(
-                                             BuiltInNetworkBehaviorConfig()))));
-      receive_transport_->SetReceiver(sender_call_->Receiver());
+      CreateSendTransport(BuiltInNetworkBehaviorConfig(), &observer_);
+      CreateReceiveTransport(BuiltInNetworkBehaviorConfig(), &observer_);
     });
   }
 
-  virtual ~MultiCodecReceiveTest() {
+  ~MultiCodecReceiveTest() override {
     SendTask(task_queue(), [this]() {
       send_transport_.reset();
       receive_transport_.reset();
@@ -170,10 +178,6 @@ class MultiCodecReceiveTest : public test::CallTest {
   void RunTestWithCodecs(const std::vector<CodecConfig>& configs);
 
  private:
-  const std::map<uint8_t, MediaType> kPayloadTypeMap = {
-      {CallTest::kPayloadTypeVP8, MediaType::VIDEO},
-      {CallTest::kPayloadTypeVP9, MediaType::VIDEO},
-      {CallTest::kPayloadTypeH264, MediaType::VIDEO}};
   FrameObserver observer_;
 };
 
@@ -215,23 +219,25 @@ void MultiCodecReceiveTest::RunTestWithCodecs(
   EXPECT_TRUE(!configs.empty());
 
   test::FunctionVideoEncoderFactory encoder_factory(
-      [](const SdpVideoFormat& format) -> std::unique_ptr<VideoEncoder> {
+      [](const Environment& env,
+         const SdpVideoFormat& format) -> std::unique_ptr<VideoEncoder> {
         if (format.name == "VP8") {
-          return VP8Encoder::Create();
+          return CreateVp8Encoder(env);
         }
         if (format.name == "VP9") {
-          return VP9Encoder::Create();
+          return CreateVp9Encoder(env);
         }
         if (format.name == "H264") {
-          return H264Encoder::Create(cricket::VideoCodec("H264"));
+          return CreateH264Encoder(env);
         }
         RTC_DCHECK_NOTREACHED() << format.name;
         return nullptr;
       });
   test::FunctionVideoDecoderFactory decoder_factory(
-      [](const SdpVideoFormat& format) -> std::unique_ptr<VideoDecoder> {
+      [](const Environment& env,
+         const SdpVideoFormat& format) -> std::unique_ptr<VideoDecoder> {
         if (format.name == "VP8") {
-          return VP8Decoder::Create();
+          return CreateVp8Decoder(env);
         }
         if (format.name == "VP9") {
           return VP9Decoder::Create();
@@ -245,9 +251,9 @@ void MultiCodecReceiveTest::RunTestWithCodecs(
   // Create and start call.
   SendTask(task_queue(),
            [this, &configs, &encoder_factory, &decoder_factory]() {
-             CreateSendConfig(1, 0, 0, send_transport_.get());
+             CreateSendConfig(1, 0, 0);
              ConfigureEncoder(configs[0], &encoder_factory);
-             CreateMatchingReceiveConfigs(receive_transport_.get());
+             CreateMatchingReceiveConfigs();
              video_receive_configs_[0].renderer = &observer_;
              // Disable to avoid post-decode frame dropping in
              // VideoRenderFrames.
@@ -270,6 +276,7 @@ void MultiCodecReceiveTest::RunTestWithCodecs(
       GetVideoSendStream()->Start();
       CreateFrameGeneratorCapturer(kFps, kWidth / 2, kHeight / 2);
       ConnectVideoSourcesToStreams();
+      StartVideoSources();
     });
     EXPECT_TRUE(observer_.Wait()) << "Timed out waiting for frames.";
   }
@@ -281,28 +288,42 @@ void MultiCodecReceiveTest::RunTestWithCodecs(
 }
 
 TEST_F(MultiCodecReceiveTest, SingleStreamReceivesVp8Vp9) {
-  RunTestWithCodecs({{"VP8", 1}, {"VP9", 1}, {"VP8", 1}});
+  RunTestWithCodecs({{.payload_name = "VP8", .num_temporal_layers = 1},
+                     {.payload_name = "VP9", .num_temporal_layers = 1},
+                     {.payload_name = "VP8", .num_temporal_layers = 1}});
 }
 
 TEST_F(MultiCodecReceiveTest, SingleStreamReceivesVp8Vp9WithTl) {
-  RunTestWithCodecs({{"VP8", 2}, {"VP9", 2}, {"VP8", 2}});
+  RunTestWithCodecs({{.payload_name = "VP8", .num_temporal_layers = 2},
+                     {.payload_name = "VP9", .num_temporal_layers = 2},
+                     {.payload_name = "VP8", .num_temporal_layers = 2}});
 }
 
 #if defined(WEBRTC_USE_H264)
 TEST_F(MultiCodecReceiveTest, SingleStreamReceivesVp8H264) {
-  RunTestWithCodecs({{"VP8", 1}, {"H264", 1}, {"VP8", 1}});
+  RunTestWithCodecs({{.payload_name = "VP8", .num_temporal_layers = 1},
+                     {.payload_name = "H264", .num_temporal_layers = 1},
+                     {.payload_name = "VP8", .num_temporal_layers = 1}});
 }
 
 TEST_F(MultiCodecReceiveTest, SingleStreamReceivesVp8H264WithTl) {
-  RunTestWithCodecs({{"VP8", 3}, {"H264", 1}, {"VP8", 3}});
+  RunTestWithCodecs({{.payload_name = "VP8", .num_temporal_layers = 3},
+                     {.payload_name = "H264", .num_temporal_layers = 1},
+                     {.payload_name = "VP8", .num_temporal_layers = 3}});
 }
 
 TEST_F(MultiCodecReceiveTest, SingleStreamReceivesVp8Vp9H264) {
-  RunTestWithCodecs({{"VP8", 1}, {"VP9", 1}, {"H264", 1}, {"VP9", 1}});
+  RunTestWithCodecs({{.payload_name = "VP8", .num_temporal_layers = 1},
+                     {.payload_name = "VP9", .num_temporal_layers = 1},
+                     {.payload_name = "H264", .num_temporal_layers = 1},
+                     {.payload_name = "VP9", .num_temporal_layers = 1}});
 }
 
 TEST_F(MultiCodecReceiveTest, SingleStreamReceivesVp8Vp9H264WithTl) {
-  RunTestWithCodecs({{"VP8", 3}, {"VP9", 2}, {"H264", 1}, {"VP9", 3}});
+  RunTestWithCodecs({{.payload_name = "VP8", .num_temporal_layers = 3},
+                     {.payload_name = "VP9", .num_temporal_layers = 2},
+                     {.payload_name = "H264", .num_temporal_layers = 1},
+                     {.payload_name = "VP9", .num_temporal_layers = 3}});
 }
 #endif  // defined(WEBRTC_USE_H264)
 

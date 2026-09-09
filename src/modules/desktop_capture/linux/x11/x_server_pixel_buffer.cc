@@ -10,13 +10,18 @@
 
 #include "modules/desktop_capture/linux/x11/x_server_pixel_buffer.h"
 
+#include <X11/X.h>
+#include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#include <stdint.h>
-#include <string.h>
+#include <X11/extensions/XShm.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 
+#include <cstdint>
+#include <vector>
+
 #include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/desktop_geometry.h"
 #include "modules/desktop_capture/linux/x11/window_list_utils.h"
 #include "modules/desktop_capture/linux/x11/x_error_trap.h"
 #include "modules/desktop_capture/linux/x11/x_window_property.h"
@@ -69,20 +74,11 @@ void FastBlit(XImage* x_image,
   RTC_DCHECK_LE(frame->top_left().x(), rect.left());
   RTC_DCHECK_LE(frame->top_left().y(), rect.top());
 
-  int src_stride = x_image->bytes_per_line;
-  int dst_x = rect.left() - frame->top_left().x();
-  int dst_y = rect.top() - frame->top_left().y();
-
-  uint8_t* dst_pos = frame->data() + frame->stride() * dst_y;
-  dst_pos += dst_x * DesktopFrame::kBytesPerPixel;
-
-  int height = rect.height();
-  int row_bytes = rect.width() * DesktopFrame::kBytesPerPixel;
-  for (int y = 0; y < height; ++y) {
-    memcpy(dst_pos, src_pos, row_bytes);
-    src_pos += src_stride;
-    dst_pos += frame->stride();
-  }
+  frame->CopyPixelsFrom(
+      src_pos, x_image->bytes_per_line,
+      DesktopRect::MakeXYWH(rect.left() - frame->top_left().x(),
+                            rect.top() - frame->top_left().y(), rect.width(),
+                            rect.height()));
 }
 
 void SlowBlit(XImage* x_image,
@@ -173,10 +169,14 @@ void XServerPixelBuffer::Release() {
 void XServerPixelBuffer::ReleaseSharedMemorySegment() {
   if (!shm_segment_info_)
     return;
+  if (xshm_attached_) {
+    XShmDetach(display_, shm_segment_info_);
+    xshm_attached_ = false;
+  }
   if (shm_segment_info_->shmaddr != nullptr)
     shmdt(shm_segment_info_->shmaddr);
   if (shm_segment_info_->shmid != -1)
-    shmctl(shm_segment_info_->shmid, IPC_RMID, 0);
+    shmctl(shm_segment_info_->shmid, IPC_RMID, nullptr);
   delete shm_segment_info_;
   shm_segment_info_ = nullptr;
 }
@@ -220,30 +220,29 @@ void XServerPixelBuffer::InitShm(const XWindowAttributes& attributes) {
     return;
   }
 
-  bool using_shm = false;
   shm_segment_info_ = new XShmSegmentInfo;
   shm_segment_info_->shmid = -1;
   shm_segment_info_->shmaddr = nullptr;
   shm_segment_info_->readOnly = False;
   x_shm_image_ = XShmCreateImage(display_, default_visual, default_depth,
-                                 ZPixmap, 0, shm_segment_info_,
+                                 ZPixmap, nullptr, shm_segment_info_,
                                  window_rect_.width(), window_rect_.height());
   if (x_shm_image_) {
     shm_segment_info_->shmid =
         shmget(IPC_PRIVATE, x_shm_image_->bytes_per_line * x_shm_image_->height,
                IPC_CREAT | 0600);
     if (shm_segment_info_->shmid != -1) {
-      void* shmat_result = shmat(shm_segment_info_->shmid, 0, 0);
+      void* shmat_result = shmat(shm_segment_info_->shmid, nullptr, 0);
       if (shmat_result != reinterpret_cast<void*>(-1)) {
         shm_segment_info_->shmaddr = reinterpret_cast<char*>(shmat_result);
         x_shm_image_->data = shm_segment_info_->shmaddr;
 
         XErrorTrap error_trap(display_);
-        using_shm = XShmAttach(display_, shm_segment_info_);
+        xshm_attached_ = XShmAttach(display_, shm_segment_info_);
         XSync(display_, False);
         if (error_trap.GetLastErrorAndDisable() != 0)
-          using_shm = false;
-        if (using_shm) {
+          xshm_attached_ = false;
+        if (xshm_attached_) {
           RTC_LOG(LS_VERBOSE)
               << "Using X shared memory segment " << shm_segment_info_->shmid;
         }
@@ -254,7 +253,7 @@ void XServerPixelBuffer::InitShm(const XWindowAttributes& attributes) {
     }
   }
 
-  if (!using_shm) {
+  if (!xshm_attached_) {
     RTC_LOG(LS_WARNING)
         << "Not using shared memory. Performance may be degraded.";
     ReleaseSharedMemorySegment();
@@ -264,7 +263,7 @@ void XServerPixelBuffer::InitShm(const XWindowAttributes& attributes) {
   if (have_pixmaps)
     have_pixmaps = InitPixmaps(default_depth);
 
-  shmctl(shm_segment_info_->shmid, IPC_RMID, 0);
+  shmctl(shm_segment_info_->shmid, IPC_RMID, nullptr);
   shm_segment_info_->shmid = -1;
 
   RTC_LOG(LS_VERBOSE) << "Using X shared memory extension v" << major << "."
@@ -301,7 +300,7 @@ bool XServerPixelBuffer::InitPixmaps(int depth) {
     if (error_trap.GetLastErrorAndDisable() != 0) {
       XFreePixmap(display_, shm_pixmap_);
       shm_pixmap_ = 0;
-      shm_gc_ = 0;  // See shm_pixmap_ comment above.
+      shm_gc_ = nullptr;  // See shm_pixmap_ comment above.
       return false;
     }
   }
@@ -335,6 +334,7 @@ bool XServerPixelBuffer::CaptureRect(const DesktopRect& rect,
                                      DesktopFrame* frame) {
   RTC_DCHECK_LE(rect.right(), window_rect_.width());
   RTC_DCHECK_LE(rect.bottom(), window_rect_.height());
+  RTC_CHECK_EQ(FOURCC_ARGB, frame->pixel_format());
 
   XImage* image;
   uint8_t* data;

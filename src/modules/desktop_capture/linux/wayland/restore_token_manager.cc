@@ -10,27 +10,33 @@
 
 #include "modules/desktop_capture/linux/wayland/restore_token_manager.h"
 
+#include <string>
+
+#include "modules/desktop_capture/desktop_capturer.h"
+#include "rtc_base/synchronization/mutex.h"
+
 namespace webrtc {
 
 // static
 RestoreTokenManager& RestoreTokenManager::GetInstance() {
-  static webrtc::RestoreTokenManager* manager = new RestoreTokenManager();
+  static RestoreTokenManager* manager = new RestoreTokenManager();
   return *manager;
 }
 
 void RestoreTokenManager::AddToken(DesktopCapturer::SourceId id,
                                    const std::string& token) {
+  MutexLock lock(&mutex_);
   restore_tokens_.insert({id, token});
 }
 
-std::string RestoreTokenManager::TakeToken(DesktopCapturer::SourceId id) {
-  std::string token = restore_tokens_[id];
-  // Remove the token as it cannot be used anymore
-  restore_tokens_.erase(id);
+std::string RestoreTokenManager::GetToken(DesktopCapturer::SourceId id) {
+  MutexLock lock(&mutex_);
+  const std::string token = restore_tokens_[id];
   return token;
 }
 
 DesktopCapturer::SourceId RestoreTokenManager::GetUnusedId() {
+  MutexLock lock(&mutex_);
   return ++last_source_id_;
 }
 

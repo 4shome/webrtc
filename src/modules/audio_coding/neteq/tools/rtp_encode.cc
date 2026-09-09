@@ -8,33 +8,33 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdio.h>
+#include <cstdint>
+#include <cstdio>
+#include <memory>
+#include <utility>
 
 #ifdef WIN32
 #include <winsock2.h>
 #endif
-#if defined(WEBRTC_LINUX) || defined(WEBRTC_FUCHSIA)
-#include <netinet/in.h>
-#endif
 
-#include <iostream>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
-#include "absl/memory/memory.h"
 #include "api/audio/audio_frame.h"
 #include "api/audio_codecs/L16/audio_encoder_L16.h"
 #include "api/audio_codecs/g711/audio_encoder_g711.h"
 #include "api/audio_codecs/g722/audio_encoder_g722.h"
-#include "api/audio_codecs/ilbc/audio_encoder_ilbc.h"
-#include "api/audio_codecs/isac/audio_encoder_isac.h"
 #include "api/audio_codecs/opus/audio_encoder_opus.h"
+#include "api/environment/environment_factory.h"
 #include "modules/audio_coding/codecs/cng/audio_encoder_cng.h"
 #include "modules/audio_coding/include/audio_coding_module.h"
+#include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "modules/audio_coding/neteq/tools/input_audio_file.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/ip_address.h"
 #include "rtc_base/numerics/safe_conversions.h"
 
 ABSL_FLAG(bool, list_codecs, false, "Enumerate all codecs");
@@ -43,7 +43,7 @@ ABSL_FLAG(int,
           frame_len,
           0,
           "Frame length in ms; 0 indicates codec default value");
-ABSL_FLAG(int, bitrate, 0, "Bitrate in kbps; 0 indicates codec default value");
+ABSL_FLAG(int, bitrate, 0, "Bitrate in bps; 0 indicates codec default value");
 ABSL_FLAG(int,
           payload_type,
           -1,
@@ -55,6 +55,8 @@ ABSL_FLAG(int,
 ABSL_FLAG(int, ssrc, 0, "SSRC to write to the RTP header");
 ABSL_FLAG(bool, dtx, false, "Use DTX/CNG");
 ABSL_FLAG(int, sample_rate, 48000, "Sample rate of the input file");
+ABSL_FLAG(bool, fec, false, "Use Opus FEC");
+ABSL_FLAG(int, expected_loss, 0, "Expected packet loss percentage");
 
 namespace webrtc {
 namespace test {
@@ -70,8 +72,6 @@ enum class CodecType {
   kPcm16b16,
   kPcm16b32,
   kPcm16b48,
-  kIlbc,
-  kIsac
 };
 
 struct CodecTypeAndInfo {
@@ -86,16 +86,38 @@ struct CodecTypeAndInfo {
 const std::map<std::string, CodecTypeAndInfo>& CodecList() {
   static const auto* const codec_list =
       new std::map<std::string, CodecTypeAndInfo>{
-          {"opus", {CodecType::kOpus, 111, true}},
-          {"pcmu", {CodecType::kPcmU, 0, false}},
-          {"pcma", {CodecType::kPcmA, 8, false}},
-          {"g722", {CodecType::kG722, 9, false}},
-          {"pcm16b_8", {CodecType::kPcm16b8, 93, false}},
-          {"pcm16b_16", {CodecType::kPcm16b16, 94, false}},
-          {"pcm16b_32", {CodecType::kPcm16b32, 95, false}},
-          {"pcm16b_48", {CodecType::kPcm16b48, 96, false}},
-          {"ilbc", {CodecType::kIlbc, 102, false}},
-          {"isac", {CodecType::kIsac, 103, false}}};
+          {"opus",
+           {.type = CodecType::kOpus,
+            .default_payload_type = 111,
+            .internal_dtx = true}},
+          {"pcmu",
+           {.type = CodecType::kPcmU,
+            .default_payload_type = 0,
+            .internal_dtx = false}},
+          {"pcma",
+           {.type = CodecType::kPcmA,
+            .default_payload_type = 8,
+            .internal_dtx = false}},
+          {"g722",
+           {.type = CodecType::kG722,
+            .default_payload_type = 9,
+            .internal_dtx = false}},
+          {"pcm16b_8",
+           {.type = CodecType::kPcm16b8,
+            .default_payload_type = 93,
+            .internal_dtx = false}},
+          {"pcm16b_16",
+           {.type = CodecType::kPcm16b16,
+            .default_payload_type = 94,
+            .internal_dtx = false}},
+          {"pcm16b_32",
+           {.type = CodecType::kPcm16b32,
+            .default_payload_type = 95,
+            .internal_dtx = false}},
+          {"pcm16b_48",
+           {.type = CodecType::kPcm16b48,
+            .default_payload_type = 96,
+            .internal_dtx = false}}};
   return *codec_list;
 }
 
@@ -108,22 +130,22 @@ class Packetizer : public AudioPacketizationCallback {
         ssrc_(ssrc),
         timestamp_rate_hz_(timestamp_rate_hz) {}
 
-  int32_t SendData(AudioFrameType frame_type,
+  int32_t SendData(AudioFrameType /* frame_type */,
                    uint8_t payload_type,
                    uint32_t timestamp,
                    const uint8_t* payload_data,
                    size_t payload_len_bytes,
-                   int64_t absolute_capture_timestamp_ms) override {
+                   int64_t /* absolute_capture_timestamp_ms */) override {
     if (payload_len_bytes == 0) {
       return 0;
     }
 
     constexpr size_t kRtpHeaderLength = 12;
     constexpr size_t kRtpDumpHeaderLength = 8;
-    const uint16_t length = htons(rtc::checked_cast<uint16_t>(
+    const uint16_t length = htons(checked_cast<uint16_t>(
         kRtpHeaderLength + kRtpDumpHeaderLength + payload_len_bytes));
-    const uint16_t plen = htons(
-        rtc::checked_cast<uint16_t>(kRtpHeaderLength + payload_len_bytes));
+    const uint16_t plen =
+        htons(checked_cast<uint16_t>(kRtpHeaderLength + payload_len_bytes));
     const uint32_t offset = htonl(timestamp / (timestamp_rate_hz_ / 1000));
     RTC_CHECK_EQ(fwrite(&length, sizeof(uint16_t), 1, out_file_), 1);
     RTC_CHECK_EQ(fwrite(&plen, sizeof(uint16_t), 1, out_file_), 1);
@@ -205,8 +227,11 @@ std::unique_ptr<AudioEncoder> CreateEncoder(CodecType codec_type,
         config.bitrate_bps = absl::GetFlag(FLAGS_bitrate);
       }
       config.dtx_enabled = absl::GetFlag(FLAGS_dtx);
+      config.fec_enabled = absl::GetFlag(FLAGS_fec);
       RTC_CHECK(config.IsOk());
-      return AudioEncoderOpus::MakeAudioEncoder(config, payload_type);
+      return AudioEncoderOpus::MakeAudioEncoder(CreateEnvironment(),
+                                                std::move(config),
+                                                {.payload_type = payload_type});
     }
 
     case CodecType::kPcmU:
@@ -230,16 +255,6 @@ std::unique_ptr<AudioEncoder> CreateEncoder(CodecType codec_type,
     case CodecType::kPcm16b48: {
       return AudioEncoderL16::MakeAudioEncoder(Pcm16bConfig(codec_type),
                                                payload_type);
-    }
-
-    case CodecType::kIlbc: {
-      return AudioEncoderIlbc::MakeAudioEncoder(
-          GetCodecConfig<AudioEncoderIlbc>(), payload_type);
-    }
-
-    case CodecType::kIsac: {
-      return AudioEncoderIsac::MakeAudioEncoder(
-          GetCodecConfig<AudioEncoderIsac>(), payload_type);
     }
   }
   RTC_DCHECK_NOTREACHED();
@@ -315,9 +330,9 @@ int RunRtpEncode(int argc, char* argv[]) {
 
   // Set up ACM.
   const int timestamp_rate_hz = codec->RtpTimestampRateHz();
-  AudioCodingModule::Config config;
-  std::unique_ptr<AudioCodingModule> acm(AudioCodingModule::Create(config));
+  auto acm(AudioCodingModule::Create());
   acm->SetEncoder(std::move(codec));
+  acm->SetPacketLossRate(absl::GetFlag(FLAGS_expected_loss));
 
   // Open files.
   printf("Input file: %s\n", args[1]);
@@ -333,7 +348,7 @@ int RunRtpEncode(int argc, char* argv[]) {
 
   // Create and register the packetizer, which will write the packets to file.
   Packetizer packetizer(out_file, absl::GetFlag(FLAGS_ssrc), timestamp_rate_hz);
-  RTC_DCHECK_EQ(acm->RegisterTransportCallback(&packetizer), 0);
+  RTC_CHECK_EQ(acm->RegisterTransportCallback(&packetizer), 0);
 
   AudioFrame audio_frame;
   audio_frame.samples_per_channel_ =

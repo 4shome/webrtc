@@ -12,11 +12,16 @@
 
 #include <atomic>
 #include <memory>
+#include <utility>
 
+#include "api/task_queue/task_queue_base.h"
+#include "api/task_queue/task_queue_factory.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "rtc_base/event.h"
-#include "rtc_base/task_queue.h"
 #include "rtc_base/task_queue_for_test.h"
 #include "rtc_base/task_utils/repeating_task.h"
+#include "rtc_base/virtual_socket_server.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -25,7 +30,6 @@
 namespace webrtc {
 namespace {
 using ::testing::AtLeast;
-using ::testing::Invoke;
 using ::testing::MockFunction;
 using ::testing::NiceMock;
 using ::testing::Return;
@@ -38,11 +42,11 @@ TEST(SimulatedTimeControllerTest, TaskIsStoppedOnStop) {
   const int kShortIntervalCount = 4;
   const int kMargin = 1;
   GlobalSimulatedTimeController time_simulation(kStartTime);
-  rtc::TaskQueue task_queue(
+  std::unique_ptr<TaskQueueBase, TaskQueueDeleter> task_queue =
       time_simulation.GetTaskQueueFactory()->CreateTaskQueue(
-          "TestQueue", TaskQueueFactory::Priority::NORMAL));
+          "TestQueue", TaskQueueFactory::Priority::kNormal);
   std::atomic_int counter(0);
-  auto handle = RepeatingTaskHandle::Start(task_queue.Get(), [&] {
+  auto handle = RepeatingTaskHandle::Start(task_queue.get(), [&] {
     if (++counter >= kShortIntervalCount)
       return kLongInterval;
     return kShortInterval;
@@ -51,7 +55,7 @@ TEST(SimulatedTimeControllerTest, TaskIsStoppedOnStop) {
   time_simulation.AdvanceTime(kShortInterval * (kShortIntervalCount + kMargin));
   EXPECT_EQ(counter.load(), kShortIntervalCount);
 
-  task_queue.PostTask(
+  task_queue->PostTask(
       [handle = std::move(handle)]() mutable { handle.Stop(); });
 
   // Sleep long enough that the task would run at least once more if not
@@ -63,13 +67,13 @@ TEST(SimulatedTimeControllerTest, TaskIsStoppedOnStop) {
 TEST(SimulatedTimeControllerTest, TaskCanStopItself) {
   std::atomic_int counter(0);
   GlobalSimulatedTimeController time_simulation(kStartTime);
-  rtc::TaskQueue task_queue(
+  std::unique_ptr<TaskQueueBase, TaskQueueDeleter> task_queue =
       time_simulation.GetTaskQueueFactory()->CreateTaskQueue(
-          "TestQueue", TaskQueueFactory::Priority::NORMAL));
+          "TestQueue", TaskQueueFactory::Priority::kNormal);
 
   RepeatingTaskHandle handle;
-  task_queue.PostTask([&] {
-    handle = RepeatingTaskHandle::Start(task_queue.Get(), [&] {
+  task_queue->PostTask([&] {
+    handle = RepeatingTaskHandle::Start(task_queue.get(), [&] {
       ++counter;
       handle.Stop();
       return TimeDelta::Millis(2);
@@ -85,36 +89,36 @@ TEST(SimulatedTimeControllerTest, Example) {
     void DoPeriodicTask() {}
     TimeDelta TimeUntilNextRun() { return TimeDelta::Millis(100); }
     void StartPeriodicTask(RepeatingTaskHandle* handle,
-                           rtc::TaskQueue* task_queue) {
-      *handle = RepeatingTaskHandle::Start(task_queue->Get(), [this] {
+                           TaskQueueBase* task_queue) {
+      *handle = RepeatingTaskHandle::Start(task_queue, [this] {
         DoPeriodicTask();
         return TimeUntilNextRun();
       });
     }
   };
   GlobalSimulatedTimeController time_simulation(kStartTime);
-  rtc::TaskQueue task_queue(
+  std::unique_ptr<TaskQueueBase, TaskQueueDeleter> task_queue =
       time_simulation.GetTaskQueueFactory()->CreateTaskQueue(
-          "TestQueue", TaskQueueFactory::Priority::NORMAL));
+          "TestQueue", TaskQueueFactory::Priority::kNormal);
   auto object = std::make_unique<ObjectOnTaskQueue>();
   // Create and start the periodic task.
   RepeatingTaskHandle handle;
-  object->StartPeriodicTask(&handle, &task_queue);
+  object->StartPeriodicTask(&handle, task_queue.get());
   // Restart the task
-  task_queue.PostTask(
+  task_queue->PostTask(
       [handle = std::move(handle)]() mutable { handle.Stop(); });
-  object->StartPeriodicTask(&handle, &task_queue);
-  task_queue.PostTask(
+  object->StartPeriodicTask(&handle, task_queue.get());
+  task_queue->PostTask(
       [handle = std::move(handle)]() mutable { handle.Stop(); });
 
-  task_queue.PostTask([object = std::move(object)] {});
+  task_queue->PostTask([object = std::move(object)] {});
 }
 
 TEST(SimulatedTimeControllerTest, DelayTaskRunOnTime) {
   GlobalSimulatedTimeController time_simulation(kStartTime);
   std::unique_ptr<TaskQueueBase, TaskQueueDeleter> task_queue =
       time_simulation.GetTaskQueueFactory()->CreateTaskQueue(
-          "TestQueue", TaskQueueFactory::Priority::NORMAL);
+          "TestQueue", TaskQueueFactory::Priority::kNormal);
 
   bool delay_task_executed = false;
   task_queue->PostDelayedTask([&] { delay_task_executed = true; },
@@ -124,7 +128,7 @@ TEST(SimulatedTimeControllerTest, DelayTaskRunOnTime) {
   EXPECT_TRUE(delay_task_executed);
 }
 
-TEST(SimulatedTimeControllerTest, ThreadYeildsOnSynchronousCall) {
+TEST(SimulatedTimeControllerTest, ThreadYieldsOnSynchronousCall) {
   GlobalSimulatedTimeController sim(kStartTime);
   auto main_thread = sim.GetMainThread();
   auto t2 = sim.CreateThread("thread", nullptr);
@@ -133,7 +137,7 @@ TEST(SimulatedTimeControllerTest, ThreadYeildsOnSynchronousCall) {
   // called.
   main_thread->PostTask([&] { task_has_run = true; });
   SendTask(t2.get(), [] {
-    rtc::Event yield_event;
+    Event yield_event;
     // Wait() triggers YieldExecution() which will runs message processing on
     // all threads that are not in the yielded set.
 
@@ -144,6 +148,35 @@ TEST(SimulatedTimeControllerTest, ThreadYeildsOnSynchronousCall) {
   EXPECT_FALSE(task_has_run);
   sim.AdvanceTime(TimeDelta::Seconds(1));
   ASSERT_TRUE(task_has_run);
+}
+
+TEST(SimulatedTimeControllerTest, SkipsDelayedTaskForward) {
+  GlobalSimulatedTimeController sim(kStartTime);
+  auto main_thread = sim.GetMainThread();
+  constexpr auto duration_during_which_nothing_runs = TimeDelta::Seconds(2);
+  constexpr auto shorter_duration = TimeDelta::Seconds(1);
+  MockFunction<void()> fun;
+  EXPECT_CALL(fun, Call).WillOnce([&] {
+    ASSERT_EQ(sim.GetClock()->CurrentTime(),
+              kStartTime + duration_during_which_nothing_runs);
+  });
+  main_thread->PostDelayedTask(fun.AsStdFunction(), shorter_duration);
+  sim.SkipForwardBy(duration_during_which_nothing_runs);
+  // Run tasks that were pending during the skip.
+  sim.AdvanceTime(TimeDelta::Zero());
+}
+
+TEST(SimulatedTimeControllerTest, CreateThreadWithSocketServer) {
+  GlobalSimulatedTimeController sim(kStartTime);
+  auto ss = std::make_unique<VirtualSocketServer>();
+  auto t2 = sim.CreateThreadWithSocketServer("thread", ss.get());
+  EXPECT_TRUE(t2);
+  EXPECT_EQ(t2->socketserver(), ss.get());
+
+  bool task_has_run = false;
+  t2->PostTask([&] { task_has_run = true; });
+  sim.AdvanceTime(TimeDelta::Zero());
+  EXPECT_TRUE(task_has_run);
 }
 
 }  // namespace webrtc

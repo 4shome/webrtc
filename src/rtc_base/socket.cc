@@ -10,4 +10,30 @@
 
 #include "rtc_base/socket.h"
 
-namespace rtc {}  // namespace rtc
+#include <algorithm>
+#include <cstdint>
+#include <span>
+
+#include "api/units/timestamp.h"
+#include "rtc_base/buffer.h"
+
+namespace webrtc {
+
+int Socket::RecvFrom(ReceiveBuffer& buffer) {
+  static constexpr int BUF_SIZE = 64 * 1024;
+  int64_t timestamp = -1;
+  int len;
+  buffer.payload.EnsureCapacity(BUF_SIZE);
+  buffer.payload.SetData(BUF_SIZE, [&](std::span<uint8_t> payload) {
+    len = RecvFrom(payload.data(), payload.size(), &buffer.source_address,
+                   &timestamp);
+    return std::max(len, 0);
+  });
+  if (!buffer.payload.empty() && timestamp != -1) {
+    buffer.arrival_time = Timestamp::Micros(timestamp);
+  }
+
+  return len;
+}
+
+}  // namespace webrtc

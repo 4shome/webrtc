@@ -85,8 +85,6 @@ TEST_F(ConfigEndToEndTest, VerifyDefaultVideoReceiveConfigParameters) {
       << "Enabling RTX requires ssrc-group: FID negotiation";
   EXPECT_TRUE(default_receive_config.rtp.rtx_associated_payload_types.empty())
       << "Enabling RTX requires rtpmap: rtx negotiation.";
-  EXPECT_TRUE(default_receive_config.rtp.extensions.empty())
-      << "Enabling RTP extensions require negotiation.";
   VerifyEmptyNackConfig(default_receive_config.rtp.nack);
   EXPECT_EQ(-1, default_receive_config.rtp.ulpfec_payload_type)
       << "Enabling ULPFEC requires rtpmap: ulpfec negotiation.";
@@ -104,7 +102,7 @@ TEST_F(ConfigEndToEndTest, VerifyDefaultFlexfecReceiveConfigParameters) {
   FlexfecReceiveStream::Config default_receive_config(&rtcp_send_transport);
   EXPECT_EQ(-1, default_receive_config.payload_type)
       << "Enabling FlexFEC requires rtpmap: flexfec negotiation.";
-  EXPECT_EQ(0U, default_receive_config.rtp.remote_ssrc)
+  EXPECT_EQ(0U, default_receive_config.remote_ssrc)
       << "Enabling FlexFEC requires ssrc-group: FEC-FR negotiation.";
   EXPECT_TRUE(default_receive_config.protected_media_ssrcs.empty())
       << "Enabling FlexFEC requires ssrc-group: FEC-FR negotiation.";

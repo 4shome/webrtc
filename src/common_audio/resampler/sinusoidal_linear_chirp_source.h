@@ -14,6 +14,8 @@
 #ifndef COMMON_AUDIO_RESAMPLER_SINUSOIDAL_LINEAR_CHIRP_SOURCE_H_
 #define COMMON_AUDIO_RESAMPLER_SINUSOIDAL_LINEAR_CHIRP_SOURCE_H_
 
+#include <cstddef>
+
 #include "common_audio/resampler/sinc_resampler.h"
 
 namespace webrtc {
@@ -41,7 +43,7 @@ class SinusoidalLinearChirpSource : public SincResamplerCallback {
   double Frequency(size_t position);
 
  private:
-  enum { kMinFrequency = 5 };
+  static constexpr int kMinFrequency = 5;
 
   int sample_rate_;
   size_t total_samples_;

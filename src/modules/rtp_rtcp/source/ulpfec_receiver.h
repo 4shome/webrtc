@@ -18,11 +18,12 @@
 #include <vector>
 
 #include "api/sequence_checker.h"
-#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
-#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "api/units/timestamp.h"
+#include "modules/rtp_rtcp/include/recovered_packet_receiver.h"
 #include "modules/rtp_rtcp/source/forward_error_correction.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "rtc_base/system/no_unique_address.h"
+#include "rtc_base/thread_annotations.h"
 #include "system_wrappers/include/clock.h"
 
 namespace webrtc {
@@ -43,7 +44,6 @@ class UlpfecReceiver {
   UlpfecReceiver(uint32_t ssrc,
                  int ulpfec_payload_type,
                  RecoveredPacketReceiver* callback,
-                 rtc::ArrayView<const RtpExtension> extensions,
                  Clock* clock);
   ~UlpfecReceiver();
 
@@ -55,13 +55,10 @@ class UlpfecReceiver {
 
   FecPacketCounter GetPacketCounter() const;
 
-  void SetRtpExtensions(rtc::ArrayView<const RtpExtension> extensions);
-
  private:
   const uint32_t ssrc_;
   const int ulpfec_payload_type_;
   Clock* const clock_;
-  RtpHeaderExtensionMap extensions_ RTC_GUARDED_BY(&sequence_checker_);
 
   RTC_NO_UNIQUE_ADDRESS SequenceChecker sequence_checker_;
   RecoveredPacketReceiver* const recovered_packet_callback_;

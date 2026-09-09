@@ -11,28 +11,35 @@
 #ifndef TEST_PC_E2E_ANALYZER_VIDEO_QUALITY_ANALYZING_VIDEO_ENCODER_H_
 #define TEST_PC_E2E_ANALYZER_VIDEO_QUALITY_ANALYZING_VIDEO_ENCODER_H_
 
+#include <cstdint>
 #include <list>
+#include <map>
 #include <memory>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "api/environment/environment.h"
+#include "api/fec_controller_override.h"
+#include "api/test/pclf/media_configuration.h"
 #include "api/test/video_quality_analyzer_interface.h"
+#include "api/video/encoded_image.h"
+#include "api/video/resolution.h"
+#include "api/video/video_bitrate_allocation.h"
 #include "api/video/video_frame.h"
+#include "api/video/video_frame_type.h"
 #include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_encoder.h"
 #include "api/video_codecs/video_encoder_factory.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 #include "test/pc/e2e/analyzer/video/encoded_image_data_injector.h"
 
 namespace webrtc {
 namespace webrtc_pc_e2e {
-
-// Tells QualityAnalyzingVideoEncoder that it shouldn't mark any spatial stream
-// as to be discarded. In such case the top stream will be passed to
-// VideoQualityAnalyzerInterface as a reference.
-constexpr int kAnalyzeAnySpatialStream = -1;
 
 // QualityAnalyzingVideoEncoder is used to wrap origin video encoder and inject
 // VideoQualityAnalyzerInterface before and after encoder.
@@ -54,13 +61,15 @@ constexpr int kAnalyzeAnySpatialStream = -1;
 class QualityAnalyzingVideoEncoder : public VideoEncoder,
                                      public EncodedImageCallback {
  public:
-  QualityAnalyzingVideoEncoder(
-      absl::string_view peer_name,
-      std::unique_ptr<VideoEncoder> delegate,
-      double bitrate_multiplier,
-      std::map<std::string, absl::optional<int>> stream_required_spatial_index,
-      EncodedImageDataInjector* injector,
-      VideoQualityAnalyzerInterface* analyzer);
+  using EmulatedSFUConfigMap =
+      std::map<std::string, std::optional<EmulatedSFUConfig>>;
+
+  QualityAnalyzingVideoEncoder(absl::string_view peer_name,
+                               std::unique_ptr<VideoEncoder> delegate,
+                               double bitrate_multiplier,
+                               EmulatedSFUConfigMap stream_to_sfu_config,
+                               EncodedImageDataInjector* injector,
+                               VideoQualityAnalyzerInterface* analyzer);
   ~QualityAnalyzingVideoEncoder() override;
 
   // Methods of VideoEncoder interface.
@@ -80,7 +89,9 @@ class QualityAnalyzingVideoEncoder : public VideoEncoder,
   EncodedImageCallback::Result OnEncodedImage(
       const EncodedImage& encoded_image,
       const CodecSpecificInfo* codec_specific_info) override;
-  void OnDroppedFrame(DropReason reason) override;
+  void OnFrameDropped(uint32_t rtp_timestamp,
+                      int spatial_id,
+                      bool is_end_of_temporal_unit) override;
 
  private:
   enum SimulcastMode {
@@ -139,11 +150,10 @@ class QualityAnalyzingVideoEncoder : public VideoEncoder,
   const double bitrate_multiplier_;
   // Contains mapping from stream label to optional spatial index.
   // If we have stream label "Foo" and mapping contains
-  // 1. `absl::nullopt` means "Foo" isn't simulcast/SVC stream
-  // 2. `kAnalyzeAnySpatialStream` means all simulcast/SVC streams are required
-  // 3. Concrete value means that particular simulcast/SVC stream have to be
+  // 1. `std::nullopt` means all streams are required
+  // 2. Concrete value means that particular simulcast/SVC stream have to be
   //    analyzed.
-  std::map<std::string, absl::optional<int>> stream_required_spatial_index_;
+  EmulatedSFUConfigMap stream_to_sfu_config_;
   EncodedImageDataInjector* const injector_;
   VideoQualityAnalyzerInterface* const analyzer_;
 
@@ -169,21 +179,26 @@ class QualityAnalyzingVideoEncoderFactory : public VideoEncoderFactory {
       absl::string_view peer_name,
       std::unique_ptr<VideoEncoderFactory> delegate,
       double bitrate_multiplier,
-      std::map<std::string, absl::optional<int>> stream_required_spatial_index,
+      QualityAnalyzingVideoEncoder::EmulatedSFUConfigMap stream_to_sfu_config,
       EncodedImageDataInjector* injector,
       VideoQualityAnalyzerInterface* analyzer);
   ~QualityAnalyzingVideoEncoderFactory() override;
 
   // Methods of VideoEncoderFactory interface.
+  using VideoEncoderFactory::QueryCodecSupport;
   std::vector<SdpVideoFormat> GetSupportedFormats() const override;
-  std::unique_ptr<VideoEncoder> CreateVideoEncoder(
-      const SdpVideoFormat& format) override;
+  VideoEncoderFactory::CodecSupport QueryCodecSupport(
+      const SdpVideoFormat& format,
+      std::optional<std::string> scalability_mode,
+      std::optional<Resolution> resolution) const override;
+  std::unique_ptr<VideoEncoder> Create(const Environment& env,
+                                       const SdpVideoFormat& format) override;
 
  private:
   const std::string peer_name_;
   std::unique_ptr<VideoEncoderFactory> delegate_;
   const double bitrate_multiplier_;
-  std::map<std::string, absl::optional<int>> stream_required_spatial_index_;
+  QualityAnalyzingVideoEncoder::EmulatedSFUConfigMap stream_to_sfu_config_;
   EncodedImageDataInjector* const injector_;
   VideoQualityAnalyzerInterface* const analyzer_;
 };

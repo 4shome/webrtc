@@ -10,11 +10,15 @@
 
 #include "modules/desktop_capture/win/screen_capture_utils.h"
 
+#include <shellscalingapi.h>
 #include <windows.h>
 
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "modules/desktop_capture/desktop_capture_types.h"
 #include "modules/desktop_capture/desktop_capturer.h"
 #include "modules/desktop_capture/desktop_geometry.h"
 #include "rtc_base/checks.h"
@@ -53,7 +57,7 @@ bool GetScreenList(DesktopCapturer::SourceList* screens,
 
     screens->push_back({device_index, std::string()});
     if (device_names) {
-      device_names->push_back(rtc::ToUtf8(device.DeviceName));
+      device_names->push_back(ToUtf8(device.DeviceName));
     }
   }
   return true;
@@ -68,12 +72,7 @@ bool GetHmonitorFromDeviceIndex(const DesktopCapturer::SourceId device_index,
     return true;
   }
 
-  std::wstring device_key;
-  if (!IsScreenValid(device_index, &device_key)) {
-    return false;
-  }
-
-  DesktopRect screen_rect = GetScreenRect(device_index, device_key);
+  DesktopRect screen_rect = GetScreenRect(device_index, std::nullopt);
   if (screen_rect.is_empty()) {
     return false;
   }
@@ -145,8 +144,30 @@ DesktopRect GetFullscreenRect() {
                                GetSystemMetrics(SM_CYVIRTUALSCREEN));
 }
 
+DesktopVector GetDpiForMonitor(HMONITOR monitor) {
+  UINT dpi_x, dpi_y;
+  // MDT_EFFECTIVE_DPI includes the scale factor as well as the system DPI.
+  HRESULT hr = ::GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y);
+  if (SUCCEEDED(hr)) {
+    return {static_cast<INT>(dpi_x), static_cast<INT>(dpi_y)};
+  }
+  RTC_LOG_GLE_EX(LS_WARNING, hr) << "GetDpiForMonitor() failed";
+
+  // If we can't get the per-monitor DPI, then return the system DPI.
+  HDC hdc = GetDC(nullptr);
+  if (hdc) {
+    DesktopVector dpi{GetDeviceCaps(hdc, LOGPIXELSX),
+                      GetDeviceCaps(hdc, LOGPIXELSY)};
+    ReleaseDC(nullptr, hdc);
+    return dpi;
+  }
+
+  // If everything fails, then return the default DPI for Windows.
+  return {96, 96};
+}
+
 DesktopRect GetScreenRect(const DesktopCapturer::SourceId screen,
-                          const std::wstring& device_key) {
+                          const std::optional<std::wstring>& device_key) {
   if (screen == kFullDesktopScreenId) {
     return GetFullscreenRect();
   }
@@ -162,7 +183,7 @@ DesktopRect GetScreenRect(const DesktopCapturer::SourceId screen,
   // sure we are capturing the same device when devices are added or removed.
   // DeviceKey is documented as reserved, but it actually contains the registry
   // key for the device and is unique for each monitor, while DeviceID is not.
-  if (device_key != device.DeviceKey) {
+  if (device_key.has_value() && *device_key != device.DeviceKey) {
     return DesktopRect();
   }
 

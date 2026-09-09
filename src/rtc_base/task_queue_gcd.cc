@@ -18,9 +18,11 @@
 #include <string.h>
 
 #include <memory>
+#include <string>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
+#include "api/location.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/units/time_delta.h"
 #include "rtc_base/checks.h"
@@ -30,13 +32,18 @@
 namespace webrtc {
 namespace {
 
+// TODO(crbug.com/470337728): make use of QoS instead of dispatch queue
+// priorities to enable greater fidelity mapping of AUDIO and VIDEO
+// priorities.
 int TaskQueuePriorityToGCD(TaskQueueFactory::Priority priority) {
   switch (priority) {
-    case TaskQueueFactory::Priority::NORMAL:
+    case TaskQueueFactory::Priority::kNormal:
       return DISPATCH_QUEUE_PRIORITY_DEFAULT;
-    case TaskQueueFactory::Priority::HIGH:
+    case TaskQueueFactory::Priority::kHigh:
+    case TaskQueueFactory::Priority::kAudio:
+    case TaskQueueFactory::Priority::kVideo:
       return DISPATCH_QUEUE_PRIORITY_HIGH;
-    case TaskQueueFactory::Priority::LOW:
+    case TaskQueueFactory::Priority::kLow:
       return DISPATCH_QUEUE_PRIORITY_LOW;
   }
 }
@@ -45,12 +52,17 @@ class TaskQueueGcd final : public TaskQueueBase {
  public:
   TaskQueueGcd(absl::string_view queue_name, int gcd_priority);
 
+  absl::string_view queue_name() const override { return name_; }
   void Delete() override;
-  void PostTask(absl::AnyInvocable<void() &&> task) override;
-  void PostDelayedTask(absl::AnyInvocable<void() &&> task,
-                       TimeDelta delay) override;
-  void PostDelayedHighPrecisionTask(absl::AnyInvocable<void() &&> task,
-                                    TimeDelta delay) override;
+
+ protected:
+  void PostTaskImpl(absl::AnyInvocable<void() &&> task,
+                    const PostTaskTraits& traits,
+                    const Location& location) override;
+  void PostDelayedTaskImpl(absl::AnyInvocable<void() &&> task,
+                           TimeDelta delay,
+                           const PostDelayedTaskTraits& traits,
+                           const Location& location) override;
 
  private:
   struct TaskContext {
@@ -66,13 +78,15 @@ class TaskQueueGcd final : public TaskQueueBase {
   static void SetNotActive(void* task_queue);
   static void DeleteQueue(void* task_queue);
 
+  const std::string name_;
   dispatch_queue_t queue_;
   bool is_active_;
 };
 
 TaskQueueGcd::TaskQueueGcd(absl::string_view queue_name, int gcd_priority)
-    : queue_(RTCDispatchQueueCreateWithTarget(
-          std::string(queue_name).c_str(),
+    : name_(queue_name),
+      queue_(RTCDispatchQueueCreateWithTarget(
+          name_.c_str(),
           DISPATCH_QUEUE_SERIAL,
           dispatch_get_global_queue(gcd_priority, 0))),
       is_active_(true) {
@@ -86,46 +100,48 @@ TaskQueueGcd::TaskQueueGcd(absl::string_view queue_name, int gcd_priority)
 TaskQueueGcd::~TaskQueueGcd() = default;
 
 void TaskQueueGcd::Delete() {
-  RTC_DCHECK(!IsCurrent());
   // Implementation/behavioral note:
   // Dispatch queues are reference counted via calls to dispatch_retain and
   // dispatch_release. Pending blocks submitted to a queue also hold a
   // reference to the queue until they have finished. Once all references to a
-  // queue have been released, the queue will be deallocated by the system.
-  // This is why we check the is_active_ before running tasks.
+  // queue have been released, the queue will be deallocated by the system. We
+  // check `is_active_` before running tasks to ensure they don't execute after
+  // `Delete()` has been called.
 
-  // Use dispatch_sync to set the is_active_ to guarantee that there's not a
-  // race with checking it from a task.
-  dispatch_sync_f(queue_, this, &SetNotActive);
+  if (IsCurrent()) {
+    SetNotActive(this);
+  } else {
+    // Use dispatch_sync to set the is_active_ to guarantee that there's not a
+    // race with checking it from a task.
+    dispatch_sync_f(queue_, this, &SetNotActive);
+  }
+
   dispatch_release(queue_);
 }
 
-void TaskQueueGcd::PostTask(absl::AnyInvocable<void() &&> task) {
+void TaskQueueGcd::PostTaskImpl(absl::AnyInvocable<void() &&> task,
+                                const PostTaskTraits& traits,
+                                const Location& location) {
   auto* context = new TaskContext(this, std::move(task));
   dispatch_async_f(queue_, context, &RunTask);
 }
 
-void TaskQueueGcd::PostDelayedTask(absl::AnyInvocable<void() &&> task,
-                                   TimeDelta delay) {
+void TaskQueueGcd::PostDelayedTaskImpl(absl::AnyInvocable<void() &&> task,
+                                       TimeDelta delay,
+                                       const PostDelayedTaskTraits& traits,
+                                       const Location& location) {
   auto* context = new TaskContext(this, std::move(task));
   dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, delay.us() * NSEC_PER_USEC),
                    queue_, context, &RunTask);
 }
 
-void TaskQueueGcd::PostDelayedHighPrecisionTask(
-    absl::AnyInvocable<void() &&> task,
-    TimeDelta delay) {
-  PostDelayedTask(std::move(task), delay);
-}
-
 // static
 void TaskQueueGcd::RunTask(void* task_context) {
   std::unique_ptr<TaskContext> tc(static_cast<TaskContext*>(task_context));
-  if (!tc->queue->is_active_)
-    return;
-
   CurrentTaskQueueSetter set_current(tc->queue);
-  std::move(tc->task)();
+  if (tc->queue->is_active_) {
+    std::move(tc->task)();
+  }
   // Delete the task before CurrentTaskQueueSetter clears state that this code
   // is running on the task queue.
   tc = nullptr;

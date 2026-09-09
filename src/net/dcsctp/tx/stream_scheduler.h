@@ -11,24 +11,16 @@
 #define NET_DCSCTP_TX_STREAM_SCHEDULER_H_
 
 #include <algorithm>
-#include <cstdint>
-#include <deque>
-#include <map>
+#include <cstddef>
 #include <memory>
-#include <queue>
+#include <optional>
 #include <set>
-#include <string>
-#include <utility>
 
-#include "absl/algorithm/container.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
-#include "api/array_view.h"
+#include "api/units/timestamp.h"
 #include "net/dcsctp/packet/chunk/idata_chunk.h"
 #include "net/dcsctp/packet/sctp_packet.h"
-#include "net/dcsctp/public/dcsctp_message.h"
-#include "net/dcsctp/public/dcsctp_socket.h"
 #include "net/dcsctp/public/types.h"
 #include "net/dcsctp/tx/send_queue.h"
 #include "rtc_base/containers/flat_set.h"
@@ -86,9 +78,9 @@ class StreamScheduler {
     // as `now` and should be used to skip chunks with expired limited lifetime.
     // The parameter `max_size` specifies the maximum amount of actual payload
     // that may be returned. If these constraints prevents the stream from
-    // sending some data, `absl::nullopt` should be returned.
-    virtual absl::optional<SendQueue::DataToSend> Produce(TimeMs now,
-                                                          size_t max_size) = 0;
+    // sending some data, `std::nullopt` should be returned.
+    virtual std::optional<SendQueue::DataToSend> Produce(webrtc::Timestamp now,
+                                                         size_t max_size) = 0;
 
     // Returns the number of payload bytes that is scheduled to be sent in the
     // next enqueued message, or zero if there are no enqueued messages or if
@@ -132,7 +124,8 @@ class StreamScheduler {
 
     // Produces a message from this stream. This will only be called on streams
     // that have data.
-    absl::optional<SendQueue::DataToSend> Produce(TimeMs now, size_t max_size);
+    std::optional<SendQueue::DataToSend> Produce(webrtc::Timestamp now,
+                                                 size_t max_size);
 
     void MakeActive(size_t bytes_to_send_next);
     void ForceMarkInactive();
@@ -157,8 +150,9 @@ class StreamScheduler {
 
   // The `mtu` parameter represents the maximum SCTP packet size, which should
   // be the same as `DcSctpOptions::mtu`.
-  explicit StreamScheduler(size_t mtu)
-      : max_payload_bytes_(mtu - SctpPacket::kHeaderSize -
+  StreamScheduler(absl::string_view log_prefix, size_t mtu)
+      : log_prefix_(log_prefix),
+        max_payload_bytes_(mtu - SctpPacket::kHeaderSize -
                            IDataChunk::kHeaderSize) {}
 
   std::unique_ptr<Stream> CreateStream(StreamProducer* producer,
@@ -178,8 +172,9 @@ class StreamScheduler {
   // Produces a fragment of data to send. The current wall time is specified as
   // `now` and will be used to skip chunks with expired limited lifetime. The
   // parameter `max_size` specifies the maximum amount of actual payload that
-  // may be returned. If no data can be produced, `absl::nullopt` is returned.
-  absl::optional<SendQueue::DataToSend> Produce(TimeMs now, size_t max_size);
+  // may be returned. If no data can be produced, `std::nullopt` is returned.
+  std::optional<SendQueue::DataToSend> Produce(webrtc::Timestamp now,
+                                               size_t max_size);
 
   std::set<StreamID> ActiveStreamsForTesting() const;
 
@@ -198,6 +193,7 @@ class StreamScheduler {
 
   bool IsConsistent() const;
 
+  const absl::string_view log_prefix_;
   const size_t max_payload_bytes_;
 
   // The current virtual time, as defined in the WFQ algorithm.

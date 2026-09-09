@@ -10,6 +10,8 @@
 
 #include "sdk/android/native_api/jni/class_loader.h"
 
+#include <jni.h>
+
 #include <algorithm>
 #include <string>
 
@@ -17,6 +19,7 @@
 #include "sdk/android/generated_native_api_jni/WebRtcClassLoader_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 // Abort the process if `jni` has a Java exception pending. This macros uses the
 // comma operator to execute ExceptionDescribe and ExceptionClear ignoring their
@@ -51,7 +54,7 @@ class ClassLoader {
     const jclass clazz = static_cast<jclass>(env->CallObjectMethod(
         class_loader_.obj(), load_class_method_, j_name.obj()));
     CHECK_EXCEPTION(env);
-    return ScopedJavaLocalRef<jclass>(env, clazz);
+    return ScopedJavaLocalRef<jclass>::Adopt(env, clazz);
   }
 
  private:
@@ -62,19 +65,44 @@ class ClassLoader {
 
 static ClassLoader* g_class_loader = nullptr;
 
+[[maybe_unused]] jclass GetClass(JNIEnv* env, const char* class_name) {
+  RTC_CHECK(g_class_loader);
+  return static_cast<jclass>(
+      g_class_loader->FindClass(env, class_name).Release());
+}
+
+[[maybe_unused]] jclass GetClass(JNIEnv* env,
+                                 const char* class_name,
+                                 const char* unused) {
+  RTC_CHECK(g_class_loader);
+  return static_cast<jclass>(
+      g_class_loader->FindClass(env, class_name).Release());
+}
+
 }  // namespace
 
 void InitClassLoader(JNIEnv* env) {
   RTC_CHECK(g_class_loader == nullptr);
   g_class_loader = new ClassLoader(env);
+  jni_zero::SetClassResolver(&GetClass);
 }
 
-ScopedJavaLocalRef<jclass> GetClass(JNIEnv* env, const char* name) {
-  // The class loader will be null in the JNI code called from the ClassLoader
-  // ctor when we are bootstrapping ourself.
-  return (g_class_loader == nullptr)
-             ? ScopedJavaLocalRef<jclass>(env, env->FindClass(name))
-             : g_class_loader->FindClass(env, name);
+ScopedJavaLocalRef<jclass> GetClass(JNIEnv* env, const char* c_name) {
+  if (g_class_loader != nullptr) {
+    // The class loader will be null in the JNI code called from the ClassLoader
+    // ctor when we are bootstrapping ourself.
+    return g_class_loader->FindClass(env, c_name);
+  }
+  // jni_zero generated code uses dots instead of slashes.
+  // Convert to use slashes since that's what JNI's FindClass expects.
+  // See
+  // https://cs.android.com/android/platform/superproject/main/+/main:art/runtime/jni/check_jni.cc;l=349;drc=0f62043c1670cd365aba1894ad8046cdfc1c905d
+
+  std::string name(c_name);
+  std::replace(name.begin(), name.end(), '.', '/');
+  return ScopedJavaLocalRef<jclass>::Adopt(env, env->FindClass(name.c_str()));
 }
 
 }  // namespace webrtc
+
+DEFINE_JNI(WebRtcClassLoader)

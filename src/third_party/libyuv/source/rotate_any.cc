@@ -11,38 +11,37 @@
 #include "libyuv/rotate.h"
 #include "libyuv/rotate_row.h"
 
-#include "libyuv/basic_types.h"
-
 #ifdef __cplusplus
 namespace libyuv {
 extern "C" {
 #endif
 
-#define TANY(NAMEANY, TPOS_SIMD, MASK)                                        \
-  void NAMEANY(const uint8_t* src, int src_stride, uint8_t* dst,              \
-               int dst_stride, int width) {                                   \
-    int r = width & MASK;                                                     \
-    int n = width - r;                                                        \
-    if (n > 0) {                                                              \
-      TPOS_SIMD(src, src_stride, dst, dst_stride, n);                         \
-    }                                                                         \
-    TransposeWx8_C(src + n, src_stride, dst + n * dst_stride, dst_stride, r); \
+#define TANY(NAMEANY, TPOS_SIMD, TPOS_C, MASK)                          \
+  void NAMEANY(const uint8_t* src, int src_stride, uint8_t* dst,        \
+               int dst_stride, int width) {                             \
+    int r = width & MASK;                                               \
+    int n = width - r;                                                  \
+    if (n > 0) {                                                        \
+      TPOS_SIMD(src, src_stride, dst, dst_stride, n);                   \
+    }                                                                   \
+    ptrdiff_t np = n;                                                   \
+    TPOS_C(src + np, src_stride, dst + np * dst_stride, dst_stride, r); \
   }
 
 #ifdef HAS_TRANSPOSEWX8_NEON
-TANY(TransposeWx8_Any_NEON, TransposeWx8_NEON, 7)
+TANY(TransposeWx8_Any_NEON, TransposeWx8_NEON, TransposeWx8_C, 7)
+#endif
+#ifdef HAS_TRANSPOSEWX16_NEON
+TANY(TransposeWx16_Any_NEON, TransposeWx16_NEON, TransposeWx16_C, 15)
 #endif
 #ifdef HAS_TRANSPOSEWX8_SSSE3
-TANY(TransposeWx8_Any_SSSE3, TransposeWx8_SSSE3, 7)
+TANY(TransposeWx8_Any_SSSE3, TransposeWx8_SSSE3, TransposeWx8_C, 7)
 #endif
 #ifdef HAS_TRANSPOSEWX8_FAST_SSSE3
-TANY(TransposeWx8_Fast_Any_SSSE3, TransposeWx8_Fast_SSSE3, 15)
-#endif
-#ifdef HAS_TRANSPOSEWX16_MSA
-TANY(TransposeWx16_Any_MSA, TransposeWx16_MSA, 15)
+TANY(TransposeWx8_Fast_Any_SSSE3, TransposeWx8_Fast_SSSE3, TransposeWx8_C, 15)
 #endif
 #ifdef HAS_TRANSPOSEWX16_LSX
-TANY(TransposeWx16_Any_LSX, TransposeWx16_LSX, 15)
+TANY(TransposeWx16_Any_LSX, TransposeWx16_LSX, TransposeWx16_C, 15)
 #endif
 #undef TANY
 
@@ -55,8 +54,10 @@ TANY(TransposeWx16_Any_LSX, TransposeWx16_LSX, 15)
     if (n > 0) {                                                               \
       TPOS_SIMD(src, src_stride, dst_a, dst_stride_a, dst_b, dst_stride_b, n); \
     }                                                                          \
-    TransposeUVWx8_C(src + n * 2, src_stride, dst_a + n * dst_stride_a,        \
-                     dst_stride_a, dst_b + n * dst_stride_b, dst_stride_b, r); \
+    ptrdiff_t np = n;                                                          \
+    TransposeUVWx8_C(src + np * 2, src_stride, dst_a + np * dst_stride_a,      \
+                     dst_stride_a, dst_b + np * dst_stride_b, dst_stride_b,    \
+                     r);                                                       \
   }
 
 #ifdef HAS_TRANSPOSEUVWX8_NEON
@@ -64,9 +65,6 @@ TUVANY(TransposeUVWx8_Any_NEON, TransposeUVWx8_NEON, 7)
 #endif
 #ifdef HAS_TRANSPOSEUVWX8_SSE2
 TUVANY(TransposeUVWx8_Any_SSE2, TransposeUVWx8_SSE2, 7)
-#endif
-#ifdef HAS_TRANSPOSEUVWX16_MSA
-TUVANY(TransposeUVWx16_Any_MSA, TransposeUVWx16_MSA, 7)
 #endif
 #ifdef HAS_TRANSPOSEUVWX16_LSX
 TUVANY(TransposeUVWx16_Any_LSX, TransposeUVWx16_LSX, 7)

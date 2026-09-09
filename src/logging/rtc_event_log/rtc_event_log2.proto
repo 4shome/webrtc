@@ -2,6 +2,7 @@
 // WITHOUT PRIOR WARNING. THIS FILE SHOULD NOT BE USED IN PRODUCTION CODE.
 
 syntax = "proto2";
+
 option optimize_for = LITE_RUNTIME;
 package webrtc.rtclog2;
 
@@ -35,11 +36,14 @@ message EventStream {
   repeated IceCandidatePairEvent ice_candidate_events = 26;
   repeated DtlsTransportStateEvent dtls_transport_state_events = 27;
   repeated DtlsWritableState dtls_writable_states = 28;
-  repeated GenericPacketSent generic_packets_sent = 29;
-  repeated GenericPacketReceived generic_packets_received = 30;
-  repeated GenericAckReceived generic_acks_received = 31;
+  repeated GenericPacketSent generic_packets_sent = 29 [deprecated = true];
+  repeated GenericPacketReceived generic_packets_received = 30
+      [deprecated = true];
+  repeated GenericAckReceived generic_acks_received = 31 [deprecated = true];
   repeated RouteChange route_changes = 32;
   repeated RemoteEstimates remote_estimates = 33;
+  repeated NetEqSetMinimumDelay neteq_set_minimum_delay = 34;
+  repeated ScreamBweUpdates scream_bwe_updates = 35;
 
   repeated AudioRecvStreamConfig audio_recv_stream_configs = 101;
   repeated AudioSendStreamConfig audio_send_stream_configs = 102;
@@ -102,6 +106,27 @@ message GenericAckReceived {
   optional bytes receive_acked_packet_time_ms_deltas = 20;
 }
 
+message DependencyDescriptorsWireInfo {
+  // required
+  // Base and delta encoded B and E bits represented as two bit numbers.
+  optional uint32 start_end_bit = 1;
+  optional bytes start_end_bit_deltas = 2;
+
+  // required
+  // Base and delta encoded template IDs, represented as six bit numbers.
+  optional uint32 template_id = 3;
+  optional bytes template_id_deltas = 4;
+
+  // required
+  // Base and delta compressed frame IDs.
+  optional uint32 frame_id = 5;
+  optional bytes frame_id_deltas = 6;
+
+  // optional - set if any DD contains extended information.
+  // The extended info encoded as optional blobs.
+  optional bytes extended_infos = 7;
+}
+
 message IncomingRtpPackets {
   // required
   optional int64 timestamp_ms = 1;
@@ -147,7 +172,12 @@ message IncomingRtpPackets {
   // `audio_level` and `voice_activity` are always used in conjunction.
   optional uint32 audio_level = 19;
   optional bool voice_activity = 20;
+  // Encodes all DD information in the batch, not just the base event.
+  optional DependencyDescriptorsWireInfo dependency_descriptor = 21;
   // TODO(terelius): Add other header extensions like playout delay?
+
+  // optional - The RTX OSN value, only set for RTX packets.
+  optional uint32 rtx_original_sequence_number = 22;
 
   // Delta encodings.
   optional bytes timestamp_ms_deltas = 101;
@@ -168,6 +198,7 @@ message IncomingRtpPackets {
   // `audio_level` and `voice_activity` are always used in conjunction.
   optional bytes audio_level_deltas = 119;
   optional bytes voice_activity_deltas = 120;
+  optional bytes rtx_original_sequence_number_deltas = 121;
 }
 
 message OutgoingRtpPackets {
@@ -216,6 +247,11 @@ message OutgoingRtpPackets {
   optional uint32 audio_level = 19;
   optional bool voice_activity = 20;
   // TODO(terelius): Add other header extensions like playout delay?
+  // Encodes all DD information in the batch, not just the base event.
+  optional DependencyDescriptorsWireInfo dependency_descriptor = 21;
+
+  // optional - The RTX OSN value, only set for RTX packets.
+  optional uint32 rtx_original_sequence_number = 22;
 
   // Delta encodings.
   optional bytes timestamp_ms_deltas = 101;
@@ -236,6 +272,7 @@ message OutgoingRtpPackets {
   // `audio_level` and `voice_activity` are always used in conjunction.
   optional bytes audio_level_deltas = 119;
   optional bytes voice_activity_deltas = 120;
+  optional bytes rtx_original_sequence_number_deltas = 121;
 }
 
 message IncomingRtcpPackets {
@@ -285,6 +322,26 @@ message AudioPlayoutEvents {
   optional bytes local_ssrc_deltas = 102;
 }
 
+message NetEqSetMinimumDelay {
+  // required
+  optional int64 timestamp_ms = 1;
+
+  // required - The SSRC of the remote stream associated with the MinimumDelay
+  // event.
+  optional fixed32 remote_ssrc = 2;
+
+  // required - minimum delay passed to SetBaseMinimumDelay.
+  optional int32 minimum_delay_ms = 3;
+
+  // optional - required if the batch contains delta encoded events.
+  optional uint32 number_of_deltas = 4;
+
+  // Delta encodings.
+  optional bytes timestamp_ms_deltas = 101;
+  optional bytes remote_ssrc_deltas = 102;
+  optional bytes minimum_delay_ms_deltas = 103;
+}
+
 message FrameDecodedEvents {
   enum Codec {
     CODEC_UNKNOWN = 0;
@@ -293,6 +350,7 @@ message FrameDecodedEvents {
     CODEC_VP9 = 3;
     CODEC_AV1 = 4;
     CODEC_H264 = 5;
+    CODEC_H265 = 6;
   }
 
   // required
@@ -397,6 +455,30 @@ message DelayBasedBweUpdates {
   optional bytes detector_state_deltas = 103;
 }
 
+message ScreamBweUpdates {
+  // required
+  optional int64 timestamp_ms = 1;
+
+  optional uint32 ref_window_bytes = 2;
+  optional uint32 target_rate_kbps = 3;
+  optional uint32 smoothed_rtt_ms = 4;
+  optional uint32 avg_queue_delay_ms = 5;
+  optional uint32 l4s_marked_permille = 6;
+  optional uint32 data_in_flight_bytes = 7;
+
+  // optional - required if the batch contains delta encoded events.
+  optional uint32 number_of_deltas = 15;
+
+  // Delta encodings.
+  optional bytes timestamp_ms_deltas = 101;
+  optional bytes ref_window_bytes_deltas = 102;
+  optional bytes target_rate_kbps_deltas = 103;
+  optional bytes smoothed_rtt_ms_deltas = 104;
+  optional bytes avg_queue_delay_ms_deltas = 105;
+  optional bytes l4s_marked_permille_deltas = 106;
+  optional bytes data_in_flight_bytes_deltas = 107;
+}
+
 // Maps RTP header extension names to numerical IDs.
 message RtpHeaderExtensionConfig {
   // Optional IDs for the header extensions. Each ID is a 4-bit number that is
@@ -407,6 +489,7 @@ message RtpHeaderExtensionConfig {
   optional int32 transport_sequence_number_id = 3;
   optional int32 video_rotation_id = 4;
   optional int32 audio_level_id = 5;
+  optional int32 dependency_descriptor_id = 6;
   // TODO(terelius): Add other header extensions like playout delay?
 }
 

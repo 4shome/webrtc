@@ -10,8 +10,25 @@
 
 #include "test/rtcp_packet_parser.h"
 
+#include <cstdint>
+#include <span>
+
+#include "modules/rtp_rtcp/source/rtcp_packet/app.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/bye.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/common_header.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/extended_reports.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/fir.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/nack.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/pli.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/psfb.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/rapid_resync_request.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/rtpfb.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/sdes.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/tmmbn.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/tmmbr.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 
@@ -21,11 +38,11 @@ namespace test {
 RtcpPacketParser::RtcpPacketParser() = default;
 RtcpPacketParser::~RtcpPacketParser() = default;
 
-bool RtcpPacketParser::Parse(const void* data, size_t length) {
+bool RtcpPacketParser::Parse(std::span<const uint8_t> data) {
   ++processed_rtcp_packets_;
 
-  const uint8_t* const buffer = static_cast<const uint8_t*>(data);
-  const uint8_t* const buffer_end = buffer + length;
+  const uint8_t* const buffer = data.data();
+  const uint8_t* const buffer_end = buffer + data.size();
 
   rtcp::CommonHeader header;
   for (const uint8_t* next_packet = buffer; next_packet != buffer_end;

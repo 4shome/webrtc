@@ -10,53 +10,58 @@
 
 #include "rtc_base/test_client.h"
 
-#include <string.h>
-
+#include <cstring>
 #include <memory>
+#include <optional>
 #include <utility>
+#include <variant>
 
-#include "rtc_base/gunit.h"
-#include "rtc_base/thread.h"
-#include "rtc_base/time_utils.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "rtc_base/async_packet_socket.h"
+#include "rtc_base/network/received_packet.h"
+#include "rtc_base/socket.h"
+#include "rtc_base/socket_address.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "test/wait_until.h"
 
-namespace rtc {
+namespace webrtc {
 
 // DESIGN: Each packet received is put it into a list of packets.
 //         Callers can retrieve received packets from any thread by calling
 //         NextPacket.
 
 TestClient::TestClient(std::unique_ptr<AsyncPacketSocket> socket)
-    : TestClient(std::move(socket), nullptr) {}
+    : TestClient(std::move(socket), std::monostate()) {}
 
 TestClient::TestClient(std::unique_ptr<AsyncPacketSocket> socket,
-                       ThreadProcessingFakeClock* fake_clock)
-    : fake_clock_(fake_clock),
-      socket_(std::move(socket)),
-      prev_packet_timestamp_(-1) {
-  socket_->SignalReadPacket.connect(this, &TestClient::OnPacket);
-  socket_->SignalReadyToSend.connect(this, &TestClient::OnReadyToSend);
+                       ClockVariant clock)
+    : clock_(clock), socket_(std::move(socket)) {
+  socket_->RegisterReceivedPacketCallback(
+      [&](AsyncPacketSocket* socket, const ReceivedIpPacket& packet) {
+        OnPacket(socket, packet);
+      });
+  socket_->SubscribeReadyToSend(
+      this, [this](AsyncPacketSocket* socket) { OnReadyToSend(socket); });
 }
 
 TestClient::~TestClient() {}
 
 bool TestClient::CheckConnState(AsyncPacketSocket::State state) {
   // Wait for our timeout value until the socket reaches the desired state.
-  int64_t end = TimeAfter(kTimeoutMs);
-  while (socket_->GetState() != state && TimeUntil(end) > 0) {
-    AdvanceTime(1);
-  }
-  return (socket_->GetState() == state);
+  return WaitUntil([&]() { return socket_->GetState() == state; },
+                   {.clock = clock_});
 }
 
 int TestClient::Send(const char* buf, size_t size) {
-  rtc::PacketOptions options;
+  AsyncSocketPacketOptions options;
   return socket_->Send(buf, size, options);
 }
 
 int TestClient::SendTo(const char* buf,
                        size_t size,
                        const SocketAddress& dest) {
-  rtc::PacketOptions options;
+  AsyncSocketPacketOptions options;
   return socket_->SendTo(buf, size, dest, options);
 }
 
@@ -71,22 +76,22 @@ std::unique_ptr<TestClient::Packet> TestClient::NextPacket(int timeout_ms) {
   // Note also that we only try to pump our current thread's message queue.
   // Pumping another thread's queue could lead to messages being dispatched from
   // the wrong thread to non-thread-safe objects.
+  TimeDelta timeout = TimeDelta::Millis(timeout_ms);
 
-  int64_t end = TimeAfter(timeout_ms);
-  while (TimeUntil(end) > 0) {
-    {
-      webrtc::MutexLock lock(&mutex_);
-      if (packets_.size() != 0) {
-        break;
-      }
-    }
-    AdvanceTime(1);
-  }
+  bool packets_available = WaitUntil(
+      [&] {
+        MutexLock lock(&mutex_);
+        return !packets_.empty();
+      },
+      {
+          .timeout = timeout,
+          .clock = clock_,
+      });
 
   // Return the first packet placed in the queue.
   std::unique_ptr<Packet> packet;
-  webrtc::MutexLock lock(&mutex_);
-  if (packets_.size() > 0) {
+  MutexLock lock(&mutex_);
+  if (packets_available) {
     packet = std::move(packets_.front());
     packets_.erase(packets_.begin());
   }
@@ -100,20 +105,21 @@ bool TestClient::CheckNextPacket(const char* buf,
   bool res = false;
   std::unique_ptr<Packet> packet = NextPacket(kTimeoutMs);
   if (packet) {
-    res = (packet->size == size && memcmp(packet->buf, buf, size) == 0 &&
-           CheckTimestamp(packet->packet_time_us));
+    res = (packet->buf.size() == size &&
+           memcmp(packet->buf.data(), buf, size) == 0 &&
+           CheckTimestamp(packet->packet_time));
     if (addr)
       *addr = packet->addr;
   }
   return res;
 }
 
-bool TestClient::CheckTimestamp(int64_t packet_timestamp) {
+bool TestClient::CheckTimestamp(std::optional<Timestamp> packet_timestamp) {
   bool res = true;
-  if (packet_timestamp == -1) {
+  if (!packet_timestamp) {
     res = false;
   }
-  if (prev_packet_timestamp_ != -1) {
+  if (prev_packet_timestamp_) {
     if (packet_timestamp < prev_packet_timestamp_) {
       res = false;
     }
@@ -122,18 +128,8 @@ bool TestClient::CheckTimestamp(int64_t packet_timestamp) {
   return res;
 }
 
-void TestClient::AdvanceTime(int ms) {
-  // If the test is using a fake clock, we must advance the fake clock to
-  // advance time. Otherwise, ProcessMessages will work.
-  if (fake_clock_) {
-    SIMULATED_WAIT(false, ms, *fake_clock_);
-  } else {
-    Thread::Current()->ProcessMessages(1);
-  }
-}
-
 bool TestClient::CheckNoPacket() {
-  return NextPacket(kNoPacketTimeoutMs) == nullptr;
+  return NextPacket(kNoPacketTimeout.ms()) == nullptr;
 }
 
 int TestClient::GetError() {
@@ -145,36 +141,26 @@ int TestClient::SetOption(Socket::Option opt, int value) {
 }
 
 void TestClient::OnPacket(AsyncPacketSocket* socket,
-                          const char* buf,
-                          size_t size,
-                          const SocketAddress& remote_addr,
-                          const int64_t& packet_time_us) {
-  webrtc::MutexLock lock(&mutex_);
-  packets_.push_back(
-      std::make_unique<Packet>(remote_addr, buf, size, packet_time_us));
+                          const ReceivedIpPacket& received_packet) {
+  MutexLock lock(&mutex_);
+  packets_.push_back(std::make_unique<Packet>(received_packet));
 }
 
 void TestClient::OnReadyToSend(AsyncPacketSocket* socket) {
   ++ready_to_send_count_;
 }
 
-TestClient::Packet::Packet(const SocketAddress& a,
-                           const char* b,
-                           size_t s,
-                           int64_t packet_time_us)
-    : addr(a), buf(0), size(s), packet_time_us(packet_time_us) {
-  buf = new char[size];
-  memcpy(buf, b, size);
-}
+TestClient::Packet::Packet(const ReceivedIpPacket& received_packet)
+    : addr(received_packet.source_address()),
+      // Copy received_packet payload to a buffer owned by Packet.
+      buf(received_packet.payload().data(), received_packet.payload().size()),
+      ecn(received_packet.ecn()),
+      packet_time(received_packet.arrival_time()) {}
 
 TestClient::Packet::Packet(const Packet& p)
-    : addr(p.addr), buf(0), size(p.size), packet_time_us(p.packet_time_us) {
-  buf = new char[size];
-  memcpy(buf, p.buf, size);
-}
+    : addr(p.addr),
+      buf(p.buf.data(), p.buf.size()),
+      ecn(p.ecn),
+      packet_time(p.packet_time) {}
 
-TestClient::Packet::~Packet() {
-  delete[] buf;
-}
-
-}  // namespace rtc
+}  // namespace webrtc

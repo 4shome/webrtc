@@ -10,12 +10,17 @@
 
 #include "api/video_codecs/video_codec.h"
 
-#include <string.h>
-
+#include <cstring>
+#include <optional>
 #include <string>
 
 #include "absl/strings/match.h"
+#include "api/video/video_codec_type.h"
+#include "api/video_codecs/scalability_mode.h"
+#include "api/video_codecs/sdp_video_format.h"
+#include "api/video_codecs/simulcast_stream.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/strings/string_builder.h"
 
 namespace webrtc {
 namespace {
@@ -27,7 +32,7 @@ constexpr char kPayloadNameAv1[] = "AV1";
 constexpr char kPayloadNameAv1x[] = "AV1X";
 constexpr char kPayloadNameH264[] = "H264";
 constexpr char kPayloadNameGeneric[] = "Generic";
-constexpr char kPayloadNameMultiplex[] = "Multiplex";
+constexpr char kPayloadNameH265[] = "H265";
 }  // namespace
 
 bool VideoCodecVP8::operator==(const VideoCodecVP8& other) const {
@@ -67,10 +72,35 @@ VideoCodec::VideoCodec()
       spatialLayers(),
       mode(VideoCodecMode::kRealtimeVideo),
       expect_encode_from_texture(false),
-      timing_frame_thresholds({0, 0}),
+      timing_frame_thresholds({.delay_ms = 0, .outlier_ratio_percent = 0}),
       legacy_conference_mode(false),
       codec_specific_(),
       complexity_(VideoCodecComplexity::kComplexityNormal) {}
+
+std::string VideoCodec::ToString() const {
+  StringBuilder ss;
+
+  ss << "VideoCodec {" << "type: " << CodecTypeToPayloadString(codecType)
+     << ", mode: "
+     << (mode == VideoCodecMode::kRealtimeVideo ? "RealtimeVideo"
+                                                : "Screensharing");
+  if (IsSinglecast()) {
+    ss << ", Singlecast: {" << width << "x" << height << " "
+       << ScalabilityModeToString(GetScalabilityMode())
+       << (active ? ", active" : ", inactive") << "}";
+  } else {
+    ss << ", Simulcast: {";
+    for (size_t i = 0; i < numberOfSimulcastStreams; ++i) {
+      const SimulcastStream stream = simulcastStream[i];
+      ss << "[" << stream.width << "x" << stream.height << " "
+         << ScalabilityModeToString(stream.GetScalabilityMode())
+         << (stream.active ? ", active" : ", inactive") << "]";
+    }
+    ss << "}";
+  }
+  ss << "}";
+  return ss.Release();
+}
 
 VideoCodecVP8* VideoCodec::VP8() {
   RTC_DCHECK_EQ(codecType, kVideoCodecVP8);
@@ -102,6 +132,16 @@ const VideoCodecH264& VideoCodec::H264() const {
   return codec_specific_.H264;
 }
 
+VideoCodecAV1* VideoCodec::AV1() {
+  RTC_DCHECK_EQ(codecType, kVideoCodecAV1);
+  return &codec_specific_.AV1;
+}
+
+const VideoCodecAV1& VideoCodec::AV1() const {
+  RTC_DCHECK_EQ(codecType, kVideoCodecAV1);
+  return codec_specific_.AV1;
+}
+
 const char* CodecTypeToPayloadString(VideoCodecType type) {
   switch (type) {
     case kVideoCodecVP8:
@@ -112,10 +152,10 @@ const char* CodecTypeToPayloadString(VideoCodecType type) {
       return kPayloadNameAv1;
     case kVideoCodecH264:
       return kPayloadNameH264;
-    case kVideoCodecMultiplex:
-      return kPayloadNameMultiplex;
     case kVideoCodecGeneric:
       return kPayloadNameGeneric;
+    case kVideoCodecH265:
+      return kPayloadNameH265;
   }
   RTC_CHECK_NOTREACHED();
 }
@@ -130,8 +170,8 @@ VideoCodecType PayloadStringToCodecType(const std::string& name) {
     return kVideoCodecAV1;
   if (absl::EqualsIgnoreCase(name, kPayloadNameH264))
     return kVideoCodecH264;
-  if (absl::EqualsIgnoreCase(name, kPayloadNameMultiplex))
-    return kVideoCodecMultiplex;
+  if (absl::EqualsIgnoreCase(name, kPayloadNameH265))
+    return kVideoCodecH265;
   return kVideoCodecGeneric;
 }
 
@@ -150,6 +190,24 @@ bool VideoCodec::GetFrameDropEnabled() const {
 
 void VideoCodec::SetFrameDropEnabled(bool enabled) {
   frame_drop_enabled_ = enabled;
+}
+
+bool VideoCodec::IsMixedCodec() const {
+  std::optional<SdpVideoFormat> first_format;
+  for (size_t i = 0; i < numberOfSimulcastStreams; ++i) {
+    if (!simulcastStream[i].active) {
+      continue;
+    }
+    if (!simulcastStream[i].format.has_value()) {
+      return false;  // Format is always set for active layers in mixed-codec.
+    }
+    if (!first_format.has_value()) {
+      first_format = simulcastStream[i].format;  // First active layer's format.
+    } else if (!first_format->IsSameCodec(*simulcastStream[i].format)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace webrtc
