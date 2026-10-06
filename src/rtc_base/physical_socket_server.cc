@@ -44,6 +44,7 @@
 #if defined(WEBRTC_POSIX)
 #include <fcntl.h>
 #include <netinet/tcp.h>  // for TCP_NODELAY
+#include <linux/sockios.h>
 #if defined(WEBRTC_USE_EPOLL)
 // "poll" will be used to wait for the signal dispatcher.
 #include <poll.h>
@@ -262,7 +263,7 @@ SocketAddress PhysicalSocket::GetRemoteAddress() const {
   if (result >= 0) {
     SocketAddressFromSockAddrStorage(addr_storage, &address);
   } else {
-    RTC_LOG(LS_WARNING)
+    RTC_LOG(LS_VERBOSE)
         << "GetRemoteAddress: unable to get remote addr, socket=" << s_;
   }
   return address;

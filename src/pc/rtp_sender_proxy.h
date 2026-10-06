@@ -72,6 +72,8 @@ PROXY_METHOD1(void,
               SetEncoderSelector,
               scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>)
 PROXY_METHOD1(RTCError, GenerateKeyFrame, const std::vector<std::string>&)
+PROXY_METHOD1(void, AddVideoCodecType, VideoCodecType);
+PROXY_METHOD0(std::vector<VideoCodecType>, GetVideoCodecTypes);
 END_PROXY_MAP(RtpSender)
 
 }  // namespace webrtc

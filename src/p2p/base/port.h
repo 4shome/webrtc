@@ -140,6 +140,7 @@ struct CandidatePairChangeEvent {
   std::string transport_name;
   CandidatePair selected_candidate_pair;
   int64_t last_data_received_ms;
+  IceCandidatePairState state;
   std::string reason;
   // How long do we estimate that we've been disconnected.
   int64_t estimated_disconnected_time_ms;

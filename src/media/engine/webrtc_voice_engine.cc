@@ -87,6 +87,7 @@
 #include "media/engine/webrtc_media_engine.h"
 #include "modules/async_audio_processing/async_audio_processing.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
+#include "modules/audio_processing/aec_dump/aec_dump_factory.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "rtc_base/checks.h"
@@ -788,30 +789,12 @@ WebRtcVoiceEngine::GetRtpHeaderExtensions(
 }
 
 bool WebRtcVoiceEngine::StartAecDump(FileWrapper file, int64_t max_size_bytes) {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-  RTC_DCHECK(file.is_open());
-
-  AudioProcessing* ap = apm();
-  if (!ap) {
-    RTC_LOG(LS_WARNING)
-        << "Attempting to start aecdump when no audio processing module is "
-           "present, hence no aecdump is started.";
-    return false;
-  }
-
-  return ap->CreateAndAttachAecDump(file.Release(), max_size_bytes,
-                                    low_priority_worker_queue_.get());
+  RTC_LOG(LS_INFO) << "Skip AEC dump.";
+  return false;
 }
 
 void WebRtcVoiceEngine::StopAecDump() {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-  AudioProcessing* ap = apm();
-  if (ap) {
-    ap->DetachAecDump();
-  } else {
-    RTC_LOG(LS_WARNING) << "Attempting to stop aecdump when no audio "
-                           "processing module is present";
-  }
+  RTC_LOG(LS_INFO) << "Skip AEC dump.";
 }
 
 std::optional<AudioDeviceModule::Stats>

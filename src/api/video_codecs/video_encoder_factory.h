@@ -107,6 +107,7 @@ class RTC_EXPORT VideoEncoderFactory {
   // Creates a VideoEncoder for the specified format.
   virtual std::unique_ptr<VideoEncoder> Create(
       const Environment& env,
+      const std::string& id,
       const SdpVideoFormat& format) = 0;
 
   // This method creates a EncoderSelector to use for a VideoSendStream.

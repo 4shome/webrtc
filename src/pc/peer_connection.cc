@@ -425,6 +425,18 @@ bool CheckValidSetDescription(Observer& observer,
   return true;
 }
 
+std::string ToCodecName(webrtc::VideoCodecType vct) {
+  switch (vct) {
+    case webrtc::kVideoCodecVP8:
+      return webrtc::kVp8CodecName;
+    case webrtc::kVideoCodecVP9:
+      return webrtc::kVp9CodecName;
+    case webrtc::kVideoCodecH264:
+      return webrtc::kH264CodecName;
+  }
+  return "";
+}
+
 }  // namespace
 
 scoped_refptr<PeerConnection> PeerConnection::Create(
@@ -2280,6 +2292,26 @@ PeerConnection::InitializePortAllocator_n(
   if (configuration.tcp_candidate_policy == kTcpCandidatePolicyDisabled) {
     port_allocator_flags |= PORTALLOCATOR_DISABLE_TCP;
     RTC_LOG(LS_INFO) << "TCP candidates are disabled.";
+  } else if (configuration.tcp_candidate_policy == kTcpCandidatePolicyNoUdp) {
+    port_allocator_flags |= webrtc::PORTALLOCATOR_DISABLE_UDP;
+    RTC_LOG(LS_INFO) << "UDP candidates are disabled.";
+  }
+
+  if (configuration.disable_udp_relay) {
+    port_allocator_flags |= webrtc::PORTALLOCATOR_DISABLE_UDP_RELAY;
+    RTC_LOG(LS_INFO) << "UDP relay are disabled.";
+  }
+  if (configuration.disable_tcp_relay) {
+    port_allocator_flags |= webrtc::PORTALLOCATOR_DISABLE_TCP_RELAY;
+    RTC_LOG(LS_INFO) << "TCP relay are disabled.";
+  }
+  if (configuration.disable_udp_peer_relay) {
+    port_allocator_flags |= webrtc::PORTALLOCATOR_DISABLE_UDP_PEER_RELAY;
+    RTC_LOG(LS_INFO) << "UDP peer relay are disabled.";
+  }
+  if (configuration.disable_tcp_peer_relay) {
+    port_allocator_flags |= webrtc::PORTALLOCATOR_DISABLE_TCP_PEER_RELAY;
+    RTC_LOG(LS_INFO) << "TCP peer relay are disabled.";
   }
 
   if (configuration.candidate_network_policy ==

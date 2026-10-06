@@ -254,6 +254,7 @@ class RTC_EXPORT PeerConnectionInterface : public RefCountInterface {
     std::vector<std::string> urls;
     std::string username;
     std::string password;
+    std::string peer_ip;
     TlsCertPolicy tls_cert_policy = kTlsCertPolicySecure;
     // If the URIs in `urls` only contain IP addresses, this field can be used
     // to indicate the hostname, which may be necessary for TLS (using the SNI
@@ -300,7 +301,8 @@ class RTC_EXPORT PeerConnectionInterface : public RefCountInterface {
 
   enum TcpCandidatePolicy {
     kTcpCandidatePolicyEnabled,
-    kTcpCandidatePolicyDisabled
+    kTcpCandidatePolicyDisabled,
+    kTcpCandidatePolicyNoUdp
   };
 
   enum CandidateNetworkPolicy {
@@ -463,6 +465,11 @@ class RTC_EXPORT PeerConnectionInterface : public RefCountInterface {
     // Exclude link-local network interfaces
     // from consideration for gathering ICE candidates.
     bool disable_link_local_networks = false;
+
+    bool disable_udp_relay = false;
+    bool disable_tcp_relay = false;
+    bool disable_udp_peer_relay = false;
+    bool disable_tcp_peer_relay = false;
 
     // Minimum bitrate at which screencast video tracks will be encoded at.
     // This means adding padding bits up to this bitrate, which can help

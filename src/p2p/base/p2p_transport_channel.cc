@@ -1895,6 +1895,7 @@ void P2PTransportChannel::SwitchSelectedConnectionInternal(
         .transport_name = transport_name(),
         .selected_candidate_pair = *GetSelectedCandidatePair(),
         .last_data_received_ms = selected_connection_->LastDataReceived().ms(),
+        .state = selected_connection_->state(),
         .reason = IceSwitchReasonToString(reason),
         .estimated_disconnected_time_ms =
             old_selected_connection != nullptr

@@ -19,13 +19,13 @@
 #include "api/local_network_access_permission.h"
 #include "api/packet_socket_factory.h"
 #include "api/task_queue/task_queue_base.h"
-#include "p2p/base/port.h"
 #include "p2p/base/port_allocator.h"
 #include "rtc_base/async_packet_socket.h"
 #include "rtc_base/network.h"
 
 namespace webrtc {
 class TurnCustomizer;
+class TurnPort;
 class FieldTrialsView;
 }  // namespace webrtc
 
@@ -42,6 +42,7 @@ struct CreateRelayPortArgs {
   std::string username;
   std::string password;
   std::string content_name;
+  ProtocolType peer_transport;
   TurnCustomizer* turn_customizer = nullptr;
   // Relative priority of candidates from this TURN server in relation
   // to the candidates from other servers. Required because ICE priorities
@@ -59,13 +60,13 @@ class RelayPortFactoryInterface {
 
   // This variant is used for UDP connection to the relay server
   // using a already existing shared socket.
-  virtual std::unique_ptr<Port> Create(const CreateRelayPortArgs& args,
-                                       AsyncPacketSocket* udp_socket) = 0;
+  virtual std::unique_ptr<TurnPort> Create(const CreateRelayPortArgs& args,
+                                           AsyncPacketSocket* udp_socket) = 0;
 
   // This variant is used for the other cases.
-  virtual std::unique_ptr<Port> Create(const CreateRelayPortArgs& args,
-                                       int min_port,
-                                       int max_port) = 0;
+  virtual std::unique_ptr<TurnPort> Create(const CreateRelayPortArgs& args,
+                                           int min_port,
+                                           int max_port) = 0;
 };
 
 }  //  namespace webrtc

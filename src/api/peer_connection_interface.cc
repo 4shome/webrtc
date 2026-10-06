@@ -86,6 +86,10 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
     bool disable_ipv6_on_wifi;
     int max_ipv6_networks;
     bool disable_link_local_networks;
+    bool disable_udp_relay;
+    bool disable_tcp_relay;
+    bool disable_udp_peer_relay;
+    bool disable_tcp_peer_relay;
     std::optional<int> screencast_min_bitrate;
     TcpCandidatePolicy tcp_candidate_policy;
     CandidateNetworkPolicy candidate_network_policy;
@@ -152,6 +156,10 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
          disable_ipv6_on_wifi == o.disable_ipv6_on_wifi &&
          max_ipv6_networks == o.max_ipv6_networks &&
          disable_link_local_networks == o.disable_link_local_networks &&
+         disable_udp_relay == o.disable_udp_relay &&
+         disable_tcp_relay == o.disable_tcp_relay &&
+         disable_udp_peer_relay == o.disable_udp_peer_relay &&
+         disable_tcp_peer_relay == o.disable_tcp_peer_relay &&
          screencast_min_bitrate == o.screencast_min_bitrate &&
          ice_candidate_pool_size == o.ice_candidate_pool_size &&
          prune_turn_ports == o.prune_turn_ports &&

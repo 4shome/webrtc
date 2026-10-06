@@ -33,6 +33,7 @@
 #include "api/scoped_refptr.h"
 #include "api/sframe/sframe_encryptor_interface.h"
 #include "api/video_codecs/video_encoder_factory.h"
+#include "api/video/video_codec_type.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/system/rtc_export.h"
 
@@ -164,6 +165,9 @@ class RTC_EXPORT RtpSenderInterface : public RefCountInterface,
   virtual RTCError GenerateKeyFrame(const std::vector<std::string>& rids) {
     return RTCError::OK();
   }
+
+  virtual void AddVideoCodecType(VideoCodecType vct) = 0;
+  virtual std::vector<VideoCodecType> GetVideoCodecTypes() = 0;
 
  protected:
   ~RtpSenderInterface() override = default;

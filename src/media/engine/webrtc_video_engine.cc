@@ -1840,6 +1840,7 @@ WebRtcVideoSendChannel::WebRtcVideoSendStream::WebRtcVideoSendStream(
     : send_channel_(send_channel),
       env_(env),
       thread_checker_(call->worker_thread()),
+      id_(sp.id),
       ssrcs_(sp.ssrcs),
       ssrc_groups_(sp.ssrc_groups),
       call_(call),
@@ -2291,6 +2292,7 @@ WebRtcVideoSendChannel::WebRtcVideoSendStream::CreateVideoEncoderConfig(
     const Codec& codec) const {
   RTC_DCHECK_RUN_ON(&thread_checker_);
   VideoEncoderConfig encoder_config;
+  encoder_config.id = id_;
   encoder_config.codec_type = PayloadStringToCodecType(codec.name);
   encoder_config.video_format = SdpVideoFormat(codec.name, codec.params);
   encoder_config.allow_zero_hertz_video =

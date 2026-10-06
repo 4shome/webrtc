@@ -178,6 +178,8 @@ class RTC_EXPORT BasicPortAllocatorSession : public PortAllocatorSession {
       std::vector<const Network*>& all_ipv6_networks,
       int max_ipv6_networks);
 
+  bool HasUDPTurnPort() const;
+
  protected:
   void UpdateIceParametersInternal() override;
 
@@ -396,7 +398,10 @@ class AllocationSequence {
   void Stop();
 
  private:
-  void CreateTurnPort(const RelayServerConfig& config, int relative_priority);
+  void CreateTurnPort(const RelayServerConfig& config,
+                      ProtocolType transport,
+                      ProtocolType peer_transport,
+                      int relative_priority);
 
   typedef std::vector<ProtocolType> ProtocolList;
 
@@ -405,7 +410,7 @@ class AllocationSequence {
   void CreateUDPPorts();
   void CreateTCPPorts();
   void CreateStunPorts();
-  void CreateRelayPorts();
+  void CreateRelayPorts(ProtocolType transport, ProtocolType peer_transport);
 
   void OnReadPacket(AsyncPacketSocket* socket, const ReceivedIpPacket& packet);
 

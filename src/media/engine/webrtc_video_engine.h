@@ -387,6 +387,7 @@ class WebRtcVideoSendChannel : public MediaChannelUtil,
 
     WebRtcVideoSendChannel* const send_channel_;
     const Environment env_;
+    const std::string id_;
     RTC_NO_UNIQUE_ADDRESS SequenceChecker thread_checker_;
     const std::vector<uint32_t> ssrcs_ RTC_GUARDED_BY(&thread_checker_);
     const std::vector<SsrcGroup> ssrc_groups_ RTC_GUARDED_BY(&thread_checker_);

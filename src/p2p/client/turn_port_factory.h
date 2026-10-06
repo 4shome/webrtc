@@ -13,7 +13,7 @@
 
 #include <memory>
 
-#include "p2p/base/port.h"
+#include "p2p/base/turn_port.h"
 #include "p2p/client/relay_port_factory_interface.h"
 #include "rtc_base/async_packet_socket.h"
 
@@ -24,12 +24,12 @@ class TurnPortFactory : public RelayPortFactoryInterface {
  public:
   ~TurnPortFactory() override;
 
-  std::unique_ptr<Port> Create(const CreateRelayPortArgs& args,
-                               AsyncPacketSocket* udp_socket) override;
+  std::unique_ptr<TurnPort> Create(const CreateRelayPortArgs& args,
+                                   AsyncPacketSocket* udp_socket) override;
 
-  std::unique_ptr<Port> Create(const CreateRelayPortArgs& args,
-                               int min_port,
-                               int max_port) override;
+  std::unique_ptr<TurnPort> Create(const CreateRelayPortArgs& args,
+                                   int min_port,
+                                   int max_port) override;
 };
 
 }  //  namespace webrtc
