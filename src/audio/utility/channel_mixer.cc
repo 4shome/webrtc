@@ -10,6 +10,8 @@
 
 #include "audio/utility/channel_mixer.h"
 
+#include <cstring>
+
 #include "audio/utility/channel_mixing_matrix.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -91,7 +93,7 @@ void ChannelMixer::Transform(AudioFrame* frame) {
   frame->channel_layout_ = output_layout_;
 
   // Copy the output result to the audio frame in `frame`.
-  memcpy(
+  std::memcpy(
       frame->mutable_data(), out_audio,
       sizeof(int16_t) * frame->samples_per_channel() * frame->num_channels());
 }

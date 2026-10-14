@@ -12,6 +12,7 @@
 #define NET_DCSCTP_PACKET_BOUNDED_BYTE_WRITER_H_
 
 #include <algorithm>
+#include <cstring>
 
 #include "api/array_view.h"
 
@@ -92,7 +93,7 @@ class BoundedByteWriter {
     if (source.data() == nullptr || copy_size == 0) {
       return;
     }
-    memcpy(data_.data() + FixedSize, source.data(), copy_size);
+    std::memcpy(data_.data() + FixedSize, source.data(), copy_size);
   }
 
  private:

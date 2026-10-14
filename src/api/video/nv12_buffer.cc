@@ -10,6 +10,8 @@
 
 #include "api/video/nv12_buffer.h"
 
+#include <cstring>
+
 #include "api/make_ref_counted.h"
 #include "api/video/i420_buffer.h"
 #include "rtc_base/checks.h"
@@ -119,7 +121,7 @@ size_t NV12Buffer::UVOffset() const {
 }
 
 void NV12Buffer::InitializeData() {
-  memset(data_.get(), 0, NV12DataSize(height_, stride_y_, stride_uv_));
+  std::memset(data_.get(), 0, NV12DataSize(height_, stride_y_, stride_uv_));
 }
 
 void NV12Buffer::CropAndScaleFrom(const NV12BufferInterface& src,
